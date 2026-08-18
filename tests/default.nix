@@ -11,4 +11,5 @@ let
 in
 {
   smoke = import ./smoke-test.nix args;
+  builders = import ./lib-test.nix args;
 }

@@ -116,6 +116,16 @@
         in
         {
           inherit (coding-agent) mkCodingAgent;
+
+          # Per-system because the builders need pkgs. agent-skills imports
+          # `${pi-nix}/lib` directly rather than going through this, but
+          # exposing it keeps `nix eval .#lib.builders.x86_64-linux` honest.
+          builders = forEachSystem (
+            system:
+            import ./lib {
+              pkgs = import nixpkgs { inherit system; };
+            }
+          );
         };
 
       nixosModules = rec {
