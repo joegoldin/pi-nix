@@ -1,5 +1,5 @@
 {
-  description = "pi-mono";
+  description = "pi-nix: a Nix flake for the pi coding agent, with pinned ecosystem extensions and agent-stack integration";
 
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs?ref=nixos-unstable";
@@ -94,6 +94,16 @@
                   ${docs-md}/index.md \
                   --output $out/index.html
               '';
+        }
+      );
+
+      checks = forEachSystem (
+        system:
+        let
+          pkgs = import nixpkgs { inherit system; };
+        in
+        import ./tests {
+          inherit pkgs self jail-nix;
         }
       );
 

@@ -1,0 +1,5 @@
+builds:
+  include:
+    - "checks.*.*"
+    - "packages.*.coding-agent"
+    - "packages.*.ext-*"
