@@ -1,0 +1,19 @@
+{
+  "name": "pi-notify",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Desktop notifications for pi: permission prompts, agent settled, and long-running tool calls.",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "notifications"
+  ],
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "scripts": {
+    "test": "bun test"
+  }
+}
