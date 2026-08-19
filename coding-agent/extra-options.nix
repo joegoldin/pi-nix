@@ -79,8 +79,20 @@ let
       map (e: "${p}/${lib.removePrefix "./" e}") override;
 
   extEntrypoints = lib.concatMap entrypointsOf extPkgs;
-  extSkills = lib.concatMap (p: p.passthru.piSkills or [ ]) extPkgs;
-  extPrompts = lib.concatMap (p: p.passthru.piPrompts or [ ]) extPkgs;
+
+  # Handing pi a package *root* makes it read that package's manifest, and it
+  # loads the skills and prompts declared there by itself. Passing them again
+  # registers each one twice, which pi reports at startup as a collision
+  # against its own path and then skips.
+  #
+  # Handing it a specific entrypoint file instead — which is what an
+  # entrypointOverrides entry does — skips the manifest, so those packages do
+  # need their skills and prompts passed explicitly.
+  readsOwnManifest = p: entrypointsOf p == [ "${p}" ];
+  needsExplicitResources = lib.filter (p: !(readsOwnManifest p)) extPkgs;
+
+  extSkills = lib.concatMap (p: p.passthru.piSkills or [ ]) needsExplicitResources;
+  extPrompts = lib.concatMap (p: p.passthru.piPrompts or [ ]) needsExplicitResources;
 
   # Deep merge, so two extensions contributing to one settings subtree compose
   # rather than the later one erasing the earlier.
