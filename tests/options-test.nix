@@ -550,13 +550,17 @@ assert
 # leaves pi with the `sh` jail.nix binds at /bin/sh and every bash-syntax
 # command reads as the model's mistake.
 assert lib.any (lib.hasPrefix "set-env:SHELL=") defaultPermissions;
-assert lib.elem "add-pkg-deps:20" defaultPermissions;
+# A count, not a list, because the point is that the toolchain does not shrink
+# by accident: --clearenv means a package dropped here is not a degraded PATH
+# but a "command not found" the model reports as a broken task. Bump it
+# deliberately when adding a tool, never to make this pass.
+assert lib.elem "add-pkg-deps:28" defaultPermissions;
 # nix is opt-in, and it is three binds rather than one package: without the
 # store and the daemon socket the binary is present and useless.
 assert !(lib.elem "try-readonly:/nix/store" defaultPermissions);
 assert lib.elem "try-readonly:/nix/store" nixPermissions;
 assert lib.elem "try-readwrite:/nix/var/nix/daemon-socket/socket" nixPermissions;
-assert lib.elem "add-pkg-deps:21" nixPermissions;
+assert lib.elem "add-pkg-deps:29" nixPermissions;
 # Enabled without a package must fail loudly rather than silently doing
 # nothing, because "notifications are on" and "no notifier exists" is exactly
 # the state a user would not notice.

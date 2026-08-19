@@ -494,6 +494,26 @@ let
           # sends whoever hits it looking for a fault that is not there.
           pkgs.direnv
           pkgs.hostname
+          # The floor an agent assumes rather than checks. Measured inside the
+          # jail rather than guessed: each of these came back "not found" from a
+          # probe that ran the real bwrap argv with a shell in pi's place.
+          #
+          # tar is the one that actually breaks work. coreutils does not carry
+          # it, so anything that unpacks a release tarball or a `git archive`
+          # fails on a missing binary rather than on anything to do with the
+          # task, and the compression tools are the same story one layer down.
+          # less matters because git and other tools spawn a pager and get a
+          # "not found" instead. file, which and tree are small, and their
+          # absence reads as a broken machine rather than a deliberate sandbox,
+          # which is the failure mode this list exists to avoid.
+          pkgs.gnutar
+          pkgs.gzip
+          pkgs.xz
+          pkgs.unzip
+          pkgs.less
+          pkgs.file
+          pkgs.which
+          pkgs.tree
         ]
         ++ nixRuntimeInputs
         ++ messagingRuntimeInputs
