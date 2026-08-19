@@ -204,6 +204,21 @@ let
     };
   };
 
+  # `[ ]` and "unset" are different values and must render differently. The
+  # package seeds each rule section with its own built-ins and only replaces
+  # them once a source has been *seen* (config.ts's finalizeRuleSetting takes
+  # the defaults as its base when `!seen`). So an operator who empties a
+  # section needs the key present-and-empty in the rendered JSON; dropping it
+  # as if it were unset hands back every built-in, which is the opposite of
+  # what they asked for.
+  autoEmptied = evalPi {
+    pi.coding-agent.autoMode = {
+      enable = true;
+      protectedPaths = [ ];
+      hard_deny = [ "reading private SSH keys" ];
+    };
+  };
+
   # Both gates answer `tool_call` and pi returns on the first one that blocks,
   # so the composition is not ordering, it is the permission system's authorizer
   # chain. Enabling them together writes that package's own config file naming
@@ -441,6 +456,20 @@ assert
     enabled = true;
     classifierIo = false;
   };
+# An explicit `[ ]` survives to the rendered file as an empty array, so the
+# extension sees a section that was configured to hold nothing.
+assert autoEmptied.autoMode.settings.autoMode.protectedPaths == [ ];
+assert autoEmptied.autoMode.settings.autoMode ? protectedPaths;
+# A section left at its default is absent entirely, which is what lets the
+# package keep its built-ins for that one.
+assert !(autoEmptied.autoMode.settings.autoMode ? allow);
+assert !(autoOn.autoMode.settings.autoMode ? protectedPaths);
+# Emptying one section does not disturb another set in the same config.
+assert
+  autoEmptied.autoMode.settings.autoMode.hard_deny == [
+    "reading private SSH keys"
+  ];
+
 # An unset scalar is absent, not null: the package's own default is the one
 # documented, and a second copy in Nix would be a second thing to keep true.
 assert !(autoJson.autoMode ? classifyReadOnlyTools);

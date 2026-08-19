@@ -160,16 +160,25 @@ let
   # `protectedPaths`, a fixed path gate, and rarely the right one for the four
   # prose lists.
   #
-  # An empty list is not the same as no list. Any array at all sets `seen` in
-  # the package's accumulator (config.ts's applyRuleSetting), so `[ ]` would
-  # read as "replace the built-ins with nothing". A section nobody configured
-  # is left out of the rendered file entirely.
-  passRules = rules: if rules == [ ] then null else rules;
+  # An empty list is not the same as no list, and the two are spelled
+  # differently here because the package distinguishes them. Any array at all
+  # sets `seen` in its accumulator (config.ts's applyRuleSetting), and
+  # finalizeRuleSetting then takes the built-ins as its base only when the
+  # section was never seen. So `[ ]` means "replace the built-ins with
+  # nothing", and `null` -- the default -- means "this section was never
+  # configured; leave the built-ins alone" by being left out of the rendered
+  # file entirely.
+  #
+  # Collapsing the two, as an earlier version of this did, silently drops an
+  # operator's explicit `[ ]` and hands back all of the built-ins instead.
 
   # Only what the operator actually set. Every key omitted here falls through
   # to the package's own default, which is the value its docs describe; writing
   # a Nix-side copy of that default would be a second place to keep in sync.
   setKeys = lib.filterAttrs (_: v: v != null && v != [ ]);
+
+  # Rule sections keep an explicit `[ ]`; only `null` means unset.
+  setRules = lib.filterAttrs (_: v: v != null);
 
   autoModePermissions = setKeys { inherit (autoMode.permissions) deny ask; };
 
@@ -215,13 +224,19 @@ let
         maxUserTranscriptTokens
         maxToolTranscriptTokens
         ;
-      environment = passRules autoMode.environment;
-      allow = passRules autoMode.allow;
-      soft_deny = passRules autoMode.soft_deny;
-      hard_deny = passRules autoMode.hard_deny;
-      protectedPaths = passRules autoMode.protectedPaths;
+    }
+    // setRules {
+      inherit (autoMode)
+        environment
+        allow
+        soft_deny
+        hard_deny
+        protectedPaths
+        ;
+    }
+    // {
       # deniedPaths ships no built-in entries at all, so there is nothing for a
-      # sentinel to keep.
+      # sentinel to keep and nothing an empty list could mean beyond "none".
       inherit (autoMode) deniedPaths;
     };
   }
@@ -790,23 +805,24 @@ in
       };
 
       allow = lib.mkOption {
-        type = lib.types.listOf lib.types.str;
-        default = [ ];
+        type = lib.types.nullOr (lib.types.listOf lib.types.str);
+        default = null;
         description = ''
           Exceptions to `soft_deny`, written as plain sentences for the
           classifier to read. They are exceptions, not grants: an action still
           reaches the classifier, and no `allow` sentence clears a `hard_deny`.
 
-          A non-empty list REPLACES the package's built-in allow rules rather
-          than adding to them. Put the literal `$defaults` in the list to keep
-          them as well. Leaving the option empty leaves the built-ins alone.
+          A list REPLACES the package's built-in allow rules rather than adding
+          to them. Put the literal `$defaults` in the list to keep them as
+          well. `null`, the default, leaves the built-ins alone; `[ ]` is a
+          real value meaning "no allow rules at all".
         '';
         example = lib.literalExpression ''[ "reading or searching any file inside the working directory" ]'';
       };
 
       soft_deny = lib.mkOption {
-        type = lib.types.listOf lib.types.str;
-        default = [ ];
+        type = lib.types.nullOr (lib.types.listOf lib.types.str);
+        default = null;
         description = ''
           Destructive or irreversible actions that **explicit user intent
           clears**. The classifier is shown recent user messages and the
@@ -819,8 +835,8 @@ in
       };
 
       hard_deny = lib.mkOption {
-        type = lib.types.listOf lib.types.str;
-        default = [ ];
+        type = lib.types.nullOr (lib.types.listOf lib.types.str);
+        default = null;
         description = ''
           Security boundaries. User intent does not clear these and cannot: the
           classifier contract refuses `allow` on a `hard_deny` tier outright,
@@ -831,8 +847,8 @@ in
       };
 
       environment = lib.mkOption {
-        type = lib.types.listOf lib.types.str;
-        default = [ ];
+        type = lib.types.nullOr (lib.types.listOf lib.types.str);
+        default = null;
         description = ''
           Facts about this machine the classifier should assume while
           reasoning. These are not permissions and grant nothing.
@@ -841,14 +857,16 @@ in
       };
 
       protectedPaths = lib.mkOption {
-        type = lib.types.listOf lib.types.str;
-        default = [ ];
+        type = lib.types.nullOr (lib.types.listOf lib.types.str);
+        default = null;
         description = ''
           Repository-relative paths whose writes always reach the classifier.
-          A non-empty list replaces the package's built-in list (`.git`, `.pi`,
-          shell profiles, package-manager configs, hook configs, build-wrapper
+          A list replaces the package's built-in list (`.git`, `.pi`, shell
+          profiles, package-manager configs, hook configs, build-wrapper
           properties); write `$defaults` as the first entry to keep it and add
-          to it, which is usually what this list wants. It only matters when
+          to it, which is usually what this list wants. `null`, the default,
+          leaves the built-ins alone. `[ ]` is a real value meaning "gate no
+          paths", which hands the whole question to the classifier. It only matters when
           `allowInsideWorkingDirectory` is on, which is what gives in-tree
           writes a deterministic allow; a protected target is carved back out
           of it.
