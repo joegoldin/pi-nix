@@ -100,6 +100,43 @@ let
     AGENT_STATUSLINE_CONFIG.value = "${statuslineConfigFile}";
   };
 
+  autoMode = cfg.autoMode;
+
+  autoModePackage = self.packages.${system}.ext-pi-auto-mode;
+
+  # Read by pi-auto-mode at runtime through PI_AUTO_MODE_CONFIG. It travels as a
+  # store path in an environment variable rather than in settings.json, because
+  # ExtensionContext exposes no settings reader (F6) and upstream jq-merges
+  # settings.json at launch anyway.
+  autoModeConfigFile =
+    if !autoMode.enable then
+      null
+    else
+      pkgs.writeText "pi-auto-mode.json" (
+        builtins.toJSON {
+          enabled = true;
+          inherit (autoMode)
+            allow
+            soft_deny
+            hard_deny
+            environment
+            userTurnLimit
+            timeoutMs
+            delegateToPermissionSystem
+            ;
+          deterministic = {
+            inherit (autoMode.deterministic) allow deny;
+          };
+          classifierModel = autoMode.model;
+        }
+      );
+
+  autoModeEntrypoints = lib.optionals autoMode.enable autoModePackage.passthru.piEntrypoint;
+
+  autoModeEnv = lib.optionalAttrs autoMode.enable {
+    PI_AUTO_MODE_CONFIG.value = "${autoModeConfigFile}";
+  };
+
   notifications = cfg.notifications;
 
   notificationsPackage =
@@ -135,6 +172,12 @@ let
       inherit (notifications) notifierCommand events longRunningToolSeconds;
     };
   };
+
+  # One definition of `environment`, assembled from every feature that needs a
+  # variable. Merging them here rather than contributing three separate
+  # definitions keeps the "defined multiple times" failure that F206 describes
+  # to a single boundary: the consumer's own definition against ours.
+  extraEnv = lib.optionalAttrs statusline.enable statuslineEnv // autoModeEnv;
 in
 {
   options = lib.setAttrByPath optionPath {
@@ -210,6 +253,143 @@ in
             '';
           };
         };
+      };
+    };
+
+    autoMode = {
+      enable = lib.mkEnableOption "the pi-auto-mode permission classifier";
+
+      allow = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [ ];
+        description = ''
+          Things the operator has pre-approved, written as plain sentences for
+          the classifier to read. A call matching one of these proceeds.
+        '';
+        example = lib.literalExpression ''[ "reading or searching any file inside the working directory" ]'';
+      };
+
+      soft_deny = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [ ];
+        description = ''
+          Destructive or irreversible actions that **explicit user intent
+          clears**. The classifier is shown the last `userTurnLimit` user turns
+          precisely so it can tell "delete the build dir" from the agent
+          deciding to delete something nobody asked about.
+        '';
+        example = lib.literalExpression ''[ "deleting files the user did not name" ]'';
+      };
+
+      hard_deny = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [ ];
+        description = ''
+          Security boundaries. User intent does not clear these and cannot: the
+          gate blocks a `hard_deny` even when the classifier answers `allow`,
+          so text injected into a tool call or a file cannot talk its way past
+          one.
+        '';
+        example = lib.literalExpression ''[ "reading private SSH keys, API tokens, or password stores" ]'';
+      };
+
+      environment = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [ ];
+        description = ''
+          Facts about this machine the classifier should assume while
+          reasoning. These are not permissions and grant nothing.
+        '';
+        example = lib.literalExpression ''[ "this is a NixOS machine; /nix/store is read-only" ]'';
+      };
+
+      deterministic = {
+        allow = lib.mkOption {
+          type = lib.types.listOf lib.types.str;
+          default = [ ];
+          description = ''
+            Deterministic allow rules, resolved without a model call. Claude
+            Code's permission syntax: `Bash(git status:*)`, `Read(/home/joe/**)`.
+            A `:*` suffix is a whole-word prefix match.
+
+            A bash command containing a shell control operator (`&&`, `;`, `|`,
+            `$(`, a backtick) can never be allowed by a prefix rule, because
+            `git status && rm -rf /` starts with `git status `. Such a command
+            falls through to the classifier instead.
+          '';
+          example = lib.literalExpression ''[ "Bash(git status:*)" "Read(/home/joe/**)" ]'';
+        };
+        deny = lib.mkOption {
+          type = lib.types.listOf lib.types.str;
+          default = [ ];
+          description = ''
+            Deterministic deny rules, in the same syntax. Deny beats allow, and
+            unlike allow it still applies to a compound command: refusing to
+            deny would be the unsafe direction.
+          '';
+          example = lib.literalExpression ''[ "Bash(curl:*)" ]'';
+        };
+      };
+
+      model = lib.mkOption {
+        type = lib.types.nullOr (
+          lib.types.submodule {
+            options = {
+              provider = lib.mkOption {
+                type = lib.types.str;
+                description = "Provider id as pi knows it, for example `anthropic`.";
+              };
+              modelId = lib.mkOption {
+                type = lib.types.str;
+                description = "Model id within that provider.";
+              };
+            };
+          }
+        );
+        default = null;
+        description = ''
+          Model used for classification. Null uses the session's own model,
+          which is the cheapest thing to reason about and the most expensive to
+          run, since it bills at the session model's rate.
+        '';
+        example = lib.literalExpression ''{ provider = "anthropic"; modelId = "claude-haiku-4-5"; }'';
+      };
+
+      userTurnLimit = lib.mkOption {
+        type = lib.types.ints.positive;
+        default = 6;
+        description = ''
+          How many recent user turns the classifier is shown. Explicit user
+          intent clears `soft_deny`, and the classifier cannot judge intent it
+          cannot see.
+        '';
+      };
+
+      timeoutMs = lib.mkOption {
+        type = lib.types.ints.positive;
+        default = 20000;
+        description = ''
+          Classifier timeout. On expiry auto mode fails closed: with a UI it
+          asks, and in `print` or `json` mode it blocks.
+        '';
+      };
+
+      delegateToPermissionSystem = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = ''
+          Delegate deterministic matching to `@gotgenes/pi-permission-system` by
+          registering pi-auto-mode on its authorizer chain, which fires only for
+          asks that package could not resolve. The built-in matcher stays as the
+          fallback when that extension is absent.
+        '';
+      };
+
+      configFile = lib.mkOption {
+        type = lib.types.nullOr lib.types.path;
+        internal = true;
+        readOnly = true;
+        description = "Rendered config handed to pi-auto-mode as PI_AUTO_MODE_CONFIG.";
       };
     };
 
@@ -302,9 +482,11 @@ in
       systemPromptArgs ++ promptFragmentArgs ++ statuslineArgs ++ notificationFlags
     );
 
-    environment = lib.mkIf statusline.enable statuslineEnv;
+    autoMode.configFile = autoModeConfigFile;
 
-    extensions = extEntrypoints;
+    environment = lib.mkIf (extraEnv != { }) extraEnv;
+
+    extensions = extEntrypoints ++ autoModeEntrypoints;
     skills = extSkills;
     promptTemplates = extPrompts;
     settings = lib.recursiveUpdate extSettings notificationSettings;

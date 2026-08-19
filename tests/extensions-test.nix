@@ -32,6 +32,8 @@ let
     "ext-juicesharp-rpiv-todo"
     "ext-narumitw-pi-btw"
     "ext-narumitw-pi-goal"
+    # First-party, from packages/extensions/<name>: no pin, no lockfile.
+    "ext-pi-auto-mode"
     "ext-pi-background-tasks"
     "ext-pi-cache-optimizer"
     "ext-pi-mcp-adapter"
@@ -62,6 +64,13 @@ let
     assert exts.ext-pi-background-tasks.passthru.piSkills == [ ];
     assert exts.ext-pi-mcp-adapter.passthru.settings == { };
     assert exts.ext-pi-mcp-adapter.passthru.promptFragment == null;
+    # A first-party extension names its entrypoint explicitly instead, because
+    # nothing about it is resolved from an npm manifest.
+    assert exts.ext-pi-auto-mode.passthru.piEntrypoint == [ "${exts.ext-pi-auto-mode}/src/index.ts" ];
+    assert exts.ext-pi-auto-mode.passthru.settings == { };
+    assert exts.ext-pi-auto-mode.passthru.promptFragment == null;
+    # It carries no pin, so extensions.json must not have grown one.
+    assert !(pins ? pi-auto-mode);
     # Exactly one pin takes the bundled branch, and it is the one with no
     # runtime dependencies. If a future bump gives pi-cache-optimizer a
     # dependency, this fires before anything ships a broken node_modules.

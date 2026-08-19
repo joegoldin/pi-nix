@@ -66,5 +66,13 @@ let
       extraBuildInputs = extraBuildInputsFor.${slug} or [ ];
       promptFragment = null;
     };
+  # First-party extensions. No pin, no lockfile: the source is in this repo and
+  # neither package has a runtime dependency, so mkPiExtension's local-src arm
+  # copies the tree and stops. They are named the same way as the pinned ones so
+  # `extensionPackages` treats every extension alike.
+  firstParty = {
+    ext-pi-auto-mode = bunPkgs.callPackage ./pi-auto-mode { inherit mkPiExtension; };
+  };
 in
 lib.mapAttrs' (name: pin: lib.nameValuePair "ext-${slugOf name}" (mkOne name pin)) pins
+// firstParty

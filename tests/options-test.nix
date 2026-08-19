@@ -14,6 +14,7 @@ let
       # Distinguishable from coding-agent so the default-package assertion
       # below cannot pass by accident.
       coding-agent-bun = pkgs.cowsay;
+      inherit (self.packages.${system}) ext-pi-auto-mode;
     };
     inputs.agent-statusline = self.inputs.agent-statusline;
   };
@@ -156,6 +157,30 @@ let
     };
   };
 
+  autoOff = evalPi { };
+
+  autoOn = evalPi {
+    pi.coding-agent.autoMode = {
+      enable = true;
+      allow = [ "reading anything under the working directory" ];
+      soft_deny = [ "deleting files the user did not name" ];
+      hard_deny = [ "reading private SSH keys" ];
+      environment = [ "this is a NixOS machine" ];
+      deterministic = {
+        allow = [ "Bash(git status:*)" ];
+        deny = [ "Bash(curl:*)" ];
+      };
+      model = {
+        provider = "anthropic";
+        modelId = "claude-haiku-4-5";
+      };
+      userTurnLimit = 3;
+      timeoutMs = 5000;
+    };
+  };
+
+  autoJson = builtins.fromJSON (builtins.readFile autoOn.autoMode.configFile);
+
   notifyUnpackaged = builtins.tryEval (
     lib.deepSeq (evalPi { pi.coding-agent.notifications.enable = true; }).finalArgs "unreachable"
   );
@@ -224,6 +249,34 @@ assert
   ];
 assert notifyOn.settings.piNotify.longRunningToolSeconds == 45;
 assert lib.hasPrefix "/nix/store/" notifyOn.settings.piNotify.notifierCommand;
+# Disabled contributes no extension, no environment, and no config file.
+assert autoOff.autoMode.configFile == null;
+assert envValue autoOff "PI_AUTO_MODE_CONFIG" == null;
+assert !(lib.any (lib.hasInfix "pi-auto-mode") (flagValues autoOff.finalArgs "--extension"));
+# Enabled hands pi the entrypoint from the extension's own passthru, so the
+# filename inside the package stays that package's business.
+assert
+  flagValues autoOn.finalArgs "--extension"
+  == selfStub.packages.${system}.ext-pi-auto-mode.passthru.piEntrypoint;
+# Config travels as a store path in an env var, never in settings.json: pi's
+# ExtensionContext has no settings reader.
+assert envValue autoOn "PI_AUTO_MODE_CONFIG" != null;
+assert (envValue autoOn "PI_AUTO_MODE_CONFIG").value == "${autoOn.autoMode.configFile}";
+assert !(autoOn.settings ? piAutoMode);
+# Every rule list reaches the rendered JSON under the key the extension reads,
+# including the two underscore-cased ones the classifier prompt names verbatim.
+assert autoJson.enabled == true;
+assert autoJson.allow == [ "reading anything under the working directory" ];
+assert autoJson.soft_deny == [ "deleting files the user did not name" ];
+assert autoJson.hard_deny == [ "reading private SSH keys" ];
+assert autoJson.environment == [ "this is a NixOS machine" ];
+assert autoJson.deterministic.allow == [ "Bash(git status:*)" ];
+assert autoJson.deterministic.deny == [ "Bash(curl:*)" ];
+assert autoJson.classifierModel.provider == "anthropic";
+assert autoJson.classifierModel.modelId == "claude-haiku-4-5";
+assert autoJson.userTurnLimit == 3;
+assert autoJson.timeoutMs == 5000;
+assert autoJson.delegateToPermissionSystem == false;
 # Enabled without a package must fail loudly rather than silently doing
 # nothing, because "notifications are on" and "no notifier exists" is exactly
 # the state a user would not notice.

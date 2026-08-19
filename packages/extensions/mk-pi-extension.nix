@@ -8,7 +8,8 @@
   bun2nix,
   autoPatchelfHook,
 }:
-# One pinned pi extension from an npm tarball.
+# One pi extension: either a pinned npm tarball, or a first-party source tree in
+# this repo when `src` is set.
 #
 # `bundled` decides how node_modules is obtained:
 #
@@ -26,10 +27,15 @@
 {
   pname,
   version,
+  # A local source tree, for the first-party extensions this repo carries. When
+  # set, `url`/`hash`/`bunLock`/`bunNix` are all unused: there is no tarball to
+  # fetch and, because a first-party extension imports from @earendil-works/*
+  # with `import type` only, nothing to install either.
+  src ? null,
   # npm dist.tarball
-  url,
+  url ? null,
   # npm dist.integrity, usable verbatim as a Nix SRI hash
-  hash,
+  hash ? null,
   bundled ? false,
   # Vendored bun.lock and the bun2nix-generated dep set built from it.
   bunLock ? null,
@@ -61,21 +67,33 @@ let
 
   normalisePackageJson = callPackage ./normalise-package-json.nix { };
 
-  src = fetchurl {
+  tarball = fetchurl {
     inherit url hash;
     name = "${slug}-${version}.tgz";
   };
 
   drv =
-    if bundled then
-      runCommand "pi-ext-${slug}-${version}" { inherit src; } ''
+    if src != null then
+      # First-party. Test files and the typecheck config are dropped: what pi
+      # loads is the shipped tree, and pi has neither a test runner nor tsc.
+      runCommand "pi-ext-${slug}-${version}" { } ''
+        mkdir -p $out
+        cp -R ${src}/. $out/
+        chmod -R u+w $out
+        find $out -name '*.test.ts' -delete
+        find $out -name '*.nix' -delete
+        rm -f $out/tsconfig.json
+      ''
+    else if bundled then
+      runCommand "pi-ext-${slug}-${version}" { src = tarball; } ''
         mkdir -p $out
         tar -xzf $src -C $out --strip-components=1
       ''
     else
       stdenv.mkDerivation {
         pname = "pi-ext-${slug}";
-        inherit version src;
+        inherit version;
+        src = tarball;
 
         nativeBuildInputs = [
           bun2nix.hook

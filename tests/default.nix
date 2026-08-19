@@ -17,3 +17,4 @@ in
   options = import ./options-test.nix args;
   additive = import ./additive-test.nix args;
 }
+// import ./extension-tests.nix args
