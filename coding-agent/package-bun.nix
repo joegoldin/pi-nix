@@ -1,6 +1,7 @@
 {
   lib,
   stdenv,
+  runCommand,
   bun2nix,
   bun,
   nodejs,
@@ -73,7 +74,25 @@ stdenv.mkDerivation {
         fetchurl,
         ...
       }@args:
-      import ./bun.nix (args // { workspaceRoot = src; });
+      import ./bun.nix (
+        args
+        // {
+          # A DERIVATION per workspace member, not a path read during
+          # evaluation. bun2nix emits `copyPathToStore ./packages/x`, and
+          # copyPathToStore reads its argument while nix is still evaluating;
+          # pointed at the fetched pi source that meant downloading and
+          # unpacking pi's tarball before a single build line appeared, which
+          # is import-from-derivation and cost minutes on a cold eval cache.
+          #
+          # `${src}/${sub}` inside a builder is a store-path reference instead,
+          # resolved when the build is scheduled. Evaluation never touches it.
+          workspaceSubdir =
+            sub:
+            runCommand "pi-workspace-${lib.replaceStrings [ "/" ] [ "-" ] sub}" { } ''
+              cp -R ${src}/${sub} "$out"
+            '';
+        }
+      );
   };
 
   dontRunLifecycleScripts = true;

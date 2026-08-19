@@ -10,7 +10,7 @@
   fetchFromGitHub,
   fetchgit,
   fetchurl,
-  workspaceRoot ? throw "coding-agent/bun.nix requires workspaceRoot (the upstream pi source root)",
+  workspaceSubdir ? throw "coding-agent/bun.nix requires workspaceSubdir (see package-bun.nix)",
   ...
 }:
 {
@@ -202,16 +202,17 @@
     url = "https://registry.npmjs.org/@earendil-works/gondolin/-/gondolin-0.12.0.tgz";
     hash = "sha512-BXbvzQKb5QmxY5NtthRDONJTu7+IDKbzqWGrJyyNXMP7N681Tx0Q9TK8pK1ba8nUvYQTipNJyGZOsJfYiZll1A==";
   };
-  "@earendil-works/pi-agent-core" = copyPathToStore (workspaceRoot + "/packages/agent");
-  "@earendil-works/pi-ai" = copyPathToStore (workspaceRoot + "/packages/ai");
-  "@earendil-works/pi-client" = copyPathToStore (workspaceRoot + "/packages/client");
-  "@earendil-works/pi-coding-agent" = copyPathToStore (workspaceRoot + "/packages/coding-agent");
-  "@earendil-works/pi-evals" = copyPathToStore (workspaceRoot + "/packages/evals");
-  "@earendil-works/pi-protocol" = copyPathToStore (workspaceRoot + "/packages/protocol");
-  "@earendil-works/pi-server" = copyPathToStore (workspaceRoot + "/packages/server");
-  "@earendil-works/pi-session-backend-sqlite-node" = copyPathToStore (workspaceRoot + "/packages/session-backends/sqlite-node");
-  "@earendil-works/pi-telemetry" = copyPathToStore (workspaceRoot + "/packages/telemetry");
-  "@earendil-works/pi-tui" = copyPathToStore (workspaceRoot + "/packages/tui");
+  "@earendil-works/pi-agent-core" = workspaceSubdir "packages/agent";
+  "@earendil-works/pi-ai" = workspaceSubdir "packages/ai";
+  "@earendil-works/pi-client" = workspaceSubdir "packages/client";
+  "@earendil-works/pi-coding-agent" = workspaceSubdir "packages/coding-agent";
+  "@earendil-works/pi-evals" = workspaceSubdir "packages/evals";
+  "@earendil-works/pi-protocol" = workspaceSubdir "packages/protocol";
+  "@earendil-works/pi-server" = workspaceSubdir "packages/server";
+  "@earendil-works/pi-session-backend-sqlite-node" =
+    workspaceSubdir "packages/session-backends/sqlite-node";
+  "@earendil-works/pi-telemetry" = workspaceSubdir "packages/telemetry";
+  "@earendil-works/pi-tui" = workspaceSubdir "packages/tui";
   "@esbuild/aix-ppc64@0.28.1" = fetchurl {
     url = "https://registry.npmjs.org/@esbuild/aix-ppc64/-/aix-ppc64-0.28.1.tgz";
     hash = "sha512-Svl7tq8k/08+p6CXPpRjQ1fKX+1odH/BQbb48fV6fj3CWHhsoIOoY87w1oHXm0qEpkIK3ZfVgp0hed3XBXzXMQ==";
@@ -1228,11 +1229,13 @@
     url = "https://registry.npmjs.org/pathe/-/pathe-2.0.3.tgz";
     hash = "sha512-WUjGcAqP1gQacoQe+OBJsFA7Ld4DyXuUIjZ5cc75cLHvJ7dtNsTugphxIADwspS+AraAUePCKrSVtPLFj/F88w==";
   };
-  "pi-extension-custom-provider-anthropic" = copyPathToStore (workspaceRoot + "/packages/coding-agent/examples/extensions/custom-provider-anthropic");
-  "pi-extension-custom-provider-gitlab-duo" = copyPathToStore (workspaceRoot + "/packages/coding-agent/examples/extensions/custom-provider-gitlab-duo");
-  "pi-extension-gondolin" = copyPathToStore (workspaceRoot + "/packages/coding-agent/examples/extensions/gondolin");
-  "pi-extension-sandbox" = copyPathToStore (workspaceRoot + "/packages/coding-agent/examples/extensions/sandbox");
-  "pi-extension-with-deps" = copyPathToStore (workspaceRoot + "/packages/coding-agent/examples/extensions/with-deps");
+  "pi-extension-custom-provider-anthropic" =
+    workspaceSubdir "packages/coding-agent/examples/extensions/custom-provider-anthropic";
+  "pi-extension-custom-provider-gitlab-duo" =
+    workspaceSubdir "packages/coding-agent/examples/extensions/custom-provider-gitlab-duo";
+  "pi-extension-gondolin" = workspaceSubdir "packages/coding-agent/examples/extensions/gondolin";
+  "pi-extension-sandbox" = workspaceSubdir "packages/coding-agent/examples/extensions/sandbox";
+  "pi-extension-with-deps" = workspaceSubdir "packages/coding-agent/examples/extensions/with-deps";
   "picocolors@1.1.1" = fetchurl {
     url = "https://registry.npmjs.org/picocolors/-/picocolors-1.1.1.tgz";
     hash = "sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA==";

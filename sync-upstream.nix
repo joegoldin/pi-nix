@@ -49,8 +49,19 @@ pkgs.writeShellApplication {
       bun2nix -o bun.nix
       popd >/dev/null
 
-      sed -i '/^  fetchurl,$/a\  workspaceRoot ? throw "coding-agent/bun.nix requires workspaceRoot (the upstream pi source root)",' "$tmpdir/bun.nix"
-      sed -Ei 's|copyPathToStore \.\/packages\/([^ );]+)|copyPathToStore (workspaceRoot + "/packages/\1")|g' "$tmpdir/bun.nix"
+      # bun2nix emits `copyPathToStore ./packages/x` for each workspace member.
+      # copyPathToStore reads the path AT EVALUATION TIME, and the path lives
+      # inside the fetched pi source, so evaluating the module meant fetching
+      # and unpacking pi's release tarball before nix could draw a single build
+      # line. That is import-from-derivation, and on a cold eval cache it turned
+      # `nixos-rebuild` into minutes of apparent hang.
+      #
+      # The rewrite hands each member to a function that returns a DERIVATION
+      # instead. `${src}/packages/x` inside a builder is a store-path reference,
+      # which nix resolves when it schedules the build rather than while it is
+      # still evaluating.
+      sed -i '/^  fetchurl,$/a\  workspaceSubdir ? throw "coding-agent/bun.nix requires workspaceSubdir (see package-bun.nix)",' "$tmpdir/bun.nix"
+      sed -Ei 's|copyPathToStore \.\/packages\/([^ );]+)|workspaceSubdir "packages/\1"|g' "$tmpdir/bun.nix"
 
       npm_deps_hash=$(prefetch-npm-deps "$tmpdir/package-lock.json" | tail -n1)
 
