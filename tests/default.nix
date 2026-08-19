@@ -15,4 +15,5 @@ in
   extensions = import ./extensions-test.nix args;
   update-app = import ./update-app-test.nix args;
   options = import ./options-test.nix args;
+  additive = import ./additive-test.nix args;
 }
