@@ -133,6 +133,32 @@ let
       e = c.environment;
     in
     if e == null then null else (e.${name} or null);
+
+  notifyExt = fakeExt "notify" {
+    piEntrypoint = [ "/nix/store/fake-notify/index.ts" ];
+    piSkills = [ ];
+    piPrompts = [ ];
+    settings = { };
+    promptFragment = null;
+  };
+
+  notifyOff = evalPi { };
+
+  notifyOn = evalPi {
+    pi.coding-agent.notifications = {
+      enable = true;
+      package = notifyExt;
+      events = [
+        "settled"
+        "needs_input"
+      ];
+      longRunningToolSeconds = 45;
+    };
+  };
+
+  notifyUnpackaged = builtins.tryEval (
+    lib.deepSeq (evalPi { pi.coding-agent.notifications.enable = true; }).finalArgs "unreachable"
+  );
 in
 # The fork ships the Bun build by default. Upstream's option declares
 # `default = coding-agent`; a mkDefault from extra-options.nix outranks it
@@ -187,6 +213,21 @@ assert envValue slOn "AGENT_STATUSLINE_BIN" != null;
 assert envValue slOn "AGENT_STATUSLINE_CONFIG" != null;
 # The shared schema is mounted verbatim, so every option claude-nix has is here.
 assert slOn.statusline.padding == 2;
+# Disabled contributes nothing at all.
+assert !(notifyOff.settings ? piNotify);
+# Enabled with a package wires both the flag and the settings block.
+assert lib.elem "/nix/store/fake-notify/index.ts" (flagValues notifyOn.finalArgs "--extension");
+assert
+  notifyOn.settings.piNotify.events == [
+    "settled"
+    "needs_input"
+  ];
+assert notifyOn.settings.piNotify.longRunningToolSeconds == 45;
+assert lib.hasPrefix "/nix/store/" notifyOn.settings.piNotify.notifierCommand;
+# Enabled without a package must fail loudly rather than silently doing
+# nothing, because "notifications are on" and "no notifier exists" is exactly
+# the state a user would not notice.
+assert notifyUnpackaged.success == false;
 pkgs.runCommand "pi-nix-options-tests" { } ''
   set -euo pipefail
   # The written prompt must be the literal text, with no wrapper or frontmatter.

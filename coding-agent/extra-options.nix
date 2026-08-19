@@ -99,6 +99,42 @@ let
     AGENT_STATUSLINE_BIN.value = "${statusline.package}/bin/agent-statusline";
     AGENT_STATUSLINE_CONFIG.value = "${statuslineConfigFile}";
   };
+
+  notifications = cfg.notifications;
+
+  notificationsPackage =
+    if !notifications.enable then
+      null
+    else if notifications.package == null then
+      throw ''
+        pi.coding-agent.notifications.enable is set, but
+        pi.coding-agent.notifications.package is null.
+
+        pi ships no notification support and the npm ecosystem has no vetted
+        extension, so pi-nix carries a first-party pi-notify — which does not
+        exist yet (phase 3 of docs/plans/2026-08-18-pi-nix-agent-stack-design.md).
+        Either set notifications.package explicitly or leave
+        notifications.enable off.
+      ''
+    else
+      notifications.package;
+
+  notificationArgs = lib.optionals (notificationsPackage != null) (
+    notificationsPackage.passthru.piEntrypoint or [ ]
+  );
+
+  notificationFlags = lib.concatMap (p: [
+    "--extension"
+    p
+  ]) notificationArgs;
+
+  # Read by pi-notify at runtime. The notifier path is resolved at build time
+  # so the extension never has to search PATH inside the jail.
+  notificationSettings = lib.optionalAttrs (notificationsPackage != null) {
+    piNotify = {
+      inherit (notifications) notifierCommand events longRunningToolSeconds;
+    };
+  };
 in
 {
   options = lib.setAttrByPath optionPath {
@@ -177,6 +213,72 @@ in
       };
     };
 
+    notifications = {
+      enable = lib.mkEnableOption "desktop notifications for pi via the first-party pi-notify extension";
+
+      package = lib.mkOption {
+        type = lib.types.nullOr lib.types.package;
+        default = null;
+        description = ''
+          The `pi-notify` extension derivation. Null until pi-nix ships it;
+          setting `enable` without a package is an error rather than a silent
+          no-op, because "notifications on, no notifier" is precisely the state
+          a user would not notice.
+        '';
+      };
+
+      notifierCommand = lib.mkOption {
+        type = lib.types.str;
+        default =
+          if pkgs.stdenv.hostPlatform.isDarwin then
+            "${pkgs.terminal-notifier}/bin/terminal-notifier"
+          else
+            "${pkgs.libnotify}/bin/notify-send";
+        defaultText = lib.literalExpression ''
+          if pkgs.stdenv.hostPlatform.isDarwin then
+            "''${pkgs.terminal-notifier}/bin/terminal-notifier"
+          else
+            "''${pkgs.libnotify}/bin/notify-send"
+        '';
+        description = ''
+          Absolute path to the notifier binary pi-notify shells out to.
+          Resolved at build time so the path survives inside the jail, where
+          the host PATH is not available.
+        '';
+      };
+
+      events = lib.mkOption {
+        type = lib.types.listOf (
+          lib.types.enum [
+            "needs_input"
+            "settled"
+            "long_running_tool"
+          ]
+        );
+        default = [
+          "needs_input"
+          "settled"
+          "long_running_tool"
+        ];
+        description = ''
+          Which events raise a notification.
+
+          - `needs_input` — a permission layer raised a prompt
+          - `settled` — the agent finished its turn (pi's `agent_settled`)
+          - `long_running_tool` — a tool ran longer than
+            `longRunningToolSeconds` (pi's `tool_execution_start`/`_end`)
+        '';
+      };
+
+      longRunningToolSeconds = lib.mkOption {
+        type = lib.types.int;
+        default = 30;
+        description = ''
+          Duration a tool must exceed before `long_running_tool` fires.
+        '';
+      };
+    };
+
     finalSystemPrompt = lib.mkOption {
       type = lib.types.nullOr lib.types.path;
       internal = true;
@@ -196,13 +298,15 @@ in
     # mkAfter so our flags land behind anything the user set, and behind
     # upstream's resourceArgs (which are concatenated before extraArgs in
     # options.nix's wrapper).
-    extraArgs = lib.mkAfter (systemPromptArgs ++ promptFragmentArgs ++ statuslineArgs);
+    extraArgs = lib.mkAfter (
+      systemPromptArgs ++ promptFragmentArgs ++ statuslineArgs ++ notificationFlags
+    );
 
     environment = lib.mkIf statusline.enable statuslineEnv;
 
     extensions = extEntrypoints;
     skills = extSkills;
     promptTemplates = extPrompts;
-    settings = extSettings;
+    settings = lib.recursiveUpdate extSettings notificationSettings;
   };
 }
