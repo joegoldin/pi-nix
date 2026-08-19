@@ -506,6 +506,12 @@ let
           # "not found" instead. file, which and tree are small, and their
           # absence reads as a broken machine rather than a deliberate sandbox,
           # which is the failure mode this list exists to avoid.
+          # gawk before the rest because its absence is the least visible: a
+          # shell one-liner with an awk stage fails mid-pipeline, and the model
+          # reads that as its own syntax error rather than as a missing binary.
+          # Nothing else in this list provides it -- not coreutils, not gnused,
+          # not gnugrep.
+          pkgs.gawk
           pkgs.gnutar
           pkgs.gzip
           pkgs.xz

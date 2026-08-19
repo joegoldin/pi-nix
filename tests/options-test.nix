@@ -554,13 +554,13 @@ assert lib.any (lib.hasPrefix "set-env:SHELL=") defaultPermissions;
 # by accident: --clearenv means a package dropped here is not a degraded PATH
 # but a "command not found" the model reports as a broken task. Bump it
 # deliberately when adding a tool, never to make this pass.
-assert lib.elem "add-pkg-deps:28" defaultPermissions;
+assert lib.elem "add-pkg-deps:29" defaultPermissions;
 # nix is opt-in, and it is three binds rather than one package: without the
 # store and the daemon socket the binary is present and useless.
 assert !(lib.elem "try-readonly:/nix/store" defaultPermissions);
 assert lib.elem "try-readonly:/nix/store" nixPermissions;
 assert lib.elem "try-readwrite:/nix/var/nix/daemon-socket/socket" nixPermissions;
-assert lib.elem "add-pkg-deps:29" nixPermissions;
+assert lib.elem "add-pkg-deps:30" nixPermissions;
 # Enabled without a package must fail loudly rather than silently doing
 # nothing, because "notifications are on" and "no notifier exists" is exactly
 # the state a user would not notice.
