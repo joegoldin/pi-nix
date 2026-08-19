@@ -18,6 +18,7 @@ let
         ext-czottmann-pi-automode
         ext-pi-notify
         ext-pi-voice
+        ext-pi-foreign-skills
         ;
     };
     inputs.agent-statusline = self.inputs.agent-statusline;
@@ -456,6 +457,13 @@ assert
     enabled = true;
     classifierIo = false;
   };
+# The foreign-skills extension is off by default and contributes its entrypoint
+# when enabled. `.claude/skills` is not one of pi's skill roots and settings.json
+# cannot add it, so this extension is the only path to it.
+assert !(lib.any (e: lib.hasInfix "pi-foreign-skills" e) (evalPi { }).extensions);
+assert lib.any (e: lib.hasInfix "pi-foreign-skills" e)
+  (evalPi { pi.coding-agent.foreignSkills.enable = true; }).extensions;
+
 # pi-subagents resolves the permission system by name, so it has to be findable
 # at `npm/node_modules/<name>` -- the launcher links the store path there.
 assert

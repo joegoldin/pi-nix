@@ -646,6 +646,8 @@ let
 
   voiceEntrypoints = lib.optionals voice.enable voice.package.passthru.piEntrypoint;
 
+  foreignSkillsEntrypoints = lib.optionals cfg.foreignSkills.enable cfg.foreignSkills.package.passthru.piEntrypoint;
+
   notifications = cfg.notifications;
 
   notificationsPackage =
@@ -1287,6 +1289,33 @@ in
       };
     };
 
+    foreignSkills = {
+      enable = lib.mkEnableOption ''
+        loading skills from another agent's directory layout.
+
+        pi reads skills from `~/.pi/agent/skills`, `~/.agents/skills`,
+        `.pi/skills`, and `.agents/skills` walking up from the cwd. A
+        `.claude/skills` directory is none of those, and `settings.json` cannot
+        add one: entries in its `skills` array are enable/disable patterns and
+        must start with `!`, `+` or `-` (package-manager.js's
+        `getOverridePatterns` discards the rest), so a plain path there is
+        dropped without a diagnostic. `packages` is the only settings key that
+        adds a source and it is global, which cannot express "wherever pi was
+        launched".
+
+        This extension answers pi's `resources_discover` event, which carries
+        the cwd and takes skill paths back, so the directory is found for the
+        session that needs it and for no other
+      '';
+
+      package = lib.mkOption {
+        type = lib.types.package;
+        default = self.packages.${system}.ext-pi-foreign-skills;
+        defaultText = lib.literalExpression "pi-nix's packages.ext-pi-foreign-skills";
+        description = "The extension providing foreign skill discovery.";
+      };
+    };
+
     messaging = {
       enable = lib.mkEnableOption ''
         peer messaging between separately launched pi instances.
@@ -1578,7 +1607,8 @@ in
       ++ extEntrypoints
       ++ notificationEntrypoints
       ++ messagingEntrypoints
-      ++ voiceEntrypoints;
+      ++ voiceEntrypoints
+      ++ foreignSkillsEntrypoints;
     skills = extSkills ++ messagingSkills;
     promptTemplates = extPrompts;
     settings = extSettings;

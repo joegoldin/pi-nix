@@ -1,4 +1,4 @@
-# Test derivations for the first-party extensions: `pi-notify` and `pi-voice`.
+# Test derivations for the first-party extensions.
 # Each runs twice over the same tree:
 #
 #   bun test — the unit suite. No node_modules and no network: the packages
@@ -104,4 +104,5 @@ in
 lib.mapAttrs mkTest {
   pi-notify = ../packages/extensions/pi-notify;
   pi-voice = ../packages/extensions/pi-voice;
+  pi-foreign-skills = ../packages/extensions/pi-foreign-skills;
 }

@@ -1,0 +1,19 @@
+{
+  "name": "pi-foreign-skills",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Load skills from another agent's directory layout: .claude/skills in the launch directory.",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "skills"
+  ],
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "scripts": {
+    "test": "bun test"
+  }
+}
