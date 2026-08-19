@@ -18,7 +18,11 @@
         }
         // extraSpecialArgs;
 
-        modules = [ (import ./options.nix { inherit self jail-nix; }) ] ++ modules;
+        modules = [
+          (import ./options.nix { inherit self jail-nix; })
+          (import ./extra-options.nix { inherit self; })
+        ]
+        ++ modules;
       };
 
       inherit (evaluated.config.pi.coding-agent) finalPackage finalRules finalArgs;

@@ -18,6 +18,14 @@ in
         "coding-agent"
       ];
     })
+    (import ./extra-options.nix {
+      inherit self;
+      optionPath = [
+        "programs"
+        "pi"
+        "coding-agent"
+      ];
+    })
   ];
 
   options.programs.pi.coding-agent = {
