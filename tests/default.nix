@@ -19,5 +19,6 @@ in
   extension-contract = import ./extension-contract-test.nix args;
   pi-intercom-hardening = import ./pi-intercom-hardening-test.nix args;
   pi-intercom-broker-tests = import ./pi-intercom-broker-tests.nix args;
+  pi-intercom-smoke = import ./pi-intercom-smoke-test.nix args;
 }
 // import ./extension-tests.nix args
