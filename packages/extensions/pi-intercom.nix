@@ -1,10 +1,10 @@
-# pi-intercom 0.10.1 — pi's missing ListAgents/SendMessage, over a local Unix
+# pi-intercom 0.10.1: pi's missing ListAgents/SendMessage, over a local Unix
 # domain socket at $PI_CODING_AGENT_DIR/intercom/broker.sock.
 #
 # Zero runtime dependencies. The package declares tsx, but tsx is only reached
 # on upstream's default launch path, and we do not take it: the module points
 # brokerCommand at a bun store path, and `bun broker/broker.ts` runs the broker
-# with no node_modules at all. That also avoids a real bug — upstream's default
+# with no node_modules at all. That also avoids a real bug. Upstream's default
 # path calls getNodeCommand(process.execPath), which falls back to the literal
 # string "node" resolved through PATH whenever the interpreter is not Node, and
 # under a Bun-built pi it never is.
@@ -31,7 +31,7 @@ mkPiExtension {
 
   patchPhaseExtra = securityPatch;
 
-  # NOT settings.json — pi-intercom reads
+  # NOT settings.json. pi-intercom reads
   # $PI_CODING_AGENT_DIR/intercom/config.json and never pi's settings. These are
   # the package's own defaults with the security-relevant ones corrected; the
   # `messaging` option overrides brokerCommand, inboundTrigger and confirmSend

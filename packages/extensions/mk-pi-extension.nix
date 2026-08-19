@@ -57,9 +57,9 @@
   #
   # settings.json is not the only configuration surface an extension reads, and
   # for some packages it is the wrong one. pi-intercom reads
-  # $PI_CODING_AGENT_DIR/intercom/config.json, and its inboundTrigger setting —
+  # $PI_CODING_AGENT_DIR/intercom/config.json, and its inboundTrigger setting,
   # which decides whether an unauthenticated local peer may start a model turn
-  # in this session — has no environment override at all. Without this field
+  # in this session, has no environment override at all. Without this field
   # that default cannot be set from Nix.
   configFiles ? { },
   # Shell appended to the unpack/patch phase, run with the package root as the

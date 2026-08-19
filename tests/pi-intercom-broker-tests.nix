@@ -1,6 +1,6 @@
 # Runs pi-intercom's own shipped tests against the exact tree we install. The
 # tarball includes broker/*.test.ts, so this costs one derivation and catches
-# wire-protocol drift the moment a pin bump lands — including drift that would
+# wire-protocol drift the moment a pin bump lands, including drift that would
 # move the Task 3 patch target.
 {
   pkgs,

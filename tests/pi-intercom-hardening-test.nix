@@ -1,6 +1,6 @@
 # Asserts the security patch is present in the tree we actually install, and
 # that the original is gone. --replace-fail already catches upstream drift; this
-# catches the other direction — somebody deleting the patch from
+# catches the other direction, somebody deleting the patch from
 # pi-intercom-patches.nix and leaving the build green.
 {
   pkgs,

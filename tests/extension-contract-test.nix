@@ -1,7 +1,7 @@
 # Asserts the mkPiExtension passthru contract. Five of the six fields are
 # phase 2's (docs/plans/2026-08-18-pi-nix-fork.md Task 3); configFiles is added
-# by the messaging plan because pi-intercom's inboundTrigger — the security
-# default the whole phase turns on — lives in an extension-owned config file
+# by the messaging plan because pi-intercom's inboundTrigger, the security
+# default the whole phase turns on, lives in an extension-owned config file
 # with no environment override.
 #
 # This exists so a package that drops a field, or a refactor that turns
