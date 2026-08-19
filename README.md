@@ -117,6 +117,7 @@ This fork adds:
 | `autoMode.maxToolTranscriptTokens` | `null \| int` | `null` | Budget for the agent's own tool-call inputs. Package default 4000. |
 | `autoMode.log.enable` | bool | `false` | JSONL decision log beside the session file. |
 | `autoMode.log.classifierIo` | bool | `false` | Also log the classifier's prompt, responses, and parsed verdict. |
+| `jail.nixAccess` | bool | `false` | Put `nix` in the jail, with the store read-only and the daemon socket read-write. |
 | `messaging.enable` | bool | `false` | Peer messaging between separately launched pi instances, over a local unix socket. |
 | `messaging.package` | package | `ext-pi-intercom` | The messaging extension. Must satisfy the `mkPiExtension` passthru contract. |
 | `messaging.inboundTrigger` | enum | `replies` | Whether an inbound peer message may start a model turn. Upstream ships `always`; this fork does not. |

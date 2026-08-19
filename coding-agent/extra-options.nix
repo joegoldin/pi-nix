@@ -309,6 +309,35 @@ let
   # permission. It fails late, at finalPackage, with "attempt to call something
   # which is not a function but a set".
 
+  # `nix` is not in the generic list above, and that is the deliberate half of
+  # this option. Every pi-nix consumer is a Nix user, which argues for shipping
+  # it; but making it *work* is not one package. jail.nix's base binds only the
+  # runtime closure of the wrapped program into /nix/store, and the daemon
+  # socket is not bound at all, so a bare `pkgs.nix` inside the jail cannot
+  # copy a flake into the store, cannot reach a builder, and cannot read a
+  # result path it did somehow produce. Making the rule "nix build and nix eval
+  # are read-only" reachable means binding the whole store and the daemon
+  # socket, and that is a different jail: the package list stops being an
+  # execution allowlist, because anything the agent can build it can then run.
+  #
+  # That is a trade the operator should make on purpose, in their own config,
+  # which is why it is an option that defaults to off rather than another line
+  # in the list above.
+  nixRuntimeInputs = lib.optionals cfg.jail.nixAccess [ pkgs.nix ];
+
+  nixJailPermissions =
+    combinators:
+    lib.optionals cfg.jail.nixAccess [
+      # Read-only, and the whole store rather than the closure: evaluation
+      # reads the paths the daemon just wrote, and it cannot read what is not
+      # bound. The store is world-readable on the host already.
+      (combinators.try-readonly "/nix/store")
+      # The daemon does the writing. Read-write because it is a socket, and
+      # connect() wants write.
+      (combinators.try-readwrite "/nix/var/nix/daemon-socket/socket")
+      (combinators.try-readonly "/nix/var/nix/db")
+    ];
+
   jailPermissions =
     combinators:
     [
@@ -341,7 +370,32 @@ let
           pkgs.fd
           pkgs.gh
           pkgs.libnotify
+          # The shell pi's bash tool actually runs, and the one a person types
+          # into. pi resolves its shell as /bin/bash, then bash on PATH, then
+          # bare `sh` (pi-coding-agent's dist/utils/shell.js). Inside
+          # --clearenv there is no /bin/bash and no PATH but the one
+          # add-pkg-deps builds, so without this every tool call lands on the
+          # `sh` that jail.nix's base binds at /bin/sh, and anything using
+          # bash syntax fails in a way that reads as the model's mistake.
+          #
+          # fish is here because it is the shell the operator has, not as a
+          # second way to run tool calls: pi never consults $SHELL for those.
+          # It is what an interactive escape hatch should feel like, and what
+          # `$SHELL` should point at rather than at nologin.
+          pkgs.bashInteractive
+          pkgs.fish
+          # Reported missing by `/doctor` inside the jail. Each one is
+          # something the agent's own instructions assume it can run: curl for
+          # fetching, sed/grep/find for the read-only inspection the allow
+          # rules name, procps for `ps`/`free` when a command has to be
+          # explained rather than guessed at.
+          pkgs.curl
+          pkgs.gnused
+          pkgs.gnugrep
+          pkgs.findutils
+          pkgs.procps
         ]
+        ++ nixRuntimeInputs
         ++ messagingRuntimeInputs
       ))
       # Mirrors modules/ai/claude.nix's extraSandbox.filesystem.allowRead, which
@@ -365,7 +419,14 @@ let
       (combinators.try-readonly (combinators.noescape "~/.ssh/known_hosts2"))
       (combinators.try-readonly (combinators.noescape "~/.ssh/config"))
       (combinators.try-fwd-env "SSH_AUTH_SOCK")
+      # $SHELL inside the jail is whatever the host exported, which on NixOS is
+      # a nologin binary once --clearenv has dropped everything else. Programs
+      # that spawn "the user's shell" then fail oddly rather than obviously.
+      # pi's own tool calls do not read it (see the bash resolution above), so
+      # this is only for what pi spawns.
+      (combinators.set-env "SHELL" "${lib.getExe pkgs.fish}")
     ]
+    ++ nixJailPermissions combinators
     # Spliced rather than left for the consumer to remember. jail.permissions is
     # function-typed, and `functionTo (listOf raw)` does merge: every definition
     # is applied to the same combinators and the results concatenate. But a
@@ -653,6 +714,27 @@ in
           };
         };
       };
+    };
+
+    jail.nixAccess = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = ''
+        Put `nix` inside the jail, and with it the whole of /nix/store
+        read-only, the daemon socket read-write, and the database read-only.
+        Off by default.
+
+        The package alone is not enough to be useful. jail.nix binds only the
+        wrapped program's own runtime closure into /nix/store, so without the
+        wider binds `nix eval` cannot read the flake the daemon just copied in,
+        and `nix build` produces a path the jail cannot see.
+
+        With them, a rule like "nix build and nix eval are read-only" becomes
+        true instead of merely stated. The package list also stops being an
+        execution allowlist, because anything the agent can build it can also
+        run. On a machine whose repositories are Nix, that is usually the right
+        trade. It is not one this module should make for you.
+      '';
     };
 
     autoMode = {

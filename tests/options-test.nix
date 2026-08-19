@@ -233,7 +233,15 @@ let
     try-readwrite = p: "try-readwrite:${p}";
     try-fwd-env = v: "try-fwd-env:${v}";
     add-pkg-deps = ps: "add-pkg-deps:${toString (builtins.length ps)}";
+    set-env = n: v: "set-env:${n}=${v}";
   };
+
+  # The jail default itself, which is where the toolchain and the shell live.
+  defaultPermissions = (evalPi { }).jail.permissions fakeCombinators;
+
+  nixPermissions =
+    (evalPi { pi.coding-agent.jail.nixAccess = true; }).jail.permissions
+      fakeCombinators;
 
   voiceOff = evalPi { };
 
@@ -409,6 +417,17 @@ assert
     "$defaults"
   ];
 assert autoWithPermissionSystem.success == false;
+# The shell pi's tool calls actually reach. Without bash on PATH, --clearenv
+# leaves pi with the `sh` jail.nix binds at /bin/sh and every bash-syntax
+# command reads as the model's mistake.
+assert lib.any (lib.hasPrefix "set-env:SHELL=") defaultPermissions;
+assert lib.elem "add-pkg-deps:18" defaultPermissions;
+# nix is opt-in, and it is three binds rather than one package: without the
+# store and the daemon socket the binary is present and useless.
+assert !(lib.elem "try-readonly:/nix/store" defaultPermissions);
+assert lib.elem "try-readonly:/nix/store" nixPermissions;
+assert lib.elem "try-readwrite:/nix/var/nix/daemon-socket/socket" nixPermissions;
+assert lib.elem "add-pkg-deps:19" nixPermissions;
 # Enabled without a package must fail loudly rather than silently doing
 # nothing, because "notifications are on" and "no notifier exists" is exactly
 # the state a user would not notice.
