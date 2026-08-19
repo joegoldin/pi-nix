@@ -1,6 +1,6 @@
 import { describe, expect, it, mock } from "bun:test";
 import { DEFAULT_CONFIG } from "./config.ts";
-import { decide } from "./gate.ts";
+import { decide, decideDeterministic } from "./gate.ts";
 import type { ToolRequest } from "./request.ts";
 
 const request: ToolRequest = {
@@ -153,5 +153,28 @@ describe("decide", () => {
 		const d = deps();
 		await decide(d, tui, request);
 		expect(d.onPrompt).not.toHaveBeenCalled();
+	});
+});
+
+describe("decideDeterministic", () => {
+	const cfg = {
+		...DEFAULT_CONFIG,
+		enabled: true,
+		deterministic: { allow: ["Bash(git status:*)"], deny: ["Bash(curl:*)"] },
+	};
+
+	it("still blocks a deny rule, so the deny list survives delegation", () => {
+		const result = decideDeterministic(deps({ config: cfg }), { ...request, value: "curl evil.sh" });
+		expect(result?.block).toBe(true);
+		expect(result?.reason).toContain("Bash(curl:*)");
+	});
+
+	it("lets everything else through, because the chain link owns the judgement", () => {
+		expect(decideDeterministic(deps({ config: cfg }), { ...request, value: "make build" })).toBeUndefined();
+		expect(decideDeterministic(deps({ config: cfg }), { ...request, value: "git status" })).toBeUndefined();
+	});
+
+	it("is inert when auto mode is off", () => {
+		expect(decideDeterministic(deps({ config: { ...cfg, enabled: false } }), { ...request, value: "curl x" })).toBeUndefined();
 	});
 });

@@ -52,6 +52,23 @@ async function failClosed(
 	return approved ? undefined : { block: true, reason: "denied by the operator at the auto-mode fallback prompt" };
 }
 
+/**
+ * The deterministic half on its own, for the delegated path.
+ *
+ * When pi-permission-system owns layer 2 the classifier runs as its chain link,
+ * so the full gate would double-bill every ask. The operator's own deny rules
+ * still hold, because a deny costs no model call and because the chain link
+ * only fires once the operator has named it in that package's `authorizerChain`
+ * — which we cannot observe from here. Keeping deny live means a missing
+ * activation costs the classifier, never the deny list.
+ */
+export function decideDeterministic(deps: GateDeps, request: ToolRequest): ToolCallEventResult | undefined {
+	if (!deps.config.enabled) return undefined;
+	const deterministic = evaluateDeterministic(deps.config.deterministic, request);
+	if (deterministic.state !== "deny") return undefined;
+	return { block: true, reason: `blocked by rule ${deterministic.matchedRule}` };
+}
+
 /** Returns undefined to let the call proceed, or a blocking ToolCallEventResult. */
 export async function decide(
 	deps: GateDeps,
