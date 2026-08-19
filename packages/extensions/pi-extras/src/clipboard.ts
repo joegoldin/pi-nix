@@ -30,7 +30,11 @@ export function clipboardTargets(env: Record<string, string | undefined>): Clipb
 	return ["wl-copy", "xclip", "pbcopy"].map((command) => ({ command, args: argsFor(command) }));
 }
 
-export async function copyToClipboard(text: string, targets: ClipboardTarget[], run: ClipboardRunner): Promise<boolean> {
+export async function copyToClipboard(
+	text: string,
+	targets: ClipboardTarget[],
+	run: ClipboardRunner,
+): Promise<boolean> {
 	for (const target of targets) {
 		try {
 			if (await run(target, text)) return true;

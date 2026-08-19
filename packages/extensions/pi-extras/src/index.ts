@@ -14,7 +14,13 @@ import { homedir } from "node:os";
 import { dirname } from "node:path";
 
 import { type ChordAction, ChordReader, type RegisterName } from "./chord.ts";
-import { type ClipboardRunner, type ClipboardTarget, clipboardTargets, copyToClipboard, spawnRunner } from "./clipboard.ts";
+import {
+	type ClipboardRunner,
+	type ClipboardTarget,
+	clipboardTargets,
+	copyToClipboard,
+	spawnRunner,
+} from "./clipboard.ts";
 import { gitEditorOverrides } from "./gitenv.ts";
 import { expandPathRefs, nextThinkingLevel, unresolvedRefs } from "./input.ts";
 import { type StashTheme, createStashComponent } from "./overlay.ts";
@@ -57,7 +63,10 @@ export interface ExtrasContext {
 /** The slice of pi's ExtensionAPI this extension registers against. */
 export interface ExtrasHost {
 	on(event: string, handler: (payload: never, ctx: never) => unknown): void;
-	registerCommand(name: string, options: { description?: string; handler: (args: string, ctx: never) => Promise<void> }): void;
+	registerCommand(
+		name: string,
+		options: { description?: string; handler: (args: string, ctx: never) => Promise<void> },
+	): void;
 	getThinkingLevel?(): string;
 	setThinkingLevel?(level: string): void;
 }

@@ -30,7 +30,8 @@ export interface StashIO {
  */
 export function stashPath(env: Record<string, string | undefined>, homeDir: string): string {
 	const override = env.PI_CODING_AGENT_DIR;
-	const dir = override ? (override.startsWith("~/") ? `${homeDir}/${override.slice(2)}` : override) : `${homeDir}/.pi/agent`;
+	const expanded = override?.startsWith("~/") ? `${homeDir}/${override.slice(2)}` : override;
+	const dir = expanded ? expanded : `${homeDir}/.pi/agent`;
 	return `${dir}/pi-extras/stash.json`;
 }
 
