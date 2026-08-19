@@ -63,10 +63,15 @@ let
   # entrypointOverrides names the entrypoints to load, by package pname, and
   # nothing else from that package is loaded. Paths are relative to the
   # package root, matching the spelling in its package.json.
+  # Keyed by the package name as it appears in extensions.json, not by the
+  # derivation's pname: packaging prefixes those with `pi-ext-`, and nobody
+  # writing this option would think to.
+  entrypointKeyOf = p: lib.removePrefix "pi-ext-" (p.pname or "");
+
   entrypointsOf =
     p:
     let
-      override = cfg.entrypointOverrides.${p.pname or ""} or null;
+      override = cfg.entrypointOverrides.${entrypointKeyOf p} or null;
     in
     if override == null then
       p.passthru.piEntrypoint or [ ]
@@ -470,7 +475,9 @@ in
       type = lib.types.attrsOf (lib.types.listOf lib.types.str);
       default = { };
       description = ''
-        Load only these entrypoints from a package, keyed by its `pname`.
+        Load only these entrypoints from a package, keyed by the package name
+        as it appears in `extensions.json` (`pi-background-tasks`, not the
+        derivation's `pi-ext-pi-background-tasks`).
 
         A pi package declares its entrypoints in `package.json` under
         `pi.extensions`, and handing pi the package directory loads all of
