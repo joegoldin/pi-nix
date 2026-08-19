@@ -98,17 +98,25 @@ This fork adds:
 | `notifications.appName` | str | `pi` | Title, and the `--app-name` the desktop groups by. |
 | `notifications.events` | `[enum]` | all three | `needs_input`, `settled`, `long_running_tool`. |
 | `notifications.longRunningToolSeconds` | int | `30` | Threshold for `long_running_tool`. |
-| `autoMode.enable` | bool | `false` | The `pi-auto-mode` permission classifier. |
-| `autoMode.allow` | `[str]` | `[ ]` | Pre-approved actions, as plain sentences for the classifier. |
+| `autoMode.enable` | bool | `false` | The `@czottmann/pi-automode` guardrail. Conflicts with `@gotgenes/pi-permission-system`; see `docs/assumption-a2.md`. |
+| `autoMode.package` | package | `ext-czottmann-pi-automode` | The auto-mode extension derivation. |
+| `autoMode.allow` | `[str]` | `[ ]` | Exceptions to `soft_deny`, as plain sentences for the classifier. Appended to the package's built-ins. |
 | `autoMode.soft_deny` | `[str]` | `[ ]` | Destructive actions that explicit user intent clears. |
 | `autoMode.hard_deny` | `[str]` | `[ ]` | Security boundaries. Intent does not clear these and cannot. |
 | `autoMode.environment` | `[str]` | `[ ]` | Facts about the machine. Not permissions. |
-| `autoMode.deterministic.allow` | `[str]` | `[ ]` | Claude Code rule syntax, resolved without a model call: `Bash(git status:*)`, `Read(/home/joe/**)`. |
-| `autoMode.deterministic.deny` | `[str]` | `[ ]` | Same syntax. Deny beats allow. |
-| `autoMode.model` | `null \| { provider; modelId; }` | `null` | Classifier model. Null uses the session's own. |
-| `autoMode.userTurnLimit` | int | `6` | How many user turns the classifier sees, which is what makes `soft_deny` clearable. |
-| `autoMode.timeoutMs` | int | `20000` | Classifier timeout. On expiry auto mode fails closed. |
-| `autoMode.delegateToPermissionSystem` | bool | `false` | Register on `@gotgenes/pi-permission-system`'s authorizer chain. See `docs/assumption-a2.md`: this also needs an `authorizerChain` entry on that package's side. |
+| `autoMode.protectedPaths` | `[str]` | `[ ]` | Paths whose writes always reach the classifier, on top of the built-in list. |
+| `autoMode.deniedPaths` | `[str]` | `[ ]` | Globs the file tools may never touch, matched before any classifier or fast path. |
+| `autoMode.permissions.deny` | `[str]` | `[ ]` | Tool patterns blocked with no model call: `bash(rm -rf *)`, `write(.env*)`. |
+| `autoMode.permissions.ask` | `[str]` | `[ ]` | Tool patterns that prompt first. With no UI a match blocks. |
+| `autoMode.classifierModel` | `null \| str` | `null` | `provider/model-id`. Null uses the session's own model. |
+| `autoMode.classifierReasoningLevel` | `null \| enum` | `null` | `low`…`max`. Null leaves the choice to the provider. |
+| `autoMode.classifyReadOnlyTools` | `null \| bool` | `null` | Send `read`/`grep`/`find`/`ls` to the classifier too. |
+| `autoMode.allowInsideWorkingDirectory` | `null \| bool` | `null` | Deterministic allow for in-tree file access; out-of-tree access is classified. |
+| `autoMode.fastClassifierMaxTokens` | `null \| int` | `null` | Budget for the one-token first stage. Package default 512. |
+| `autoMode.maxUserTranscriptTokens` | `null \| int` | `null` | How much user text the classifier sees, which is what makes `soft_deny` clearable. Package default 4000. |
+| `autoMode.maxToolTranscriptTokens` | `null \| int` | `null` | Budget for the agent's own tool-call inputs. Package default 4000. |
+| `autoMode.log.enable` | bool | `false` | JSONL decision log beside the session file. |
+| `autoMode.log.classifierIo` | bool | `false` | Also log the classifier's prompt, responses, and parsed verdict. |
 | `messaging.enable` | bool | `false` | Peer messaging between separately launched pi instances, over a local unix socket. |
 | `messaging.package` | package | `ext-pi-intercom` | The messaging extension. Must satisfy the `mkPiExtension` passthru contract. |
 | `messaging.inboundTrigger` | enum | `replies` | Whether an inbound peer message may start a model turn. Upstream ships `always`; this fork does not. |
@@ -211,36 +219,46 @@ reading documentation. Each row names the command that settled it.
 
 ### Auto mode
 
-Three layers, outermost first: the jail contains, a deterministic matcher
-resolves the clear-cut majority with no model call, and a classifier judges only
-what the matcher left as `ask`.
+Three layers, outermost first: the jail contains, a deterministic tier resolves
+what needs no judgement, and a two-stage classifier judges the rest.
+
+The deterministic tier is `permissions.deny`, declined `permissions.ask`, the
+package's own hard-deny checks (shell profile writes, `authorized_keys`, cron
+and launch-agent persistence, TLS and auth weakening, root and home destructive
+deletes, edits to auto-mode's own config), and `deniedPaths`. None of it costs a
+model call. Everything that survives it and is not a read-only tool goes to the
+classifier, `write` and `edit` included, so a direct file write cannot route
+around a rule the classifier holds.
 
 Two properties are load-bearing, and both are tested against a live pi in
-`docs/phase-3-acceptance.md`.
+`docs/automode-acceptance.md`.
 
 **It fails closed.** A classifier that errors, times out, returns unparseable
-output, or has no model never lets a call through. With a UI it degrades to a
-confirmation dialog; in `print` and `json` mode it blocks. A malformed config
-file enables auto mode with nothing pre-approved rather than disabling it.
+output, or names a model that does not resolve never lets a call through. A
+`permissions.ask` match with no UI blocks rather than proceeding.
 
-**`hard_deny` is a floor, not a preference.** The gate blocks a `hard_deny` even
-when the classifier answers `allow`, and does not offer the operator a dialog to
-wave it through. The model is not trusted to enforce the one rule it is told it
-may not clear, so text injected into a file or a tool call cannot talk its way
-past one.
+**`hard_deny` is a floor, not a preference.** The verdict contract refuses the
+combination outright: `{"decision":"allow","tier":"hard_deny"}` does not parse,
+and an unparseable verdict blocks. The model is not trusted to clear the one
+rule it is told it may not clear, so text injected into a file or a tool call
+cannot talk its way past one.
 
-One sharp edge worth knowing about the deterministic layer: it has no shell
-parser, so a `Bash(...)` prefix rule refuses to **allow** any command containing
-a control operator. `git status && rm -rf /` starts with `git status `, and the
-matcher would otherwise wave it through. Such a command falls to the classifier
-instead. Deny rules are unaffected, because refusing to deny is the unsafe
-direction. Delegating to `@gotgenes/pi-permission-system` is what closes this
-gap properly: that package carries tree-sitter-bash.
+There is no allow list for `bash`, and that is the design rather than a gap.
+A prefix rule with no shell parser will wave through `git status && rm -rf /`,
+which starts with `git status `; the answer here is that every `bash` call is
+classified and the first stage is one token wide to keep that cheap.
 
-Config reaches both first-party extensions as a store path in an environment
-variable, `PI_AUTO_MODE_CONFIG` and `PI_NOTIFY_CONFIG`, never through
-`settings.json`. pi's `ExtensionContext` exposes no settings reader, so a
-`settings.json` block would be config nothing can read.
+The rules reach the extension as `PI_AUTOMODE_SETTINGS_JSON`, exported from a
+store file the launcher `cat`s, never through `settings.json`, which the
+package does not read. That variable is its highest-precedence source, so a
+stale `~/.pi/agent/automode.json` cannot outrank the declared policy. pi-notify
+takes the same shape for the same reason, as `PI_NOTIFY_CONFIG`: pi's
+`ExtensionContext` exposes no settings reader.
+
+Auto mode and `@gotgenes/pi-permission-system` cannot both run. Both gate
+`tool_call`, pi stops at the first extension that blocks, and the permission
+system loads first. Enabling both throws at eval; `docs/assumption-a2.md` has
+the evidence and what dropping the permission system costs.
 
 ### The jail
 
@@ -277,15 +295,20 @@ TypeScript erases.
 
 | Attribute | Source | What it adds |
 | --- | --- | --- |
-| `ext-pi-auto-mode` | `packages/extensions/pi-auto-mode` | Claude-Code-style auto mode: deterministic rules plus a fail-closed classifier |
 | `ext-pi-notify` | `packages/extensions/pi-notify` | Desktop notifications on prompts, settle, and long tool calls |
+| `ext-pi-voice` | `packages/extensions/pi-voice` | Push-to-talk dictation into the editor |
 
-Their tests run under `nix flake check` as `pi-auto-mode` and `pi-notify`. Each
+Their tests run under `nix flake check` as `pi-notify` and `pi-voice`. Each
 check runs the suite twice over one tree: `bun test`, with
 `PI_CODING_AGENT_SRC` pointed at the pi source `packages.coding-agent` builds
-from so the contract tests read pi's real tool schemas, and then `tsc --strict`
-against pi 0.84.2's published `.d.ts`. A pi bump that moves the extension API
-fails there rather than at load.
+from, and then `tsc --strict` against pi 0.84.2's published `.d.ts`. A pi bump
+that moves the extension API fails there rather than at load.
+
+Auto mode used to be a third. It is now the pinned `@czottmann/pi-automode`,
+which speaks Claude Code's own `autoMode` schema and ships the deterministic
+hard-deny list, the path deny list, and the transcript budgets the first-party
+one never had. `docs/assumption-a2.md` records why the first-party one was
+retired and why it cannot run alongside `@gotgenes/pi-permission-system`.
 
 Bump every pin, and pi itself, with one command:
 

@@ -33,12 +33,11 @@ let
     "ext-juicesharp-rpiv-todo"
     "ext-narumitw-pi-btw"
     "ext-narumitw-pi-goal"
-    # First-party, from packages/extensions/<name>: no pin, no lockfile.
-    "ext-pi-auto-mode"
     "ext-pi-background-tasks"
     "ext-pi-cache-optimizer"
     "ext-pi-intercom"
     "ext-pi-mcp-adapter"
+    # First-party, from packages/extensions/<name>: no pin, no lockfile.
     "ext-pi-notify"
     "ext-pi-subagents"
     "ext-pi-voice"
@@ -76,17 +75,12 @@ let
     assert exts.ext-pi-mcp-adapter.passthru.promptFragment == null;
     # A first-party extension names its entrypoint explicitly instead, because
     # nothing about it is resolved from an npm manifest.
-    assert exts.ext-pi-auto-mode.passthru.piEntrypoint == [ "${exts.ext-pi-auto-mode}/src/index.ts" ];
-    assert exts.ext-pi-auto-mode.passthru.settings == { };
-    assert exts.ext-pi-auto-mode.passthru.promptFragment == null;
-    # It carries no pin, so extensions.json must not have grown one.
     assert exts.ext-pi-notify.passthru.piEntrypoint == [ "${exts.ext-pi-notify}/src/index.ts" ];
     assert exts.ext-pi-voice.passthru.piEntrypoint == [ "${exts.ext-pi-voice}/src/index.ts" ];
     assert exts.ext-pi-voice.passthru.settings == { };
     assert exts.ext-pi-voice.passthru.promptFragment == null;
     # No first-party extension carries a pin, so extensions.json must not have
     # grown one.
-    assert !(pins ? pi-auto-mode);
     assert !(pins ? pi-notify);
     assert !(pins ? pi-voice);
     # Three pins take the bundled branch, and none needs node_modules:

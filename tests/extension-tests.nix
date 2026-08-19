@@ -1,5 +1,5 @@
-# Test derivations for the first-party extensions: `pi-auto-mode`, `pi-notify`,
-# and `pi-voice`. Each runs twice over the same tree:
+# Test derivations for the first-party extensions: `pi-notify` and `pi-voice`.
+# Each runs twice over the same tree:
 #
 #   bun test — the unit suite. No node_modules and no network: the packages
 #     declare no dependencies at all, and `import type` from @earendil-works/*
@@ -11,8 +11,8 @@
 #     this fork believes it has. A pi bump that changes one fails here.
 #
 # PI_CODING_AGENT_SRC points at the same fetchFromGitHub output
-# packages.coding-agent builds from, which turns pi-contract.test.ts from a
-# skipped file into a differential test against pi's real tool schemas.
+# packages.coding-agent builds from, so a test that wants to read pi's real
+# source can.
 {
   pkgs,
   self,
@@ -102,7 +102,6 @@ let
       '';
 in
 lib.mapAttrs mkTest {
-  pi-auto-mode = ../packages/extensions/pi-auto-mode;
   pi-notify = ../packages/extensions/pi-notify;
   pi-voice = ../packages/extensions/pi-voice;
 }

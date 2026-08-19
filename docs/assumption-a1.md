@@ -20,8 +20,9 @@ already call it: `qna.ts`, `summarize.ts`, `custom-compaction.ts`, and
 Consequence: the design's A1 fallback, shelling out to a small classification
 CLI, is not implemented, and should not be added.
 
-`packages/extensions/pi-auto-mode/src/pi-contract.test.ts` re-checks the
-docstring, the `complete` signature, and `find(provider, modelId)` against pi's
-real source whenever `PI_CODING_AGENT_SRC` is set, which the `pi-auto-mode`
-Nix check always does. A pi bump that retires the facade fails there rather
-than at load.
+The differential test that re-checked the docstring, the `complete` signature,
+and `find(provider, modelId)` against pi's source lived in the first-party
+auto-mode extension, and went with it. `@czottmann/pi-automode` calls the same
+facade (`extensions/auto-mode/classifier.ts`) and its own suite covers it, but
+that suite runs upstream, not here. A pi bump that retires the facade now
+surfaces as a failed classifier call, which fails closed.

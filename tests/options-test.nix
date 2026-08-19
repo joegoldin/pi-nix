@@ -14,7 +14,11 @@ let
       # Distinguishable from coding-agent so the default-package assertion
       # below cannot pass by accident.
       coding-agent-bun = pkgs.cowsay;
-      inherit (self.packages.${system}) ext-pi-auto-mode ext-pi-notify ext-pi-voice;
+      inherit (self.packages.${system})
+        ext-czottmann-pi-automode
+        ext-pi-notify
+        ext-pi-voice
+        ;
     };
     inputs.agent-statusline = self.inputs.agent-statusline;
   };
@@ -176,20 +180,45 @@ let
       soft_deny = [ "deleting files the user did not name" ];
       hard_deny = [ "reading private SSH keys" ];
       environment = [ "this is a NixOS machine" ];
-      deterministic = {
-        allow = [ "Bash(git status:*)" ];
-        deny = [ "Bash(curl:*)" ];
-      };
-      model = {
-        provider = "anthropic";
-        modelId = "claude-haiku-4-5";
-      };
-      userTurnLimit = 3;
-      timeoutMs = 5000;
+      deniedPaths = [ "~/.ssh/*" ];
+      permissions.deny = [ "bash(curl:*)" ];
+      permissions.ask = [ "bash(git push *)" ];
+      classifierModel = "anthropic/claude-haiku-4-5";
+      classifierReasoningLevel = "low";
+      maxUserTranscriptTokens = 2000;
+      log.enable = true;
     };
   };
 
-  autoJson = builtins.fromJSON (builtins.readFile autoOn.autoMode.configFile);
+  autoJson = autoOn.autoMode.settings;
+
+  # A caller who spells the sentinel themselves keeps their own placement, and
+  # nothing is prepended twice.
+  autoExplicitDefaults = evalPi {
+    pi.coding-agent.autoMode = {
+      enable = true;
+      allow = [
+        "a first rule"
+        "$defaults"
+      ];
+    };
+  };
+
+  # Both gates answer `tool_call`, and the permission system answers first, so
+  # enabling them together means the classifier is never asked. The module
+  # refuses rather than shipping that arrangement quietly.
+  autoWithPermissionSystem = builtins.tryEval (
+    (evalPi {
+      pi.coding-agent = {
+        autoMode.enable = true;
+        extensionPackages = [
+          (pkgs.hello.overrideAttrs (_: {
+            pname = "pi-ext-gotgenes-pi-permission-system";
+          }))
+        ];
+      };
+    }).finalArgs
+  );
 
   # A stand-in for jail.nix's combinator set, so the permission list can be
   # asserted without building a jail.
@@ -317,32 +346,69 @@ assert
   == selfStub.packages.${system}.ext-pi-notify.passthru.piEntrypoint;
 # Disabled contributes no extension, no environment, and no config file.
 assert autoOff.autoMode.configFile == null;
-assert envValue autoOff "PI_AUTO_MODE_CONFIG" == null;
-assert !(lib.any (lib.hasInfix "pi-auto-mode") (flagValues autoOff.finalArgs "--extension"));
+assert envValue autoOff "PI_AUTOMODE_SETTINGS_JSON" == null;
+assert !(lib.any (lib.hasInfix "pi-automode") (flagValues autoOff.finalArgs "--extension"));
 # Enabled hands pi the entrypoint from the extension's own passthru, so the
 # filename inside the package stays that package's business.
 assert
   flagValues autoOn.finalArgs "--extension"
-  == selfStub.packages.${system}.ext-pi-auto-mode.passthru.piEntrypoint;
-# Config travels as a store path in an env var, never in settings.json: pi's
-# ExtensionContext has no settings reader.
-assert envValue autoOn "PI_AUTO_MODE_CONFIG" != null;
-assert (envValue autoOn "PI_AUTO_MODE_CONFIG").value == "${autoOn.autoMode.configFile}";
-assert !(autoOn.settings ? piAutoMode);
+  == selfStub.packages.${system}.ext-czottmann-pi-automode.passthru.piEntrypoint;
+# The rules travel as an immutable store file whose contents the launcher
+# exports as PI_AUTOMODE_SETTINGS_JSON, never through settings.json (which
+# pi-automode does not read) and never as a write into the user's home.
+assert (envValue autoOn "PI_AUTOMODE_SETTINGS_JSON").file == "${autoOn.autoMode.configFile}";
+assert !(autoOn.settings ? autoMode);
+assert !(autoOn.finalConfigFiles ? "automode.json");
+assert builtins.fromJSON (builtins.readFile autoOn.autoMode.configFile) == autoJson;
 # Every rule list reaches the rendered JSON under the key the extension reads,
-# including the two underscore-cased ones the classifier prompt names verbatim.
-assert autoJson.enabled == true;
-assert autoJson.allow == [ "reading anything under the working directory" ];
-assert autoJson.soft_deny == [ "deleting files the user did not name" ];
-assert autoJson.hard_deny == [ "reading private SSH keys" ];
-assert autoJson.environment == [ "this is a NixOS machine" ];
-assert autoJson.deterministic.allow == [ "Bash(git status:*)" ];
-assert autoJson.deterministic.deny == [ "Bash(curl:*)" ];
-assert autoJson.classifierModel.provider == "anthropic";
-assert autoJson.classifierModel.modelId == "claude-haiku-4-5";
-assert autoJson.userTurnLimit == 3;
-assert autoJson.timeoutMs == 5000;
-assert autoJson.delegateToPermissionSystem == false;
+# including the two underscore-cased ones the classifier prompt names verbatim,
+# and each leads with the sentinel that keeps the package's built-in rules.
+assert autoJson.autoMode.enabled == true;
+assert
+  autoJson.autoMode.allow == [
+    "$defaults"
+    "reading anything under the working directory"
+  ];
+assert
+  autoJson.autoMode.soft_deny == [
+    "$defaults"
+    "deleting files the user did not name"
+  ];
+assert
+  autoJson.autoMode.hard_deny == [
+    "$defaults"
+    "reading private SSH keys"
+  ];
+assert
+  autoJson.autoMode.environment == [
+    "$defaults"
+    "this is a NixOS machine"
+  ];
+# deniedPaths has no built-in entries, so the sentinel would only be noise.
+assert autoJson.autoMode.deniedPaths == [ "~/.ssh/*" ];
+assert autoJson.permissions.deny == [ "bash(curl:*)" ];
+assert autoJson.permissions.ask == [ "bash(git push *)" ];
+assert autoJson.autoMode.classifierModel == "anthropic/claude-haiku-4-5";
+assert autoJson.autoMode.classifierReasoningLevel == "low";
+assert autoJson.autoMode.maxUserTranscriptTokens == 2000;
+assert
+  autoJson.autoMode.log == {
+    enabled = true;
+    classifierIo = false;
+  };
+# An unset scalar is absent, not null: the package's own default is the one
+# documented, and a second copy in Nix would be a second thing to keep true.
+assert !(autoJson.autoMode ? classifyReadOnlyTools);
+assert !(autoJson.autoMode ? maxToolTranscriptTokens);
+# A section nobody configured is omitted entirely. An empty list would read as
+# "replace the built-ins with nothing".
+assert !(autoJson.autoMode ? protectedPaths);
+assert
+  autoExplicitDefaults.autoMode.settings.autoMode.allow == [
+    "a first rule"
+    "$defaults"
+  ];
+assert autoWithPermissionSystem.success == false;
 # Enabled without a package must fail loudly rather than silently doing
 # nothing, because "notifications are on" and "no notifier exists" is exactly
 # the state a user would not notice.

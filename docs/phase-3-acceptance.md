@@ -1,4 +1,10 @@
-# Phase 3 acceptance run
+# Phase 3 acceptance run (historical)
+
+**Superseded.** This run tested the first-party `pi-auto-mode` extension, which
+was retired on 2026-08-19 in favour of the pinned `@czottmann/pi-automode`. It
+is kept because the harness it describes is the one the replacement was tested
+with, and because the nine behaviours below are the bar that replacement had to
+clear. `docs/automode-acceptance.md` is the current run.
 
 Date: 2026-08-18
 pi version: 0.84.2 (`VERSION.json` rev `v0.84.2`), built as `coding-agent-bun`

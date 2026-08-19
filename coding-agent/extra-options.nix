@@ -151,40 +151,142 @@ let
 
   autoMode = cfg.autoMode;
 
-  autoModePackage = self.packages.${system}.ext-pi-auto-mode;
+  # `$defaults` is pi-automode's sentinel for "keep this section's built-in
+  # rules and add mine". Omitting it REPLACES them, and an empty list counts as
+  # omitting (docs/defaults.md, and config.ts's applyRuleSetting: any array at
+  # all sets `seen`), so a section nobody configured must not be written at
+  # all. Prepending it is the same additive contract claude-nix's
+  # mergeClaudeSettings applies to the identical four lists, which is what lets
+  # one rule set feed both agents. A caller who spells `$defaults` themselves
+  # keeps their own placement; nobody can drop the built-ins from Nix, which is
+  # the safe direction for a deny list.
+  withDefaults =
+    rules:
+    if rules == [ ] then
+      null
+    else if lib.elem "$defaults" rules then
+      rules
+    else
+      [ "$defaults" ] ++ rules;
 
-  # Read by pi-auto-mode at runtime through PI_AUTO_MODE_CONFIG. It travels as a
-  # store path in an environment variable rather than in settings.json, because
-  # ExtensionContext exposes no settings reader (F6) and upstream jq-merges
-  # settings.json at launch anyway.
+  # Only what the operator actually set. Every key omitted here falls through
+  # to the package's own default, which is the value its docs describe; writing
+  # a Nix-side copy of that default would be a second place to keep in sync.
+  setKeys = lib.filterAttrs (_: v: v != null && v != [ ]);
+
+  autoModePermissions = setKeys { inherit (autoMode.permissions) deny ask; };
+
+  # pi-automode reads three sources and pi's settings.json is not one of them:
+  # `~/.pi/agent/automode.json`, `.pi/automode.local.json`, and the
+  # PI_AUTOMODE_SETTINGS_JSON environment variable, which carries the settings
+  # as inline JSON rather than as a path (config.ts's
+  # loadEffectiveConfigWithDiagnostics: `JSON.parse(process.env...)`).
+  #
+  # The environment variable is the one Nix should use, and the `file` tag on
+  # upstream's `environment` option is what makes that ergonomic: it exports
+  # `"$(cat <store path>)"`, so the rules travel as an immutable store file
+  # that rolls back with the generation, lands in the runtime closure the jail
+  # binds, and never writes into the user's home.
+  #
+  # The alternative, `configFiles."automode.json"`, would have been wrong here
+  # in a way that is easy to miss. That contract installs relative to
+  # PI_CODING_AGENT_DIR, while pi-automode's global path is
+  # `resolve(HOME, ".pi/agent/automode.json")` (constants.ts), anchored to the
+  # home directory and honouring no override. The two agree by default and only
+  # by default, and a consumer who repoints PI_CODING_AGENT_DIR would get a file
+  # the guardrail never reads and its built-in rules instead of theirs.
+  #
+  # Inline settings are also the highest-precedence source, which is the right
+  # place for a rule set the operator declared in Nix: a checked-out project's
+  # `.pi/automode.local.json` can still ADD rules, but it cannot turn auto mode
+  # off or swap the classifier model out from under it.
+  autoModeSettings = {
+    autoMode = {
+      enabled = true;
+      log = {
+        enabled = autoMode.log.enable;
+        inherit (autoMode.log) classifierIo;
+      };
+    }
+    // setKeys {
+      inherit (autoMode)
+        classifierModel
+        classifierReasoningLevel
+        classifyReadOnlyTools
+        allowInsideWorkingDirectory
+        fastClassifierMaxTokens
+        maxUserTranscriptTokens
+        maxToolTranscriptTokens
+        ;
+      environment = withDefaults autoMode.environment;
+      allow = withDefaults autoMode.allow;
+      soft_deny = withDefaults autoMode.soft_deny;
+      hard_deny = withDefaults autoMode.hard_deny;
+      protectedPaths = withDefaults autoMode.protectedPaths;
+      # No `$defaults` here: deniedPaths ships no built-in entries, and the
+      # sentinel is accepted there only for consistency.
+      inherit (autoMode) deniedPaths;
+    };
+  }
+  // lib.optionalAttrs (autoModePermissions != { }) { permissions = autoModePermissions; };
+
   autoModeConfigFile =
     if !autoMode.enable then
       null
     else
-      pkgs.writeText "pi-auto-mode.json" (
-        builtins.toJSON {
-          enabled = true;
-          inherit (autoMode)
-            allow
-            soft_deny
-            hard_deny
-            environment
-            userTurnLimit
-            timeoutMs
-            delegateToPermissionSystem
-            ;
-          deterministic = {
-            inherit (autoMode.deterministic) allow deny;
-          };
-          classifierModel = autoMode.model;
-        }
-      );
-
-  autoModeEntrypoints = lib.optionals autoMode.enable autoModePackage.passthru.piEntrypoint;
+      pkgs.writeText "pi-automode.json" (builtins.toJSON autoModeSettings);
 
   autoModeEnv = lib.optionalAttrs autoMode.enable {
-    PI_AUTO_MODE_CONFIG.value = "${autoModeConfigFile}";
+    # A string, not the derivation: the `file` tag is `either str path`, and a
+    # writeText result is neither until it is interpolated.
+    PI_AUTOMODE_SETTINGS_JSON.file = "${autoModeConfigFile}";
   };
+
+  # Two gates on one event is one gate too many. pi dispatches `tool_call` to
+  # every extension in `--extension` order and returns on the first
+  # `{ block: true }` (pi-coding-agent 0.84.2,
+  # `dist/core/extensions/runner.js`'s emitToolCall), and both packages
+  # register there: @gotgenes/pi-permission-system through
+  # createFailClosedToolCall, pi-automode through its own handler.
+  #
+  # extEntrypoints is concatenated ahead of autoModeEntrypoints below, so the
+  # permission system always answers first. With an empty `authorizerChain` its
+  # composed chain *is* the terminal authorizer, so every ask it cannot resolve
+  # goes to a dialog and the classifier is never consulted. That is not a
+  # theory: it is what the option this replaces actually shipped
+  # (docs/assumption-a2.md).
+  #
+  # pi-automode cannot be that chain's link either. It never reads
+  # Symbol.for("@gotgenes/pi-permission-system:service") and has no
+  # registerAuthorizer call anywhere in its source, so there is no arrangement
+  # in which the two compose. Pick one.
+  permissionSystemPnames = [
+    "pi-ext-gotgenes-pi-permission-system"
+    "@gotgenes/pi-permission-system"
+  ];
+
+  autoModeConflict =
+    autoMode.enable && lib.any (p: lib.elem (p.pname or "") permissionSystemPnames) extPkgs;
+
+  autoModeEntrypoints =
+    if autoModeConflict then
+      throw ''
+        pi.coding-agent.autoMode.enable is set and
+        @gotgenes/pi-permission-system is in extensionPackages.
+
+        Both extensions gate the same `tool_call` event, and pi stops at the
+        first one that blocks. The permission system is loaded first, so with
+        no `authorizerChain` naming a link it prompts for every ask its
+        deterministic engine cannot settle and the auto-mode classifier never
+        runs. Two gatekeepers, two prompts, and the one you configured is the
+        one that goes unasked.
+
+        Drop @gotgenes/pi-permission-system from extensionPackages, or turn
+        autoMode.enable off. They cannot be composed: pi-automode does not
+        register on that package's authorizer chain.
+      ''
+    else
+      lib.optionals autoMode.enable autoMode.package.passthru.piEntrypoint;
 
   # Design §9's outermost layer. Upstream's default is `[ network mount-cwd ]`,
   # which is enough to reach a model API and edit the working directory and
@@ -206,6 +308,7 @@ let
   # notifications ]` silently hands jail.nix an option submodule instead of a
   # permission. It fails late, at finalPackage, with "attempt to call something
   # which is not a function but a set".
+
   jailPermissions =
     combinators:
     [
@@ -553,14 +656,32 @@ in
     };
 
     autoMode = {
-      enable = lib.mkEnableOption "the pi-auto-mode permission classifier";
+      enable = lib.mkEnableOption "the @czottmann/pi-automode guardrail";
+
+      package = lib.mkOption {
+        type = lib.types.package;
+        default = self.packages.${system}.ext-czottmann-pi-automode;
+        defaultText = lib.literalExpression "pi-nix's packages.ext-czottmann-pi-automode";
+        description = ''
+          The auto-mode extension derivation. Its `passthru.piEntrypoint`
+          becomes the `--extension` flag; the rest of this option block is
+          rendered to JSON and exported as `PI_AUTOMODE_SETTINGS_JSON`, which
+          is the package's highest-precedence config source.
+        '';
+      };
 
       allow = lib.mkOption {
         type = lib.types.listOf lib.types.str;
         default = [ ];
         description = ''
-          Things the operator has pre-approved, written as plain sentences for
-          the classifier to read. A call matching one of these proceeds.
+          Exceptions to `soft_deny`, written as plain sentences for the
+          classifier to read. They are exceptions, not grants: an action still
+          reaches the classifier, and no `allow` sentence clears a `hard_deny`.
+
+          These are appended to the package's built-in allow rules. The
+          rendered file leads with the `$defaults` sentinel, so the built-ins
+          survive; that is the same additive contract claude-nix applies to the
+          identical list.
         '';
         example = lib.literalExpression ''[ "reading or searching any file inside the working directory" ]'';
       };
@@ -570,9 +691,11 @@ in
         default = [ ];
         description = ''
           Destructive or irreversible actions that **explicit user intent
-          clears**. The classifier is shown the last `userTurnLimit` user turns
-          precisely so it can tell "delete the build dir" from the agent
-          deciding to delete something nobody asked about.
+          clears**. The classifier is shown recent user messages and the
+          agent's own tool-call inputs precisely so it can tell "delete the
+          build dir" from the agent deciding to delete something nobody asked
+          about. A tool result never counts as intent, ask-user tools included:
+          untrusted text must not be able to authorise anything.
         '';
         example = lib.literalExpression ''[ "deleting files the user did not name" ]'';
       };
@@ -582,9 +705,9 @@ in
         default = [ ];
         description = ''
           Security boundaries. User intent does not clear these and cannot: the
-          gate blocks a `hard_deny` even when the classifier answers `allow`,
-          so text injected into a tool call or a file cannot talk its way past
-          one.
+          classifier contract refuses `allow` on a `hard_deny` tier outright,
+          and an unparseable verdict blocks, so text injected into a tool call
+          or a file cannot talk its way past one.
         '';
         example = lib.literalExpression ''[ "reading private SSH keys, API tokens, or password stores" ]'';
       };
@@ -599,93 +722,202 @@ in
         example = lib.literalExpression ''[ "this is a NixOS machine; /nix/store is read-only" ]'';
       };
 
-      deterministic = {
-        allow = lib.mkOption {
-          type = lib.types.listOf lib.types.str;
-          default = [ ];
-          description = ''
-            Deterministic allow rules, resolved without a model call. Claude
-            Code's permission syntax: `Bash(git status:*)`, `Read(/home/joe/**)`.
-            A `:*` suffix is a whole-word prefix match.
+      protectedPaths = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [ ];
+        description = ''
+          Repository-relative paths whose writes always reach the classifier,
+          on top of the package's built-in list (`.git`, `.pi`, shell profiles,
+          package-manager configs, hook configs). This only matters when
+          `allowInsideWorkingDirectory` is on, which is what gives in-tree
+          writes a deterministic allow; a protected target is carved back out
+          of it.
+        '';
+        example = lib.literalExpression ''[ "flake.lock" ]'';
+      };
 
-            A bash command containing a shell control operator (`&&`, `;`, `|`,
-            `$(`, a backtick) can never be allowed by a prefix rule, because
-            `git status && rm -rf /` starts with `git status `. Such a command
-            falls through to the classifier instead.
-          '';
-          example = lib.literalExpression ''[ "Bash(git status:*)" "Read(/home/joe/**)" ]'';
-        };
+      deniedPaths = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [ ];
+        description = ''
+          Glob patterns the file tools (`read`, `write`, `edit`, `grep`,
+          `find`, `ls`) may never touch. Matched before the classifier and
+          before every fast path, against both the path as written and its
+          symlink-resolved form, so a secret never reaches the model through a
+          file read. `~`, `$HOME` and `''${HOME}` expand, and `*` matches `/`
+          as well, so `**/id_rsa` catches a key at any depth.
+
+          It governs file tools only. `bash` access to the same paths is the
+          classifier's and the deterministic hard-deny checks' problem, which
+          is an argument for writing the rule in both places.
+        '';
+        example = lib.literalExpression ''[ "~/.ssh/*" "*.env" ]'';
+      };
+
+      permissions = {
         deny = lib.mkOption {
           type = lib.types.listOf lib.types.str;
           default = [ ];
           description = ''
-            Deterministic deny rules, in the same syntax. Deny beats allow, and
-            unlike allow it still applies to a compound command: refusing to
-            deny would be the unsafe direction.
+            Tool patterns blocked before anything else runs, resolved without a
+            model call: `bash(rm -rf *)`, `write(.env*)`, `edit(.env*)`. Pi's
+            tool names are lowercase; the parser accepts `Bash(...)` too.
+
+            There is no matching allow list, by design. Every side-effecting
+            action goes to the classifier, so a prefix rule cannot be talked
+            into clearing `git status --short && rm -rf ...` the way a
+            Claude-Code-style allow list can.
           '';
-          example = lib.literalExpression ''[ "Bash(curl:*)" ]'';
+          example = lib.literalExpression ''[ "bash(git push --force*)" ]'';
+        };
+
+        ask = lib.mkOption {
+          type = lib.types.listOf lib.types.str;
+          default = [ ];
+          description = ''
+            Tool patterns that prompt before reaching the classifier, in the
+            same syntax. With no UI (`--print`, `--json`, a subagent) a match
+            blocks instead of asking, which is the fail-closed direction.
+          '';
+          example = lib.literalExpression ''[ "bash(git push *)" ]'';
         };
       };
 
-      model = lib.mkOption {
+      classifierModel = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        description = ''
+          Classifier model, as `provider/model-id` in pi's own spelling, the
+          left column of `pi --list-models`. Null uses the session's own model,
+          which is the cheapest thing to reason about and the most expensive to
+          run: the classifier fires on every side-effecting tool call and bills
+          at the session model's rate.
+
+          A model id that does not resolve is not a soft failure. The
+          classifier cannot run, so every action it would have judged is
+          blocked.
+        '';
+        example = "anthropic/claude-haiku-4-5";
+      };
+
+      classifierReasoningLevel = lib.mkOption {
         type = lib.types.nullOr (
-          lib.types.submodule {
-            options = {
-              provider = lib.mkOption {
-                type = lib.types.str;
-                description = "Provider id as pi knows it, for example `anthropic`.";
-              };
-              modelId = lib.mkOption {
-                type = lib.types.str;
-                description = "Model id within that provider.";
-              };
-            };
-          }
+          lib.types.enum [
+            "low"
+            "medium"
+            "high"
+            "xhigh"
+            "max"
+          ]
         );
         default = null;
         description = ''
-          Model used for classification. Null uses the session's own model,
-          which is the cheapest thing to reason about and the most expensive to
-          run, since it bills at the session model's rate.
-        '';
-        example = lib.literalExpression ''{ provider = "anthropic"; modelId = "claude-haiku-4-5"; }'';
-      };
+          Reasoning effort requested for both classifier stages. Null sends no
+          preference and leaves the choice to the provider. pi clamps a level
+          the model cannot serve, and a non-reasoning model resolves to `off`.
 
-      userTurnLimit = lib.mkOption {
-        type = lib.types.ints.positive;
-        default = 6;
-        description = ''
-          How many recent user turns the classifier is shown. Explicit user
-          intent clears `soft_deny`, and the classifier cannot judge intent it
-          cannot see.
+          Raising this without raising `fastClassifierMaxTokens` is a way to
+          fail closed on everything: reasoning tokens can consume the 512-token
+          fast-stage budget before the model emits the one digit that stage
+          exists to produce.
         '';
       };
 
-      timeoutMs = lib.mkOption {
-        type = lib.types.ints.positive;
-        default = 20000;
+      classifyReadOnlyTools = lib.mkOption {
+        type = lib.types.nullOr lib.types.bool;
+        default = null;
         description = ''
-          Classifier timeout. On expiry auto mode fails closed: with a UI it
-          asks, and in `print` or `json` mode it blocks.
+          Route `read`, `grep`, `find` and `ls` through the classifier as well.
+          Off by default: they are allowed once the permission rules and the
+          deterministic checks have had their say. Turning it on lets policy
+          refuse a read outside the trusted tree, and costs a model call on
+          every one of the agent's most frequent tools.
         '';
       };
 
-      delegateToPermissionSystem = lib.mkOption {
-        type = lib.types.bool;
-        default = false;
+      allowInsideWorkingDirectory = lib.mkOption {
+        type = lib.types.nullOr lib.types.bool;
+        default = null;
         description = ''
-          Delegate deterministic matching to `@gotgenes/pi-permission-system` by
-          registering pi-auto-mode on its authorizer chain, which fires only for
-          asks that package could not resolve. The built-in matcher stays as the
-          fallback when that extension is absent.
+          Allow file-tool access inside the working directory with no
+          classifier call, and send file access outside it to the classifier
+          including reads. The Codex and Claude Code "inside the sandbox is
+          silent, outside is reviewed" model. Writes and edits to protected
+          in-tree paths are carved out and still classified.
         '';
+      };
+
+      fastClassifierMaxTokens = lib.mkOption {
+        type = lib.types.nullOr lib.types.ints.positive;
+        default = null;
+        description = ''
+          Token budget for the one-token first stage. Null leaves the
+          package's default of 512. Must be at least 16.
+        '';
+      };
+
+      maxUserTranscriptTokens = lib.mkOption {
+        type = lib.types.nullOr lib.types.ints.positive;
+        default = null;
+        description = ''
+          Approximate budget for the user messages shown to the classifier.
+          Null leaves the package's default of 4000. Explicit user intent
+          clears `soft_deny`, and the classifier cannot judge intent it cannot
+          see, so this is the knob that decides how far back "the user asked
+          for this" reaches. Must be at least 32.
+        '';
+      };
+
+      maxToolTranscriptTokens = lib.mkOption {
+        type = lib.types.nullOr lib.types.ints.positive;
+        default = null;
+        description = ''
+          Approximate budget for the agent's own tool-call inputs shown to the
+          classifier. Null leaves the package's default of 4000. Assistant
+          prose and tool results are never included. Must be at least 32.
+        '';
+      };
+
+      log = {
+        enable = lib.mkOption {
+          type = lib.types.bool;
+          default = false;
+          description = ''
+            Write one JSONL line per decision, and a ccusage-compatible usage
+            line per classifier response, beside the session file as
+            `<session-id>-pi-automode.jsonl`. Off by default. Logging is
+            fail-open: a write error never changes a verdict.
+          '';
+        };
+
+        classifierIo = lib.mkOption {
+          type = lib.types.bool;
+          default = false;
+          description = ''
+            Also log the classifier's full prompt, raw responses and parsed
+            decision. The prompt carries the selected transcript evidence, so
+            this writes conversation content to disk. It is the same payload
+            the classifier endpoint already receives on every call, which is
+            the honest way to think about the privacy cost.
+          '';
+        };
+      };
+
+      settings = lib.mkOption {
+        type = lib.types.attrs;
+        internal = true;
+        readOnly = true;
+        description = "The rendered pi-automode settings, before serialisation.";
       };
 
       configFile = lib.mkOption {
         type = lib.types.nullOr lib.types.path;
         internal = true;
         readOnly = true;
-        description = "Rendered config handed to pi-auto-mode as PI_AUTO_MODE_CONFIG.";
+        description = ''
+          The store file whose contents the launcher exports as
+          PI_AUTOMODE_SETTINGS_JSON.
+        '';
       };
     };
 
@@ -1068,6 +1300,7 @@ in
 
     jail.permissions = lib.mkDefault jailPermissions;
 
+    autoMode.settings = autoModeSettings;
     autoMode.configFile = autoModeConfigFile;
     notifications.configFile = notifyConfigFile;
 

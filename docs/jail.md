@@ -67,13 +67,15 @@ set`. Every combinator in that list is written `combinators.x` for this reason.
 
 ## Config files
 
-`pi-auto-mode.json` and `pi-notify.json` are store paths interpolated into the
+`pi-automode.json` and `pi-notify.json` are store paths interpolated into the
 launcher script, so they enter its runtime closure and jail.nix binds them with
 the rest of the store closure. Verified:
 
-    nix path-info -r "$(…agent.package)" | grep -E 'pi-auto-mode\.json|pi-notify\.json'
+    nix path-info -r "$(…agent.package)" | grep -E 'pi-automode\.json|pi-notify\.json'
 
-prints both.
+prints both. The auto-mode one is read by `$(cat …)` into
+`PI_AUTOMODE_SETTINGS_JSON` before pi starts, so the bind has to be there even
+though nothing opens the file after launch.
 
 ## Verifying a change
 

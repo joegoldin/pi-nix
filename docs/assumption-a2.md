@@ -1,59 +1,101 @@
 # Assumption A2: is `tool_call` handler ordering observable?
 
-**The question does not arise.** Verified 2026-08-18 against the pinned
-`@gotgenes/pi-permission-system@26.3.0` tarball, not against its docs.
+**Yes, and it decides which gate runs.** Verified 2026-08-19 against pi
+0.84.2's own dispatch code and the pinned `@gotgenes/pi-permission-system`
+26.3.0 and `@czottmann/pi-automode` 1.11.0 tarballs, not against their docs.
 
-The package does not need ordering to cooperate with another extension. It
-publishes a typed `PermissionsService` on
-`Symbol.for("@gotgenes/pi-permission-system:service")` (`src/service.ts:66`) and
-exposes `registerAuthorizer(name, authorize)` (`dist/public.d.ts:532`), a chain
-seam invoked only for asks its deterministic engine could not resolve.
-`pi-auto-mode` registers there, so the classifier is layer 3 by construction
-rather than by luck.
+The original answer to this question was "it does not arise", on the strength
+of the permission system publishing a chain seam that the first-party
+`pi-auto-mode` registered on. That seam was real. The arrangement built on it
+was not.
 
-`pi-auto-mode` reads the symbol slot directly and never imports the package, so
-it has no dependency on it. When the extension is absent the slot is empty,
-`attachAuthorizer` answers `false`, and the built-in matcher in `src/rules.ts`
-runs. That is the fallback state design §9's build order asked to have shipped.
+## What pi actually does with two handlers
 
-Chain-link failure returns `defer`, never `allow`: deferring hands the ask back
-to the chain owner's own prompt path, which is that layer's fail-closed
-behaviour.
+`dist/core/extensions/runner.js`, `emitToolCall`:
 
-## Registration is not activation
+```js
+for (const ext of this.extensions) {
+  for (const handler of handlers) {
+    const handlerResult = await handler(event, ctx);
+    if (handlerResult) {
+      result = handlerResult;
+      if (result.block) return result;
+    }
+  }
+}
+```
 
-`registerAuthorizer`'s own docstring says the chain consults a link only when
-"the operator names it in the `authorizerChain` config". That config is
-`~/.pi/agent/extensions/pi-permission-system/config.json`, the package's own
-file, honouring `PI_CODING_AGENT_DIR`. It is **not** pi's `settings.json`, so
-neither `mkPiExtension`'s `passthru.settings` nor the module's `settings` option
-can write it.
+Every extension's handler runs, sequentially, in `--extension` order, and the
+first `{ block: true }` returns from both loops. Handlers after the blocker
+never run. A handler that returns nothing means "no opinion, keep going".
 
-So `programs.pi.coding-agent.autoMode.delegateToPermissionSystem = true` is half
-the wiring. The other half is an operator edit on the permission system's side:
+Both packages register there. The permission system wraps
+`gates.handleToolCall` in `createFailClosedToolCall` (`src/index.ts`);
+pi-automode registers its own `pi.on("tool_call", ...)`
+(`extensions/auto-mode/extension.ts`). The module concatenates
+`extEntrypoints` before `autoModeEntrypoints`, so the permission system is
+loaded first and answers first.
 
-    { "authorizerChain": ["pi-auto-mode"] }
+## Registration was never activation, and that is what shipped
 
-Phase 7 added `passthru.configFiles` to the extension contract for exactly this
-class of problem (a package whose settings live outside `settings.json`), and
-the launcher now installs every entry under `$PI_CODING_AGENT_DIR`. So the
-mechanism exists: giving `ext-gotgenes-pi-permission-system` a
+The permission system consults a chain link only when the operator names it in
+`authorizerChain`, in the package's own config file. With that list empty, the
+composed chain **is** the terminal authorizer
+(`src/authority/authorizer-chain.ts`: "with zero links the composed chain is
+the terminal instance"), which is the local user, which is a dialog.
 
-    configFiles."extensions/pi-permission-system/config.json" = {
-      authorizerChain = [ "pi-auto-mode" ];
-    };
+On the machine this fork is written for, that file read, in full:
 
-would write the chain entry from Nix, at 0600, on every launch. That edit is not
-made here, because `authorizerChain` is the operator's list rather than one
-extension's to claim: writing it unconditionally would silently overwrite a
-chain a consumer had ordered themselves. Wiring it to
-`autoMode.delegateToPermissionSystem` is the shape that fits, and it belongs
-with that option rather than with the messaging work that built the mechanism.
+```json
+{ "debugLog": false, "permissionReviewLog": true, "yoloMode": false }
+```
 
-Until then, `pi-auto-mode` does not disarm on the strength of a registration it
-cannot confirm was activated. With `delegated` true it stops classifying on
-`tool_call`, because the chain link would classify the same ask a second time,
-but it keeps running the deterministic **deny** list there. A deny costs no
-model call, so the duplication is free, and it means a forgotten
-`authorizerChain` entry costs the classifier rather than the operator's deny
-rules.
+No `authorizerChain`. So `delegateToPermissionSystem = true` registered a link
+that was never called, and every ask the deterministic engine could not settle
+went to a dialog — including `git status --short --branch`, a command the
+operator's own `allow` list names. The review log recorded it as
+`"decidedBy": {"kind": "user", "via": "dialog"}`. The option evaluated, the
+build was green, and the behaviour did not change.
+
+That is the failure mode: configuration that reads as intent and does nothing,
+because the half that arms it lives in another package's file.
+
+## Why the replacement does not have this problem, and what it costs
+
+`@czottmann/pi-automode` does not read
+`Symbol.for("@gotgenes/pi-permission-system:service")` and calls
+`registerAuthorizer` nowhere in its source. It cannot be a link in that chain,
+so there is no version of "delegate to the permission system" to configure, and
+`delegateToPermissionSystem` is gone rather than reworked.
+
+What remains is a straight contention: two extensions gating one event, the
+permission system first, prompting for what its engine cannot settle, and the
+classifier never consulted. Running both is the shipped defect with the
+packages swapped.
+
+So the module refuses. `autoMode.enable` together with
+`@gotgenes/pi-permission-system` in `extensionPackages` throws at eval, naming
+both ways out. The consumer's answer is to drop the permission system, which
+is what `modules/ai/pi.nix` in the dotfiles repo now does.
+
+What that loses: the permission system's session approvals ("allow this for
+the rest of the session"), its permission review log, its subagent forwarding,
+and its deterministic prefix-allow rules (`Bash(git status:*)`), which resolve
+without a model call. pi-automode has no allow-list fast path for `bash` at
+all. Every side-effecting call reaches the classifier, and its cheap first
+stage is one token wide precisely because that is the common case. What it
+gains is that the classifier is actually asked, a deterministic hard-deny list
+that runs before any model call, and a `hard_deny` tier the classifier is
+structurally unable to clear.
+
+## The mechanism the old note asked for still exists
+
+`passthru.configFiles` (phase 7) installs a package-owned config file under
+`$PI_CODING_AGENT_DIR` on every launch, and it is what would have written the
+`authorizerChain` entry that was missing. It is still there, still used by
+pi-intercom, and deliberately not used by auto mode: pi-automode's global
+config path is anchored to `$HOME` rather than to `PI_CODING_AGENT_DIR`, and it
+reads `PI_AUTOMODE_SETTINGS_JSON` as the highest-precedence source, so the
+rules travel as an immutable store file exported into the environment instead.
+A stale `~/.pi/agent/automode.json` from an earlier experiment cannot outrank
+them, which is this note's lesson applied to the thing that replaced it.
