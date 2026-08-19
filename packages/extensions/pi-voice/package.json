@@ -1,0 +1,20 @@
+{
+  "name": "pi-voice",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Dictation for pi, over audiomemo record --stream.",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "voice",
+    "dictation"
+  ],
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "scripts": {
+    "test": "bun test"
+  }
+}
