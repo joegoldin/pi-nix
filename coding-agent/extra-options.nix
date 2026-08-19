@@ -422,6 +422,15 @@ let
           pkgs.gnugrep
           pkgs.findutils
           pkgs.procps
+          # A second /doctor run inside the jail found these two. direnv is not
+          # a convenience: every repository on this machine that uses devenv
+          # hydrates its toolchain from a .envrc, and without direnv the agent
+          # gets the un-hydrated environment and then debugs the wrong thing.
+          # hostname is trivial and worth the byte anyway, because its absence
+          # reads as a broken machine rather than as a deliberate sandbox and
+          # sends whoever hits it looking for a fault that is not there.
+          pkgs.direnv
+          pkgs.hostname
         ]
         ++ nixRuntimeInputs
         ++ messagingRuntimeInputs

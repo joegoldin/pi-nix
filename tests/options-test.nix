@@ -484,13 +484,13 @@ assert
 # leaves pi with the `sh` jail.nix binds at /bin/sh and every bash-syntax
 # command reads as the model's mistake.
 assert lib.any (lib.hasPrefix "set-env:SHELL=") defaultPermissions;
-assert lib.elem "add-pkg-deps:18" defaultPermissions;
+assert lib.elem "add-pkg-deps:20" defaultPermissions;
 # nix is opt-in, and it is three binds rather than one package: without the
 # store and the daemon socket the binary is present and useless.
 assert !(lib.elem "try-readonly:/nix/store" defaultPermissions);
 assert lib.elem "try-readonly:/nix/store" nixPermissions;
 assert lib.elem "try-readwrite:/nix/var/nix/daemon-socket/socket" nixPermissions;
-assert lib.elem "add-pkg-deps:19" nixPermissions;
+assert lib.elem "add-pkg-deps:21" nixPermissions;
 # Enabled without a package must fail loudly rather than silently doing
 # nothing, because "notifications are on" and "no notifier exists" is exactly
 # the state a user would not notice.
