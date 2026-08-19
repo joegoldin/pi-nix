@@ -52,7 +52,28 @@ let
 
   extPkgs = cfg.extensionPackages;
 
-  extEntrypoints = lib.concatMap (p: p.passthru.piEntrypoint or [ ]) extPkgs;
+  # A package declares its entrypoints in package.json's `pi.extensions`, and
+  # handing pi the package directory loads every one of them. That is usually
+  # what you want, and occasionally not: pi-background-tasks ships
+  # anthropic-attribution.ts beside background-tasks.ts, and the attribution
+  # half refuses to let pi start at all unless the Anthropic credential is a
+  # subscription OAuth token, so a host on API keys gets a dead agent from an
+  # extension it installed for background bash.
+  #
+  # entrypointOverrides names the entrypoints to load, by package pname, and
+  # nothing else from that package is loaded. Paths are relative to the
+  # package root, matching the spelling in its package.json.
+  entrypointsOf =
+    p:
+    let
+      override = cfg.entrypointOverrides.${p.pname or ""} or null;
+    in
+    if override == null then
+      p.passthru.piEntrypoint or [ ]
+    else
+      map (e: "${p}/${lib.removePrefix "./" e}") override;
+
+  extEntrypoints = lib.concatMap entrypointsOf extPkgs;
   extSkills = lib.concatMap (p: p.passthru.piSkills or [ ]) extPkgs;
   extPrompts = lib.concatMap (p: p.passthru.piPrompts or [ ]) extPkgs;
 
@@ -442,6 +463,37 @@ in
           ext-pi-mcp-adapter
           ext-pi-subagents
         ]
+      '';
+    };
+
+    entrypointOverrides = lib.mkOption {
+      type = lib.types.attrsOf (lib.types.listOf lib.types.str);
+      default = { };
+      description = ''
+        Load only these entrypoints from a package, keyed by its `pname`.
+
+        A pi package declares its entrypoints in `package.json` under
+        `pi.extensions`, and handing pi the package directory loads all of
+        them. That is usually right. It is wrong when a package ships a second
+        extension you did not install it for, and that extension changes how pi
+        behaves.
+
+        The case this exists for: `pi-background-tasks` ships
+        `anthropic-attribution.ts` beside `background-tasks.ts`, and the
+        attribution half throws unless the Anthropic credential is a
+        subscription OAuth token. On a host authenticating with API keys it
+        stops pi from starting at all, including `pi auth check`, and neither
+        `--no-extensions` nor removing the environment variable reaches it,
+        because the launcher passes explicit `--extension` paths.
+
+        Paths are relative to the package root and are spelled as they appear
+        in the package's own `package.json`. Naming an entrypoint that does not
+        exist is not detected here; pi reports it at load.
+      '';
+      example = lib.literalExpression ''
+        {
+          pi-background-tasks = [ "./extensions/background-tasks.ts" ];
+        }
       '';
     };
 
