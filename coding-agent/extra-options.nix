@@ -329,6 +329,54 @@ let
     "extensions/pi-permission-system/config.json" = permissionSystemSettings;
   };
 
+  # pi-subagents resolves the permission system by package name so it can hand
+  # it to the child, and tries two locations in order: `npm/node_modules/<name>`
+  # and then `extensions/<name>` (its `resolvePermissionSystemExtension`). A Nix
+  # install populates neither, because the package lives in the store -- but the
+  # SECOND one exists anyway, since that is where `permissionSystemConfigFiles`
+  # writes config.json. The resolver finds that directory, demands a
+  # package.json it has no reason to contain, and refuses to spawn: subagents
+  # fail with "Permission-system package manifest is missing", which reads like
+  # a permission denial and is a failed path lookup.
+  #
+  # The manifest goes in the FIRST location, and putting it in the second
+  # instead would be a quiet mistake. `extensions/` is one of pi's discovery
+  # roots, and loader.js's rule 3 is that a subdirectory whose package.json
+  # carries a `pi` field is loaded -- so a manifest dropped next to that
+  # config.json would register the permission system a second time, on top of
+  # the `--extension` flag that already loads it. That directory is inert today
+  # precisely because it holds no manifest. `npm/node_modules` is not a
+  # discovery root; nothing walks it, and only a resolver asking for a name
+  # reads it.
+  #
+  # Keyed on the package being loaded at all rather than on `chainActive`: a
+  # subagent needs to find it whenever it is present, whether or not this
+  # config also names it as an authorizer link.
+  permissionSystemPackage = lib.findFirst (
+    p: lib.elem (p.pname or "") permissionSystemPnames
+  ) null extPkgs;
+
+  npmLinks = lib.optionalAttrs (permissionSystemPackage != null) {
+    "@gotgenes/pi-permission-system" = permissionSystemPackage;
+  };
+
+  # `ln -sfn` onto an existing real directory would link INSIDE it rather than
+  # replace it, so a directory pi's own package manager installed is left
+  # alone. Only an absent path or a symlink we own is (re)written, which also
+  # makes the store path follow the generation on every launch.
+  npmLinksPrelude = lib.concatStringsSep "\n" (
+    lib.mapAttrsToList (
+      name: drv:
+      # bash
+      ''
+        npm_link="$PI_CODING_AGENT_DIR/npm/node_modules/${name}"
+        if [ ! -e "$npm_link" ] || [ -L "$npm_link" ]; then
+          mkdir -p -m 0700 "$(dirname "$npm_link")"
+          ln -sfn ${lib.escapeShellArg "${drv}"} "$npm_link"
+        fi
+      '') npmLinks
+  );
+
   autoModeEntrypoints = lib.optionals autoMode.enable autoMode.package.passthru.piEntrypoint;
 
   # Design §9's outermost layer. Upstream's default is `[ network mount-cwd ]`,
@@ -537,13 +585,14 @@ let
   # A consumer who supplies their own package supplies their own launcher too.
   withConfigFiles =
     base:
-    if configFiles == { } then
+    if configFiles == { } && npmLinks == { } then
       base
     else
       pkgs.writeShellScriptBin "pi" # bash
         ''
           PI_CODING_AGENT_DIR="''${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"
           ${configFilesPrelude}
+          ${npmLinksPrelude}
           exec ${lib.escapeShellArg (lib.getExe base)} "$@"
         '';
 
