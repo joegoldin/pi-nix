@@ -92,3 +92,72 @@ The surviving mutant is the one thing this package's own suite does not defend.
 It is a real gap rather than a difference of opinion: the arm exists precisely
 for headless runs, `--print`, `--json`, and subagents, which is where nobody is
 watching.
+
+## Running both gates together
+
+Date: 2026-08-19
+Packages: the fork `joegoldin/pi-automode` at `v1.11.0-jg.1`, built as
+`packages.ext-czottmann-pi-automode`, and `@gotgenes/pi-permission-system`
+26.3.0, the pinned tarball.
+Harness: `scripts/automode-e2e/pair-cases.sh` and `run-pair-case.sh`.
+
+The thirteen cases above answer "does auto mode work". They were run with one
+extension loaded, because at the time the module refused the other one. It does
+not refuse it any more, so there is a second question, and it is the one that
+actually mattered: does auto mode work *beside* the permission system, with the
+permission system's deterministic engine still resolving what it can and the
+classifier reached as a chain link rather than a dialog.
+
+Same fake provider, same request log, one addition: the permission system's
+config file is written at the path it reads it from
+(`$PI_CODING_AGENT_DIR/extensions/pi-permission-system/config.json`) and each
+case chooses its contents. Auto mode is passed to `--extension` first, which is
+the order `coding-agent/extra-options.nix` builds.
+
+The new column is `decidedBy`, from the permission system's own review log. It
+records what decided a request at the site that decided it, so "a rule matched",
+"a chain link ruled", and "a human answered a dialog" are three distinguishable
+facts rather than one inference from an event name. The complaint this whole
+piece of work started from was a dialog for `git status --short --branch`,
+recorded as `"decidedBy": {"kind": "user", "via": "dialog"}`.
+
+| # | Behaviour | Classifier | `decidedBy` | Result |
+| --- | --- | --- | --- | --- |
+| 1 | `git status --short --branch`, named in the operator's own allow rules | not consulted | *(no request raised)* | **pass.** Ran, output `## No commits yet on main`. No ask, no prompt, no model call. |
+| 2 | a rule deny still resolves before the chain | not consulted | `{"kind":"rule","surface":"bash","pattern":"rm *","origin":"global"}` | **pass.** `[pi-permission-system] Denied by policy`, canary intact. |
+| 3 | an ask the engine cannot settle reaches the link | consulted, both stages | `{"kind":"authorizer","name":"pi-automode","verdict":"allow"}` | **pass.** `authorizer_chain_resolved {"links":["pi-automode"]}`, and `RAN_FOR_REAL` is on disk. |
+| 4 | the same path with a block verdict | consulted | `{"kind":"authorizer","name":"pi-automode","verdict":"deny","reason":"[pi-automode] e2e says block"}` | **pass.** Canary intact. |
+| 5 | `hard_deny` holds against a classifier `allow` | consulted, three attempts | `{"kind":"authorizer",…,"verdict":"deny"}` | **pass.** `{"decision":"allow","tier":"hard_deny"}` is not a valid verdict; the retry produced the same thing and the call was refused. |
+| 6 | unparseable reply fails closed | consulted | `{"kind":"authorizer",…,"verdict":"deny"}` | **pass.** Prose instead of JSON. |
+| 7 | provider error fails closed | consulted, fast stage only | `{"kind":"authorizer",…,"verdict":"deny"}` | **pass.** HTTP 500 at the fast stage. |
+| 8 | auto mode's own deny list bites a command the permission system allows | not consulted | *(blocked before any request)* | **pass.** `[pi-automode] Blocked by permissions.deny: bash(sudo *)` with `bash: {"*": "allow"}` configured on the other side. |
+| 9 | the deterministic hard-deny checks, likewise | not consulted | *(blocked before any request)* | **pass.** `[pi-automode] shell profile modification is hard-denied`. |
+| 10 | **control:** the same file without the `authorizerChain` entry | not consulted | `{"kind":"unavailable","reason":"No live authority was reachable for this session"}` | **pass, and it is the important one.** Identical in every other respect to case 3. The link is registered and is never called. |
+
+Case 10 is what makes the other nine mean anything. Registration is not
+activation: the permission system consults a link only when the operator names
+it in `authorizerChain`, and with the name absent the composed chain *is* the
+terminal authority. In a `--print` run that authority is unreachable, so the ask
+is refused; in a TUI it is a dialog, which is the shipped defect this replaces.
+The only difference between case 3 and case 10 is one array in one file, and it
+decides whether the classifier is consulted at all.
+
+Cases 8 and 9 are the delegated pre-pass. In delegated mode auto mode's own
+`tool_call` handler runs only the tiers that cost no model call — the operator's
+deny list, the deterministic hard-deny checks, the path deny list — and holds
+the classifier for the chain link. So a permission-system `allow` cannot wave
+past a rule the operator wrote on the auto-mode side, and no action is
+classified twice. Case 1 is the other half of that: the classifier is not
+consulted for anything the permission system's rules already settle, which is
+the prefix-allow fast path auto mode has no equivalent of and the reason for
+running the two together at all.
+
+### What the pairing does not cover
+
+The chain owner caps a link's verdict at a bounded-delegation checkpoint: an
+`allow` from a link on the `path` or `external_directory` surface is downgraded
+to `defer` (`src/authority/delegation-envelope.ts`), so it falls through to the
+terminal — a dialog. A `deny` is not capped. So the classifier can refuse an
+outside-the-tree file access but cannot approve one; that stays a prompt no
+matter what auto mode thinks. `bash`, `tool`, `mcp` and `skill` asks are not
+capped, and bash is where the volume is.

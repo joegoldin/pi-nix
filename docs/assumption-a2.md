@@ -1,13 +1,18 @@
 # Assumption A2: is `tool_call` handler ordering observable?
 
-**Yes, and it decides which gate runs.** Verified 2026-08-19 against pi
-0.84.2's own dispatch code and the pinned `@gotgenes/pi-permission-system`
-26.3.0 and `@czottmann/pi-automode` 1.11.0 tarballs, not against their docs.
+**Yes, and it decides which gate runs — which is why the answer is not to
+order them.** Verified 2026-08-19 against pi 0.84.2's own dispatch code and the
+pinned `@gotgenes/pi-permission-system` 26.3.0 and `@czottmann/pi-automode`
+1.11.0 tarballs, not against their docs.
 
-The original answer to this question was "it does not arise", on the strength
-of the permission system publishing a chain seam that the first-party
-`pi-auto-mode` registered on. That seam was real. The arrangement built on it
-was not.
+This note has been wrong twice, in opposite directions. The first answer was
+"it does not arise", on the strength of the permission system publishing a
+chain seam that the first-party `pi-auto-mode` registered on. That seam was
+real; the arrangement built on it was not, because registering a link is not
+the same as activating one. The second answer was that the two packages cannot
+be composed at all, which mistook a property of the published pi-automode for a
+property of the problem. Both are corrected below: the seam is the answer, the
+missing half is a config entry, and Nix now writes it.
 
 ## What pi actually does with two handlers
 
@@ -60,42 +65,84 @@ build was green, and the behaviour did not change.
 That is the failure mode: configuration that reads as intent and does nothing,
 because the half that arms it lives in another package's file.
 
-## Why the replacement does not have this problem, and what it costs
+## The fork, and what it costs
 
 `@czottmann/pi-automode` does not read
 `Symbol.for("@gotgenes/pi-permission-system:service")` and calls
-`registerAuthorizer` nowhere in its source. It cannot be a link in that chain,
-so there is no version of "delegate to the permission system" to configure, and
-`delegateToPermissionSystem` is gone rather than reworked.
+`registerAuthorizer` nowhere in its source, so as published it cannot be a link
+in that chain. That was read as "the two cannot be composed", and the module
+threw when both were configured. The reading was wrong: what upstream cannot do
+is a property of upstream, and this repo already forks pi.nix for exactly this
+class of problem.
 
-What remains is a straight contention: two extensions gating one event, the
-permission system first, prompting for what its engine cannot settle, and the
-classifier never consulted. Running both is the shipped defect with the
-packages swapped.
+`joegoldin/pi-automode` v1.11.0-jg.1 adds one module,
+`extensions/auto-mode/permission-chain.ts`, and six lines in the entrypoint.
+`extensions/auto-mode/extension.ts` — the file holding the decision pipeline —
+is upstream's byte for byte. The wrapper intercepts the factory's
+`pi.on("tool_call", …)` registration rather than editing the handler, and calls
+that same handler from the chain link, so a verdict the link returns and a
+verdict the standalone gate returns come from one piece of code and cannot
+drift. `packages/extensions/czottmann-pi-automode.nix` builds it from the tag;
+the fork's own `docs/REBASING.md` names what an upstream change would cost.
 
-So the module refuses. `autoMode.enable` together with
-`@gotgenes/pi-permission-system` in `extensionPackages` throws at eval, naming
-both ways out. The consumer's answer is to drop the permission system, which
-is what `modules/ai/pi.nix` in the dotfiles repo now does.
+Three properties the module is built around:
 
-What that loses: the permission system's session approvals ("allow this for
-the rest of the session"), its permission review log, its subagent forwarding,
-and its deterministic prefix-allow rules (`Bash(git status:*)`), which resolve
-without a model call. pi-automode has no allow-list fast path for `bash` at
-all. Every side-effecting call reaches the classifier, and its cheap first
-stage is one token wide precisely because that is the common case. What it
-gains is that the classifier is actually asked, a deterministic hard-deny list
-that runs before any model call, and a `hard_deny` tier the classifier is
-structurally unable to clear.
+- **Absent means inert.** The symbol slot is read off `globalThis` rather than
+  imported. With the permission system not installed the slot is empty, nothing
+  registers, and the gate runs exactly as upstream's does. There is no
+  dependency in either direction.
+- **One pipeline.** The link reviews the real tool-call event — auto mode is
+  loaded ahead of the permission system so its handler sees the call before the
+  ask is raised — and returns whatever the gate returns. In delegated mode the
+  gate itself runs only the tiers that cost no model call, so nothing is
+  classified twice and the permission system's own deterministic rules still
+  resolve what they can.
+- **`defer`, never `allow`, on failure.** A chain link that fails open widens
+  permissions. A fail-closed *block* from the pipeline is a verdict and travels
+  as a `deny`; an exception inside the link is not, and travels as a `defer`,
+  which hands the ask back to the chain owner's own prompt.
 
-## The mechanism the old note asked for still exists
+## Registration is still not activation, and now Nix writes the file
+
+The trap that produced F307 has not gone anywhere. A registered link decides
+nothing until the operator names it in `authorizerChain`, and that file belongs
+to the other package. What changed is who writes it:
+`pi.coding-agent.autoMode.permissionSystem` renders
+`extensions/pi-permission-system/config.json` through phase 7's
+`configFiles`, which is the mechanism this note asked for the first time round.
+An `authorizerChain` written by hand that omits the link is refused at eval
+rather than installed.
+
+`scripts/automode-e2e/pair-cases.sh` case 10 is the standing proof that the
+entry is load-bearing: identical to case 3 in every respect except that array,
+and the classifier is never consulted. `docs/automode-acceptance.md` has the
+whole run.
+
+## What the pairing costs, and what it buys
+
+It costs the bounded-delegation checkpoint. The chain owner downgrades a link's
+`allow` on the `path` and `external_directory` surfaces to `defer`
+(`src/authority/delegation-envelope.ts`), so the classifier can refuse an
+outside-the-tree file access but cannot approve one; that stays a prompt. `bash`
+is not capped, and bash is where the volume is.
+
+It buys back everything dropping the permission system had cost: session
+approvals, the permission review log, subagent forwarding, and deterministic
+prefix-allow rules such as `Bash(git status:*)` that resolve with no model call.
+pi-automode has no allow-list fast path for `bash` at all, so on its own every
+side-effecting call reaches the classifier. Now the rules resolve what they can
+and the classifier answers what they cannot.
+
+## The mechanism the old note asked for is in use
 
 `passthru.configFiles` (phase 7) installs a package-owned config file under
-`$PI_CODING_AGENT_DIR` on every launch, and it is what would have written the
-`authorizerChain` entry that was missing. It is still there, still used by
-pi-intercom, and deliberately not used by auto mode: pi-automode's global
-config path is anchored to `$HOME` rather than to `PI_CODING_AGENT_DIR`, and it
-reads `PI_AUTOMODE_SETTINGS_JSON` as the highest-precedence source, so the
-rules travel as an immutable store file exported into the environment instead.
-A stale `~/.pi/agent/automode.json` from an earlier experiment cannot outrank
-them, which is this note's lesson applied to the thing that replaced it.
+`$PI_CODING_AGENT_DIR` on every launch. It is what writes the `authorizerChain`
+entry that was missing, alongside pi-intercom's `inboundTrigger`.
+
+It is still the wrong mechanism for auto mode's *own* config, and for the reason
+F308 gives: that contract installs relative to `PI_CODING_AGENT_DIR`, while
+pi-automode's global config path is `resolve(HOME, ".pi/agent/automode.json")`
+(`constants.ts`), anchored to the home directory. They agree by default and only
+by default. The rules travel as `PI_AUTOMODE_SETTINGS_JSON` instead, which the
+package treats as its highest-precedence source, so a stale
+`~/.pi/agent/automode.json` from an earlier experiment cannot outrank them.
