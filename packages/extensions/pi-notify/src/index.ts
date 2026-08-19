@@ -19,8 +19,6 @@ import {
 	notifierArgs,
 } from "./notifier.ts";
 
-/** pi-auto-mode's channel; see packages/extensions/pi-auto-mode/src/config.ts. */
-export const AUTO_MODE_PROMPT_CHANNEL = "pi-auto-mode:prompt";
 /** @gotgenes/pi-permission-system's PERMISSIONS_UI_PROMPT_CHANNEL. */
 export const PERMISSIONS_UI_PROMPT_CHANNEL = "permissions:ui_prompt";
 /**
@@ -94,7 +92,6 @@ export function registerHandlers(pi: NotifyHost, config: NotifyConfig, now: () =
 				if (handle !== null) live.set(requestId, handle);
 			})();
 		};
-		pi.events.on(AUTO_MODE_PROMPT_CHANNEL, onPrompt);
 		pi.events.on(PERMISSIONS_UI_PROMPT_CHANNEL, onPrompt);
 
 		if (config.dismissOnResolve) {

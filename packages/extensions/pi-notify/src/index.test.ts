@@ -1,7 +1,6 @@
 import { describe, expect, it, mock } from "bun:test";
 import { DEFAULT_CONFIG } from "./config.ts";
 import {
-	AUTO_MODE_PROMPT_CHANNEL,
 	PERMISSIONS_DECISION_CHANNEL,
 	PERMISSIONS_UI_PROMPT_CHANNEL,
 	registerHandlers,
@@ -61,10 +60,10 @@ describe("registerHandlers", () => {
 		expect(args).toContain("pi");
 	});
 
-	it("notifies on a pi-auto-mode prompt event with critical urgency", async () => {
+	it("raises a permission prompt at critical urgency", async () => {
 		const h = host();
 		registerHandlers(h as never, config, () => 0);
-		h.emit(AUTO_MODE_PROMPT_CHANNEL, { toolName: "bash", toolCallId: "c1", value: "rm -rf /", detail: "429" });
+		h.emit(PERMISSIONS_UI_PROMPT_CHANNEL, { requestId: "r1", surface: "bash", value: "rm -rf /" });
 		await settle();
 		expect(h.exec).toHaveBeenCalledTimes(1);
 		expect(h.exec.mock.calls[0]![1]).toContain("critical");
@@ -133,7 +132,7 @@ describe("registerHandlers", () => {
 			() => 0,
 		);
 		expect(h.handlers.has("agent_settled")).toBe(false);
-		expect(h.channels.has(AUTO_MODE_PROMPT_CHANNEL)).toBe(false);
+		expect(h.channels.has(PERMISSIONS_UI_PROMPT_CHANNEL)).toBe(false);
 		expect(h.handlers.has("tool_execution_start")).toBe(true);
 	});
 
@@ -264,10 +263,6 @@ describe("dismissing a permission notification once the ask is answered", () => 
 });
 
 describe("the channel names pi-notify listens on", () => {
-	it("matches pi-auto-mode's exported literal", () => {
-		expect(AUTO_MODE_PROMPT_CHANNEL).toBe("pi-auto-mode:prompt");
-	});
-
 	it("matches pi-permission-system's PERMISSIONS_UI_PROMPT_CHANNEL", () => {
 		expect(PERMISSIONS_UI_PROMPT_CHANNEL).toBe("permissions:ui_prompt");
 	});
