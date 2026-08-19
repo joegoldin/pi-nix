@@ -184,6 +184,12 @@ let
       # path would have needed.
       (combinators.add-pkg-deps (
         [
+          # Upstream's own settings prelude runs `cmp -s` bare, while every
+          # other tool it calls is a resolved store path. Outside a jail the
+          # ambient PATH covers that; inside --clearenv it does not, and pi
+          # exits before it starts with "cmp: command not found". cmp is in
+          # diffutils, not coreutils, so prepending coreutils does not reach it.
+          pkgs.diffutils
           pkgs.gitMinimal
           pkgs.openssh
           pkgs.gnumake
