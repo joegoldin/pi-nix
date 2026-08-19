@@ -98,7 +98,7 @@ This fork adds:
 | `notifications.appName` | str | `pi` | Title, and the `--app-name` the desktop groups by. |
 | `notifications.events` | `[enum]` | all three | `needs_input`, `settled`, `long_running_tool`. |
 | `notifications.longRunningToolSeconds` | int | `30` | Threshold for `long_running_tool`. |
-| `autoMode.enable` | bool | `false` | The `@czottmann/pi-automode` guardrail. Conflicts with `@gotgenes/pi-permission-system`; see `docs/assumption-a2.md`. |
+| `autoMode.enable` | bool | `false` | The `@czottmann/pi-automode` guardrail, built from the fork that can chain beside `@gotgenes/pi-permission-system`; see `docs/assumption-a2.md`. |
 | `autoMode.package` | package | `ext-czottmann-pi-automode` | The auto-mode extension derivation. |
 | `autoMode.allow` | `[str]` | `[ ]` | Exceptions to `soft_deny`, as plain sentences for the classifier. A non-empty list replaces the package's built-ins; add `$defaults` to keep them. |
 | `autoMode.soft_deny` | `[str]` | `[ ]` | Destructive actions that explicit user intent clears. |
@@ -256,10 +256,20 @@ stale `~/.pi/agent/automode.json` cannot outrank the declared policy. pi-notify
 takes the same shape for the same reason, as `PI_NOTIFY_CONFIG`: pi's
 `ExtensionContext` exposes no settings reader.
 
-Auto mode and `@gotgenes/pi-permission-system` cannot both run. Both gate
-`tool_call`, pi stops at the first extension that blocks, and the permission
-system loads first. Enabling both throws at eval; `docs/assumption-a2.md` has
-the evidence and what dropping the permission system costs.
+Auto mode and `@gotgenes/pi-permission-system` both gate `tool_call`, and pi
+stops at the first extension that blocks, so on their own they contend rather
+than compose. `autoMode.package` is a fork of pi-automode that registers on the
+permission system's authorizer chain, which is the seam that package publishes
+for exactly this, and `autoMode.permissionSystem` writes the config entry that
+arms it. Enabled together, the permission system's flat rules resolve what they
+can with no model call and the classifier answers the rest as a chain link.
+`docs/assumption-a2.md` has the evidence and the one thing the pairing costs.
+
+| Option | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `autoMode.permissionSystem.enable` | bool | `true` | Register the chain link and write the config naming it, when both extensions are enabled. |
+| `autoMode.permissionSystem.authorizerName` | str | `pi-automode` | The link name, which has to match the one the extension registers under. |
+| `autoMode.permissionSystem.settings` | attrs | the package's three defaults | The whole of that package's `config.json`, minus the computed `authorizerChain`. The launcher installs it whole, so anything you want kept has to be named here. |
 
 ### The jail
 
@@ -288,6 +298,7 @@ Pinned extensions are exposed as `packages.<system>.ext-<slug>`:
 | `ext-narumitw-pi-btw` | `@narumitw/pi-btw` | side questions off the main thread |
 | `ext-pi-cache-optimizer` | `pi-cache-optimizer` | prefix-cache hit rate |
 | `ext-heyhuynhgiabuu-pi-pretty` | `@heyhuynhgiabuu/pi-pretty` | TUI syntax highlighting |
+| `ext-czottmann-pi-automode` | `@czottmann/pi-automode` | the auto-mode classifier, built from `joegoldin/pi-automode` rather than from npm, because upstream cannot register on the permission system's chain |
 
 Two more are first-party, built from `packages/extensions/` in this repo rather
 than from a pin. They carry no lockfile because they have no runtime
