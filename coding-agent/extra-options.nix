@@ -152,22 +152,19 @@ let
   autoMode = cfg.autoMode;
 
   # `$defaults` is pi-automode's sentinel for "keep this section's built-in
-  # rules and add mine". Omitting it REPLACES them, and an empty list counts as
-  # omitting (docs/defaults.md, and config.ts's applyRuleSetting: any array at
-  # all sets `seen`), so a section nobody configured must not be written at
-  # all. Prepending it is the same additive contract claude-nix's
-  # mergeClaudeSettings applies to the identical four lists, which is what lets
-  # one rule set feed both agents. A caller who spells `$defaults` themselves
-  # keeps their own placement; nobody can drop the built-ins from Nix, which is
-  # the safe direction for a deny list.
-  withDefaults =
-    rules:
-    if rules == [ ] then
-      null
-    else if lib.elem "$defaults" rules then
-      rules
-    else
-      [ "$defaults" ] ++ rules;
+  # rules as well as mine". It is not written here. A rule list arriving from
+  # Nix is the operator's whole policy for that section, and prepending the
+  # sentinel would union it with a stranger's prose that changes on every
+  # version bump. A caller who wants the built-ins says so by putting
+  # `$defaults` in the list themselves, which is the sensible answer for
+  # `protectedPaths`, a fixed path gate, and rarely the right one for the four
+  # prose lists.
+  #
+  # An empty list is not the same as no list. Any array at all sets `seen` in
+  # the package's accumulator (config.ts's applyRuleSetting), so `[ ]` would
+  # read as "replace the built-ins with nothing". A section nobody configured
+  # is left out of the rendered file entirely.
+  passRules = rules: if rules == [ ] then null else rules;
 
   # Only what the operator actually set. Every key omitted here falls through
   # to the package's own default, which is the value its docs describe; writing
@@ -218,13 +215,13 @@ let
         maxUserTranscriptTokens
         maxToolTranscriptTokens
         ;
-      environment = withDefaults autoMode.environment;
-      allow = withDefaults autoMode.allow;
-      soft_deny = withDefaults autoMode.soft_deny;
-      hard_deny = withDefaults autoMode.hard_deny;
-      protectedPaths = withDefaults autoMode.protectedPaths;
-      # No `$defaults` here: deniedPaths ships no built-in entries, and the
-      # sentinel is accepted there only for consistency.
+      environment = passRules autoMode.environment;
+      allow = passRules autoMode.allow;
+      soft_deny = passRules autoMode.soft_deny;
+      hard_deny = passRules autoMode.hard_deny;
+      protectedPaths = passRules autoMode.protectedPaths;
+      # deniedPaths ships no built-in entries at all, so there is nothing for a
+      # sentinel to keep.
       inherit (autoMode) deniedPaths;
     };
   }
@@ -760,10 +757,9 @@ in
           classifier to read. They are exceptions, not grants: an action still
           reaches the classifier, and no `allow` sentence clears a `hard_deny`.
 
-          These are appended to the package's built-in allow rules. The
-          rendered file leads with the `$defaults` sentinel, so the built-ins
-          survive; that is the same additive contract claude-nix applies to the
-          identical list.
+          A non-empty list REPLACES the package's built-in allow rules rather
+          than adding to them. Put the literal `$defaults` in the list to keep
+          them as well. Leaving the option empty leaves the built-ins alone.
         '';
         example = lib.literalExpression ''[ "reading or searching any file inside the working directory" ]'';
       };
@@ -808,9 +804,11 @@ in
         type = lib.types.listOf lib.types.str;
         default = [ ];
         description = ''
-          Repository-relative paths whose writes always reach the classifier,
-          on top of the package's built-in list (`.git`, `.pi`, shell profiles,
-          package-manager configs, hook configs). This only matters when
+          Repository-relative paths whose writes always reach the classifier.
+          A non-empty list replaces the package's built-in list (`.git`, `.pi`,
+          shell profiles, package-manager configs, hook configs, build-wrapper
+          properties); write `$defaults` as the first entry to keep it and add
+          to it, which is usually what this list wants. It only matters when
           `allowInsideWorkingDirectory` is on, which is what gives in-tree
           writes a deterministic allow; a protected target is carved back out
           of it.

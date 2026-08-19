@@ -100,11 +100,11 @@ This fork adds:
 | `notifications.longRunningToolSeconds` | int | `30` | Threshold for `long_running_tool`. |
 | `autoMode.enable` | bool | `false` | The `@czottmann/pi-automode` guardrail. Conflicts with `@gotgenes/pi-permission-system`; see `docs/assumption-a2.md`. |
 | `autoMode.package` | package | `ext-czottmann-pi-automode` | The auto-mode extension derivation. |
-| `autoMode.allow` | `[str]` | `[ ]` | Exceptions to `soft_deny`, as plain sentences for the classifier. Appended to the package's built-ins. |
+| `autoMode.allow` | `[str]` | `[ ]` | Exceptions to `soft_deny`, as plain sentences for the classifier. A non-empty list replaces the package's built-ins; add `$defaults` to keep them. |
 | `autoMode.soft_deny` | `[str]` | `[ ]` | Destructive actions that explicit user intent clears. |
 | `autoMode.hard_deny` | `[str]` | `[ ]` | Security boundaries. Intent does not clear these and cannot. |
 | `autoMode.environment` | `[str]` | `[ ]` | Facts about the machine. Not permissions. |
-| `autoMode.protectedPaths` | `[str]` | `[ ]` | Paths whose writes always reach the classifier, on top of the built-in list. |
+| `autoMode.protectedPaths` | `[str]` | `[ ]` | Paths whose writes always reach the classifier. `$defaults` keeps the built-in 48. |
 | `autoMode.deniedPaths` | `[str]` | `[ ]` | Globs the file tools may never touch, matched before any classifier or fast path. |
 | `autoMode.permissions.deny` | `[str]` | `[ ]` | Tool patterns blocked with no model call: `bash(rm -rf *)`, `write(.env*)`. |
 | `autoMode.permissions.ask` | `[str]` | `[ ]` | Tool patterns that prompt first. With no UI a match blocks. |

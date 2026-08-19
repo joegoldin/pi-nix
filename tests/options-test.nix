@@ -192,14 +192,14 @@ let
 
   autoJson = autoOn.autoMode.settings;
 
-  # A caller who spells the sentinel themselves keeps their own placement, and
-  # nothing is prepended twice.
+  # A caller who wants the built-ins says so, and the sentinel travels
+  # untouched in the position they wrote it.
   autoExplicitDefaults = evalPi {
     pi.coding-agent.autoMode = {
       enable = true;
-      allow = [
-        "a first rule"
+      protectedPaths = [
         "$defaults"
+        ".claude"
       ];
     };
   };
@@ -370,26 +370,23 @@ assert !(autoOn.finalConfigFiles ? "automode.json");
 assert builtins.fromJSON (builtins.readFile autoOn.autoMode.configFile) == autoJson;
 # Every rule list reaches the rendered JSON under the key the extension reads,
 # including the two underscore-cased ones the classifier prompt names verbatim,
-# and each leads with the sentinel that keeps the package's built-in rules.
+# and each one verbatim: what Nix declares is the whole policy for that
+# section, with no sentinel spliced in on the operator's behalf.
 assert autoJson.autoMode.enabled == true;
 assert
   autoJson.autoMode.allow == [
-    "$defaults"
     "reading anything under the working directory"
   ];
 assert
   autoJson.autoMode.soft_deny == [
-    "$defaults"
     "deleting files the user did not name"
   ];
 assert
   autoJson.autoMode.hard_deny == [
-    "$defaults"
     "reading private SSH keys"
   ];
 assert
   autoJson.autoMode.environment == [
-    "$defaults"
     "this is a NixOS machine"
   ];
 # deniedPaths has no built-in entries, so the sentinel would only be noise.
@@ -412,9 +409,9 @@ assert !(autoJson.autoMode ? maxToolTranscriptTokens);
 # "replace the built-ins with nothing".
 assert !(autoJson.autoMode ? protectedPaths);
 assert
-  autoExplicitDefaults.autoMode.settings.autoMode.allow == [
-    "a first rule"
+  autoExplicitDefaults.autoMode.settings.autoMode.protectedPaths == [
     "$defaults"
+    ".claude"
   ];
 assert autoWithPermissionSystem.success == false;
 # The shell pi's tool calls actually reach. Without bash on PATH, --clearenv
