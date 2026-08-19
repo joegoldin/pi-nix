@@ -173,7 +173,10 @@
       apps = forEachSystem (
         system:
         let
-          pkgs = import nixpkgs { inherit system; };
+          pkgs = import nixpkgs {
+            inherit system;
+            overlays = [ bun2nix.overlays.default ];
+          };
 
           syncUpstream = import ./sync-upstream.nix {
             inherit pkgs;
@@ -184,8 +187,17 @@
             inherit pkgs;
           };
 
+          updateExtensions = import ./update-extensions.nix {
+            inherit pkgs;
+          };
+
           update = import ./update.nix {
-            inherit pkgs regenerateModels syncUpstream;
+            inherit
+              pkgs
+              regenerateModels
+              syncUpstream
+              updateExtensions
+              ;
           };
 
           scan = import ./scan.nix { inherit pkgs; };
@@ -202,6 +214,10 @@
           regenerate-models = {
             type = "app";
             program = "${regenerateModels}/bin/pi-regenerate-models";
+          };
+          update-extensions = {
+            type = "app";
+            program = "${updateExtensions}/bin/pi-update-extensions";
           };
           scan = {
             type = "app";

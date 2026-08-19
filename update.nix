@@ -2,6 +2,7 @@
   pkgs,
   regenerateModels,
   syncUpstream,
+  updateExtensions,
 }:
 
 pkgs.writeShellApplication {
@@ -9,6 +10,7 @@ pkgs.writeShellApplication {
   runtimeInputs = [
     regenerateModels
     syncUpstream
+    updateExtensions
   ];
   text = # bash
     ''
@@ -16,5 +18,6 @@ pkgs.writeShellApplication {
 
       pi-sync-upstream
       pi-regenerate-models
+      pi-update-extensions
     '';
 }

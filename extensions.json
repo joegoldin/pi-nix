@@ -5,7 +5,9 @@
     "hash": "sha512-6/KDXIEPXTVM77274jAloxAo9AQSEy5EJ/7afIlUK2T8HOfeVapTJvwImvyChiIH+0gGShbFgnBK2BXFrjbj2w==",
     "bundled": false,
     "entrypoints": [],
-    "skills": ["skills"],
+    "skills": [
+      "skills"
+    ],
     "prompts": []
   },
   "pi-subagents": {
@@ -14,8 +16,12 @@
     "hash": "sha512-qC9ndnMbuHefE6mGS2k69jP4htgbiQQG5jGnwCuKyK/pMcz5RFZ5nChrJ6JxPOBlpmVxsQzW27MCh0HDJCXxsA==",
     "bundled": false,
     "entrypoints": [],
-    "skills": ["skills"],
-    "prompts": ["prompts"]
+    "skills": [
+      "skills"
+    ],
+    "prompts": [
+      "prompts"
+    ]
   },
   "pi-background-tasks": {
     "version": "2.4.2",
