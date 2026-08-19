@@ -95,12 +95,19 @@
                   --output $out/index.html
               '';
         }
+        // import ./packages/extensions { inherit pkgs bunPkgs; }
       );
 
       checks = forEachSystem (
         system:
         let
-          pkgs = import nixpkgs { inherit system; };
+          # bun2nix's overlay, because tests/extensions-test.nix instantiates
+          # mkPiExtension against this pkgs. The overlay only adds `bun2nix`,
+          # so every other check sees the nixpkgs it saw before.
+          pkgs = import nixpkgs {
+            inherit system;
+            overlays = [ bun2nix.overlays.default ];
+          };
         in
         import ./tests {
           inherit pkgs self jail-nix;

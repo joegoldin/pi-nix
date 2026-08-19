@@ -1,0 +1,70 @@
+{
+  pkgs,
+  # nixpkgs with bun2nix.overlays.default applied. Defaults to pkgs so a caller
+  # that already applied the overlay can pass one argument.
+  bunPkgs ? pkgs,
+  lib ? pkgs.lib,
+}:
+# Every pin in extensions.json becomes packages.ext-<slug>. The pin file is
+# read with fromJSON/readFile, never through IFD, so `nix flake show` stays
+# evaluable offline.
+let
+  pins = builtins.fromJSON (builtins.readFile ../../extensions.json);
+
+  mkPiExtension = bunPkgs.callPackage ./mk-pi-extension.nix { };
+
+  slugOf = name: lib.replaceStrings [ "@" "/" ] [ "" "-" ] name;
+
+  # Nix-side configuration per extension, merged into settings.json when the
+  # extension is enabled. Every entry is `{ }` today: verified on 2026-08-18,
+  # none of the eleven pins reads pi's settings.json. pi-mcp-adapter reads
+  # ~/.config/mcp/mcp.json and ~/.agents/mcp.json; the @juicesharp packages
+  # read their own rpiv-* config; pi-pretty and pi-cache-optimizer both write
+  # under getAgentDir(). The mechanism is here for
+  # pins that do, and is exercised by the synthetic case in
+  # tests/extensions-test.nix.
+  settingsFor = {
+    pi-mcp-adapter = { };
+    pi-subagents = { };
+    pi-background-tasks = { };
+    juicesharp-rpiv-ask-user-question = { };
+    narumitw-pi-goal = { };
+    juicesharp-rpiv-todo = { };
+    gotgenes-pi-permission-system = { };
+    narumitw-pi-btw = { };
+    pi-cache-optimizer = { };
+    heyhuynhgiabuu-pi-pretty = { };
+  };
+
+  # Libraries autoPatchelfHook must be able to find beyond stdenv.cc.cc.lib.
+  # pi-mcp-adapter reaches `recheck`, a GraalVM native-image binary published
+  # by recheck-linux-x64, and that binary links libz. Every other native file
+  # across the pin set resolves against libc/libgcc_s/libstdc++ alone.
+  extraBuildInputsFor = {
+    pi-mcp-adapter = [ bunPkgs.zlib ];
+  };
+
+  mkOne =
+    name: pin:
+    let
+      slug = slugOf name;
+    in
+    mkPiExtension {
+      pname = name;
+      inherit (pin)
+        version
+        url
+        hash
+        bundled
+        entrypoints
+        skills
+        prompts
+        ;
+      bunLock = if pin.bundled then null else ./. + "/${slug}/bun.lock";
+      bunNix = if pin.bundled then null else ./. + "/${slug}/bun.nix";
+      settings = settingsFor.${slug} or { };
+      extraBuildInputs = extraBuildInputsFor.${slug} or [ ];
+      promptFragment = null;
+    };
+in
+lib.mapAttrs' (name: pin: lib.nameValuePair "ext-${slugOf name}" (mkOne name pin)) pins
