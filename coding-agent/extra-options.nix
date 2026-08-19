@@ -63,7 +63,9 @@ let
   # promptFragment is an escape hatch for an extension that supplies no
   # promptSnippet or promptGuidelines of its own. Normally every entry is null
   # and this list is empty.
-  promptFragments = lib.filter (f: f != null) (map (p: p.passthru.promptFragment or null) extPkgs);
+  promptFragments =
+    lib.filter (f: f != null) (map (p: p.passthru.promptFragment or null) extPkgs)
+    ++ messagingFragments;
 
   promptFragmentFile = pkgs.writeText "pi-extension-prompt-fragments.md" (
     lib.concatStringsSep "\n\n" promptFragments
@@ -164,18 +166,26 @@ let
     # org.freedesktop.Notifications. Without this the extension is silently
     # inert inside the jail: exec succeeds, nothing appears.
     combinators.notifications
-    (combinators.add-pkg-deps [
-      pkgs.gitMinimal
-      pkgs.openssh
-      pkgs.gnumake
-      pkgs.jq
-      pkgs.nodejs
-      pkgs.python3
-      pkgs.ripgrep
-      pkgs.fd
-      pkgs.gh
-      pkgs.libnotify
-    ])
+    # The messaging broker is a separate process the extension spawns from
+    # inside the sandbox, so its interpreter has to be in there with it. That
+    # interpreter is bun, the same runtime pi already is, which is why this is
+    # one package rather than the nodejs plus tsx pair upstream's default launch
+    # path would have needed.
+    (combinators.add-pkg-deps (
+      [
+        pkgs.gitMinimal
+        pkgs.openssh
+        pkgs.gnumake
+        pkgs.jq
+        pkgs.nodejs
+        pkgs.python3
+        pkgs.ripgrep
+        pkgs.fd
+        pkgs.gh
+        pkgs.libnotify
+      ]
+      ++ messagingRuntimeInputs
+    ))
     # Mirrors modules/ai/claude.nix's extraSandbox.filesystem.allowRead, which
     # is these four paths and no others. 1Password's agent socket covers
     # agent-backed SSH and signing; known_hosts and ~/.ssh/config cover
@@ -198,6 +208,83 @@ let
     (combinators.try-readonly (combinators.noescape "~/.ssh/config"))
     (combinators.try-fwd-env "SSH_AUTH_SOCK")
   ];
+
+  msg = cfg.messaging;
+
+  # Extension-owned config files, with the option's overrides applied on top of
+  # the package's own defaults.
+  #
+  # brokerCommand is set here rather than in the derivation so the extension
+  # package does not have to depend on pkgs.bun. Pointing it at a store path is
+  # not a tidiness measure: upstream's default path calls
+  # getNodeCommand(process.execPath), which falls back to the literal string
+  # "node" resolved through PATH whenever the interpreter is not Node, and under
+  # coding-agent-bun it never is. With brokerArgs empty the broker is launched
+  # as `bun <broker.ts>`, so tsx is never invoked either.
+  configFiles = lib.optionalAttrs msg.enable (
+    lib.recursiveUpdate msg.package.passthru.configFiles {
+      "intercom/config.json" = {
+        brokerCommand = lib.getExe pkgs.bun;
+        brokerArgs = [ ];
+        inherit (msg) inboundTrigger confirmSend;
+      };
+    }
+  );
+
+  configFilesPrelude = lib.concatStringsSep "\n" (
+    lib.mapAttrsToList (
+      rel: value:
+      let
+        json = pkgs.writeText "pi-${lib.replaceStrings [ "/" ] [ "-" ] rel}" (builtins.toJSON value);
+      in
+      # bash
+      ''
+        mkdir -p -m 0700 "$(dirname "$PI_CODING_AGENT_DIR/${rel}")"
+        install -m 0600 ${lib.escapeShellArg "${json}"} "$PI_CODING_AGENT_DIR/${rel}"
+      ''
+    ) configFiles
+  );
+
+  # Upstream's launcher writes settings.json and nothing else, and
+  # coding-agent/options.nix stays byte-identical to upstream by construction
+  # (tests/additive-test.nix hashes it). So the writer for extension-owned
+  # config files hangs off `package` instead: upstream's wrapper execs whatever
+  # `package` resolves to, which puts the write after the environment is
+  # exported and inside the jail, where $PI_CODING_AGENT_DIR is bind-mounted.
+  #
+  # It wraps the default rather than whatever a consumer sets, because a
+  # definition of `package` that reads `cfg.package` is an infinite recursion.
+  # A consumer who supplies their own package supplies their own launcher too.
+  withConfigFiles =
+    base:
+    if configFiles == { } then
+      base
+    else
+      pkgs.writeShellScriptBin "pi" # bash
+        ''
+          PI_CODING_AGENT_DIR="''${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"
+          ${configFilesPrelude}
+          exec ${lib.escapeShellArg (lib.getExe base)} "$@"
+        '';
+
+  # piEntrypoint is a LIST (phase 2's contract). With entrypoints = [ ] it holds
+  # the package root, so pi reads pi.extensions = ["./index.ts"] from the
+  # package's own manifest.
+  messagingEntrypoints = lib.optionals msg.enable msg.package.passthru.piEntrypoint;
+
+  messagingSkills = lib.optionals (msg.enable && msg.installSkill) msg.package.passthru.piSkills;
+
+  messagingFragments = lib.optional (
+    msg.enable && msg.package.passthru.promptFragment != null
+  ) msg.package.passthru.promptFragment;
+
+  messagingRuntimeInputs = lib.optionals msg.enable [ pkgs.bun ];
+
+  # The one env var worth setting. inboundTrigger has no environment override at
+  # all, which is why configFiles exists; the ask timeout does.
+  messagingEnv = lib.optionalAttrs msg.enable {
+    PI_INTERCOM_ASK_TIMEOUT_MS.value = toString (msg.askTimeoutSeconds * 1000);
+  };
 
   notifications = cfg.notifications;
 
@@ -253,7 +340,8 @@ let
   # variable. Merging them here rather than contributing three separate
   # definitions keeps the "defined multiple times" failure that F206 describes
   # to a single boundary: the consumer's own definition against ours.
-  extraEnv = lib.optionalAttrs statusline.enable statuslineEnv // autoModeEnv // notifyEnv;
+  extraEnv =
+    lib.optionalAttrs statusline.enable statuslineEnv // autoModeEnv // notifyEnv // messagingEnv;
 in
 {
   options = lib.setAttrByPath optionPath {
@@ -572,6 +660,104 @@ in
       };
     };
 
+    messaging = {
+      enable = lib.mkEnableOption ''
+        peer messaging between separately launched pi instances.
+
+        This is pi's missing equivalent of Claude Code's ListAgents and
+        SendMessage: two pi processes started independently, in different
+        terminals or different repositories, can enumerate each other and
+        exchange messages while both stay alive. It is NOT subagents: a
+        subagent is a child of one session; these are peers.
+
+        Transport is a unix domain socket under the pi agent directory. No
+        network, no daemon, no relay, and no remote access of any kind
+      '';
+
+      package = lib.mkOption {
+        type = lib.types.package;
+        default = self.packages.${system}.ext-pi-intercom;
+        defaultText = lib.literalExpression "pi-nix's packages.ext-pi-intercom";
+        description = ''
+          The messaging extension to install. Must satisfy the mkPiExtension
+          passthru contract.
+        '';
+      };
+
+      inboundTrigger = lib.mkOption {
+        type = lib.types.enum [
+          "always"
+          "replies"
+          "never"
+        ];
+        default = "replies";
+        description = ''
+          Whether an inbound peer message may start a model turn on its own.
+
+          The broker does not authenticate peers: any process running as this
+          user that can open the socket may register and send. Upstream's
+          default is `always`, under which such a message immediately starts a
+          turn and arrives as a *user* message, which routes around the
+          permission layers entirely, since those gate tool calls and not the
+          provenance of instructions.
+
+          `replies` (the default here) lets only a reply to a request this
+          session originated start a turn. Unsolicited messages are still
+          delivered and rendered; they just do not get to drive the agent.
+          `never` disables auto-triggering completely.
+        '';
+      };
+
+      confirmSend = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = ''
+          Require interactive confirmation before ordinary outbound messages.
+          Replies are never gated.
+        '';
+      };
+
+      askTimeoutSeconds = lib.mkOption {
+        type = lib.types.ints.positive;
+        default = 300;
+        description = ''
+          How long a blocking request to a peer waits for its answer before
+          giving up. The upstream default is 600s; a peer that never answers
+          holds the caller's turn for the whole window, so this is set
+          deliberately rather than inherited.
+        '';
+      };
+
+      installSkill = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = ''
+          Also pass the extension's bundled skills via `--skill`.
+
+          Off by default: `~/.agents/skills` is already a discovery path, and
+          whether a package-provided skill de-duplicates against it is design
+          assumption A3, still unresolved.
+        '';
+      };
+    };
+
+    finalConfigFiles = lib.mkOption {
+      type = lib.types.attrsOf lib.types.attrs;
+      internal = true;
+      readOnly = true;
+      description = ''
+        Extension-owned config files the launcher installs under
+        $PI_CODING_AGENT_DIR. Key is a path relative to that directory.
+      '';
+    };
+
+    messagingRuntimeInputs = lib.mkOption {
+      type = lib.types.listOf lib.types.package;
+      internal = true;
+      readOnly = true;
+      description = "Packages the messaging broker needs inside the jail.";
+    };
+
     finalSystemPrompt = lib.mkOption {
       type = lib.types.nullOr lib.types.path;
       internal = true;
@@ -584,9 +770,11 @@ in
     # builds both and defaults to the npm one; mkDefault flips that answer at
     # the lowest possible priority, so any explicit `package = ...` from a
     # consumer still wins and `packages.coding-agent` stays buildable.
-    package = lib.mkDefault coding-agent-bun;
+    package = lib.mkDefault (withConfigFiles coding-agent-bun);
 
     finalSystemPrompt = systemPromptPath;
+    finalConfigFiles = configFiles;
+    inherit messagingRuntimeInputs;
 
     # mkAfter so our flags land behind anything the user set, and behind
     # upstream's resourceArgs (which are concatenated before extraArgs in
@@ -600,8 +788,9 @@ in
 
     environment = lib.mkIf (extraEnv != { }) extraEnv;
 
-    extensions = extEntrypoints ++ autoModeEntrypoints ++ notificationEntrypoints;
-    skills = extSkills;
+    extensions =
+      extEntrypoints ++ autoModeEntrypoints ++ notificationEntrypoints ++ messagingEntrypoints;
+    skills = extSkills ++ messagingSkills;
     promptTemplates = extPrompts;
     settings = extSettings;
   };

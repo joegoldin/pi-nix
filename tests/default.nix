@@ -20,5 +20,6 @@ in
   pi-intercom-hardening = import ./pi-intercom-hardening-test.nix args;
   pi-intercom-broker-tests = import ./pi-intercom-broker-tests.nix args;
   pi-intercom-smoke = import ./pi-intercom-smoke-test.nix args;
+  messaging-option = import ./messaging-option-test.nix args;
 }
 // import ./extension-tests.nix args
