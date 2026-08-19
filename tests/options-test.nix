@@ -204,21 +204,61 @@ let
     };
   };
 
-  # Both gates answer `tool_call`, and the permission system answers first, so
-  # enabling them together means the classifier is never asked. The module
-  # refuses rather than shipping that arrangement quietly.
-  autoWithPermissionSystem = builtins.tryEval (
+  # Both gates answer `tool_call` and pi returns on the first one that blocks,
+  # so the composition is not ordering, it is the permission system's authorizer
+  # chain. Enabling them together writes that package's own config file naming
+  # the link, because registration without an `authorizerChain` entry decides
+  # nothing (F301, and F307 for what it costs when it ships).
+  fakePermissionSystem = pkgs.hello.overrideAttrs (_: {
+    pname = "pi-ext-gotgenes-pi-permission-system";
+  });
+
+  autoWithPermissionSystem = evalPi {
+    pi.coding-agent = {
+      autoMode.enable = true;
+      extensionPackages = [ fakePermissionSystem ];
+    };
+  };
+
+  # The same pair with the link turned off: nothing is written, and the two
+  # packages are back to contending.
+  autoChainOff = evalPi {
+    pi.coding-agent = {
+      autoMode.enable = true;
+      autoMode.permissionSystem.enable = false;
+      extensionPackages = [ fakePermissionSystem ];
+    };
+  };
+
+  # An operator-written chain that forgets the link is the exact failure this
+  # option exists to prevent, so it is refused rather than written.
+  autoChainWithoutTheLink = builtins.tryEval (
     (evalPi {
       pi.coding-agent = {
         autoMode.enable = true;
-        extensionPackages = [
-          (pkgs.hello.overrideAttrs (_: {
-            pname = "pi-ext-gotgenes-pi-permission-system";
-          }))
+        autoMode.permissionSystem.settings = {
+          permissionReviewLog = true;
+          authorizerChain = [ "someone-else" ];
+        };
+        extensionPackages = [ fakePermissionSystem ];
+      };
+    }).autoMode.permissionSystem.configFile
+  );
+
+  # An operator-written chain that keeps it is taken verbatim, order and all.
+  autoChainOrdered = evalPi {
+    pi.coding-agent = {
+      autoMode.enable = true;
+      autoMode.permissionSystem.settings = {
+        permissionReviewLog = true;
+        authorizerChain = [
+          "someone-else"
+          "pi-automode"
         ];
       };
-    }).finalArgs
-  );
+      extensionPackages = [ fakePermissionSystem ];
+    };
+  };
 
   # A stand-in for jail.nix's combinator set, so the permission list can be
   # asserted without building a jail.
@@ -413,7 +453,33 @@ assert
     "$defaults"
     ".claude"
   ];
-assert autoWithPermissionSystem.success == false;
+# The pair composes now. The link is named in the file the permission system
+# actually reads, which is that package's own config rather than pi's
+# settings.json, and the rest of that file is this side's to declare because the
+# launcher installs it whole on every start.
+assert
+  autoWithPermissionSystem.autoMode.permissionSystem.configFile == {
+    debugLog = false;
+    permissionReviewLog = true;
+    yoloMode = false;
+    authorizerChain = [ "pi-automode" ];
+  };
+# Auto mode's entrypoint leads, so its handler sees the tool call before the
+# permission system turns it into an ask and the chain link reviews the real
+# input rather than a projection.
+assert
+  builtins.head autoWithPermissionSystem.extensions
+  == builtins.head self.packages.${system}.ext-czottmann-pi-automode.passthru.piEntrypoint;
+# Auto mode alone writes nothing: there is no permission system to configure.
+assert autoOn.autoMode.permissionSystem.configFile == null;
+assert autoChainOff.autoMode.permissionSystem.configFile == null;
+# Naming the link is the half that arms it, so a chain without it is refused.
+assert autoChainWithoutTheLink.success == false;
+assert
+  autoChainOrdered.autoMode.permissionSystem.configFile.authorizerChain == [
+    "someone-else"
+    "pi-automode"
+  ];
 # The shell pi's tool calls actually reach. Without bash on PATH, --clearenv
 # leaves pi with the `sh` jail.nix binds at /bin/sh and every bash-syntax
 # command reads as the model's mistake.

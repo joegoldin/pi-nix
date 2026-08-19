@@ -239,51 +239,82 @@ let
     PI_AUTOMODE_SETTINGS_JSON.file = "${autoModeConfigFile}";
   };
 
-  # Two gates on one event is one gate too many. pi dispatches `tool_call` to
-  # every extension in `--extension` order and returns on the first
-  # `{ block: true }` (pi-coding-agent 0.84.2,
-  # `dist/core/extensions/runner.js`'s emitToolCall), and both packages
-  # register there: @gotgenes/pi-permission-system through
-  # createFailClosedToolCall, pi-automode through its own handler.
+  # Two gates on one event used to be one gate too many. pi dispatches
+  # `tool_call` to every extension in `--extension` order and returns on the
+  # first `{ block: true }` (pi-coding-agent 0.84.2,
+  # `dist/core/extensions/runner.js`'s emitToolCall), and both packages register
+  # there: @gotgenes/pi-permission-system through createFailClosedToolCall,
+  # pi-automode through its own handler. Whichever loads first answers every
+  # ask, and the other one is dead code.
   #
-  # extEntrypoints is concatenated ahead of autoModeEntrypoints below, so the
-  # permission system always answers first. With an empty `authorizerChain` its
-  # composed chain *is* the terminal authorizer, so every ask it cannot resolve
-  # goes to a dialog and the classifier is never consulted. That is not a
-  # theory: it is what the option this replaces actually shipped
-  # (docs/assumption-a2.md).
+  # The way out is not ordering, it is the seam the permission system publishes
+  # for it: a typed service on
+  # Symbol.for("@gotgenes/pi-permission-system:service") carrying
+  # registerAuthorizer(name, authorize), consulted only for an `ask` its own
+  # deterministic engine could not settle. Upstream pi-automode does not use it.
+  # The fork this repo builds (packages/extensions/czottmann-pi-automode.nix)
+  # does, so auto mode is a link on that chain rather than a competing gate, and
+  # the two compose. docs/assumption-a2.md carries the whole argument.
   #
-  # pi-automode cannot be that chain's link either. It never reads
-  # Symbol.for("@gotgenes/pi-permission-system:service") and has no
-  # registerAuthorizer call anywhere in its source, so there is no arrangement
-  # in which the two compose. Pick one.
+  # Two things that arrangement needs from here.
+  #
+  # First, load order, inverted from what it was. Auto mode goes *ahead* of the
+  # rest so its `tool_call` handler sees the real event, with the real tool
+  # input, before the permission system raises an ask over it. The chain link
+  # then reviews that event rather than a projection rebuilt from the ask's
+  # display fields. In delegated mode that first pass runs only the
+  # deterministic tiers, which cost no model call; the classifier runs once, in
+  # the link.
+  #
+  # Second, activation. Registration alone decides nothing: the permission
+  # system consults a link only when the operator names it in `authorizerChain`,
+  # in that package's own config file rather than in pi's settings.json. That is
+  # F301, and F307 is the same finding arriving in production — an option that
+  # evaluated, built green, and did nothing. `autoMode.permissionSystem` below
+  # writes that file through phase 7's configFiles, so naming the link is not
+  # something a person has to remember.
   permissionSystemPnames = [
     "pi-ext-gotgenes-pi-permission-system"
     "@gotgenes/pi-permission-system"
   ];
 
-  autoModeConflict =
-    autoMode.enable && lib.any (p: lib.elem (p.pname or "") permissionSystemPnames) extPkgs;
+  permissionSystemPresent = lib.any (p: lib.elem (p.pname or "") permissionSystemPnames) extPkgs;
 
-  autoModeEntrypoints =
-    if autoModeConflict then
+  chain = autoMode.permissionSystem;
+
+  # The link is worth writing only when both halves are actually loaded.
+  chainActive = autoMode.enable && permissionSystemPresent && chain.enable;
+
+  chainNames = chain.settings.authorizerChain or [ chain.authorizerName ];
+
+  # Naming the link is the half that arms it, so a chain the operator wrote by
+  # hand without our name in it is refused rather than written. F307 is what
+  # that mistake looks like when it ships: a green build, an evaluated option,
+  # and every ask going to a dialog.
+  permissionSystemSettings =
+    if chainActive && !(lib.elem chain.authorizerName chainNames) then
       throw ''
-        pi.coding-agent.autoMode.enable is set and
-        @gotgenes/pi-permission-system is in extensionPackages.
+        pi.coding-agent.autoMode.permissionSystem.settings.authorizerChain is
+        set to ${builtins.toJSON chainNames} and does not name
+        "${chain.authorizerName}".
 
-        Both extensions gate the same `tool_call` event, and pi stops at the
-        first one that blocks. The permission system is loaded first, so with
-        no `authorizerChain` naming a link it prompts for every ask its
-        deterministic engine cannot settle and the auto-mode classifier never
-        runs. Two gatekeepers, two prompts, and the one you configured is the
-        one that goes unasked.
+        Registration is not activation: @gotgenes/pi-permission-system consults
+        a link only when the operator names it in authorizerChain, so this
+        would install auto mode as a chain link that is never called and send
+        every ask its deterministic engine cannot settle to a dialog.
 
-        Drop @gotgenes/pi-permission-system from extensionPackages, or turn
-        autoMode.enable off. They cannot be composed: pi-automode does not
-        register on that package's authorizer chain.
+        Add "${chain.authorizerName}" to that list, drop the list and take the
+        computed default, or set
+        pi.coding-agent.autoMode.permissionSystem.enable = false.
       ''
     else
-      lib.optionals autoMode.enable autoMode.package.passthru.piEntrypoint;
+      chain.settings // { authorizerChain = chainNames; };
+
+  permissionSystemConfigFiles = lib.optionalAttrs chainActive {
+    "extensions/pi-permission-system/config.json" = permissionSystemSettings;
+  };
+
+  autoModeEntrypoints = lib.optionals autoMode.enable autoMode.package.passthru.piEntrypoint;
 
   # Design §9's outermost layer. Upstream's default is `[ network mount-cwd ]`,
   # which is enough to reach a model API and edit the working directory and
@@ -444,7 +475,7 @@ let
   # "node" resolved through PATH whenever the interpreter is not Node, and under
   # coding-agent-bun it never is. With brokerArgs empty the broker is launched
   # as `bun <broker.ts>`, so tsx is never invoked either.
-  configFiles = lib.recursiveUpdate extConfigFiles (
+  configFiles = lib.recursiveUpdate (lib.recursiveUpdate extConfigFiles permissionSystemConfigFiles) (
     lib.optionalAttrs msg.enable (
       lib.recursiveUpdate msg.package.passthru.configFiles {
         "intercom/config.json" = {
@@ -983,6 +1014,82 @@ in
         };
       };
 
+      permissionSystem = {
+        enable = lib.mkOption {
+          type = lib.types.bool;
+          default = true;
+          description = ''
+            Register auto mode as a link on `@gotgenes/pi-permission-system`'s
+            authorizer chain, and write that package's config file naming the
+            link, whenever both extensions are enabled.
+
+            The two packages both gate pi's `tool_call` event, and pi returns on
+            the first extension that blocks, so without this only one of them
+            decides anything. The chain seam is the composition the permission
+            system publishes for exactly that: a link reviews an `ask` its
+            deterministic engine could not settle and answers allow, deny, or
+            defer. The auto-mode classifier becomes that link, and the
+            permission system's own rules keep resolving everything they can
+            with no model call.
+
+            Turning this off does not make the pair safe to run together. It
+            restores the arrangement where the permission system prompts for
+            every ask its rules do not cover and the classifier is never asked.
+          '';
+        };
+
+        authorizerName = lib.mkOption {
+          type = lib.types.str;
+          default = "pi-automode";
+          description = ''
+            The link name. It has to match the name the extension registers
+            under, which is `AUTHORIZER_NAME` in the fork's
+            `extensions/auto-mode/permission-chain.ts`. A name the operator
+            configures and no extension registers is skipped with a warning —
+            more prompting, never less — so a mismatch here costs prompts
+            rather than authority.
+          '';
+        };
+
+        settings = lib.mkOption {
+          type = lib.types.attrs;
+          default = {
+            debugLog = false;
+            permissionReviewLog = true;
+            yoloMode = false;
+          };
+          description = ''
+            The whole of `$PI_CODING_AGENT_DIR/extensions/pi-permission-system/config.json`,
+            minus `authorizerChain`, which is computed. The launcher installs
+            this file on every start, so it replaces whatever is on disk rather
+            than merging into it: anything the operator wants kept has to be
+            named here.
+
+            The default is that package's own three defaults.
+            `permissionReviewLog` is left on because the review log is the
+            evidence that a decision came from the chain link rather than from a
+            dialog, and that distinction is the whole point of the arrangement.
+
+            Writing `authorizerChain` here yourself takes precedence and fixes
+            the order of a multi-link chain; an assertion checks that
+            {option}`authorizerName` still appears in it.
+          '';
+        };
+
+        configFile = lib.mkOption {
+          type = lib.types.nullOr lib.types.attrs;
+          internal = true;
+          readOnly = true;
+          description = ''
+            The rendered permission-system config, or null when the link is not
+            being written. Exposed so a test can assert on the file's contents
+            rather than on the Nix that produces it — registration without an
+            `authorizerChain` entry is inert, and inert reads exactly like
+            working.
+          '';
+        };
+      };
+
       settings = lib.mkOption {
         type = lib.types.attrs;
         internal = true;
@@ -1382,13 +1489,17 @@ in
 
     autoMode.settings = autoModeSettings;
     autoMode.configFile = autoModeConfigFile;
+    autoMode.permissionSystem.configFile = if chainActive then permissionSystemSettings else null;
     notifications.configFile = notifyConfigFile;
 
     environment = lib.mkIf (extraEnv != { }) extraEnv;
 
     extensions =
-      extEntrypoints
-      ++ autoModeEntrypoints
+      # Auto mode first, deliberately: see the permissionSystemPnames comment.
+      # Its handler has to see the tool call before the permission system turns
+      # it into an ask, so the chain link reviews the real input.
+      autoModeEntrypoints
+      ++ extEntrypoints
       ++ notificationEntrypoints
       ++ messagingEntrypoints
       ++ voiceEntrypoints;
