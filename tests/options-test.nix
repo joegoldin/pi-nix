@@ -88,6 +88,55 @@ let
       ];
     };
   };
+
+  fakeExt =
+    name: passthru:
+    (pkgs.runCommand "fake-pi-ext-${name}" { } ''
+      mkdir -p $out/skills $out/prompts
+      touch $out/index.ts
+    '').overrideAttrs
+      (old: {
+        passthru = (old.passthru or { }) // passthru;
+      });
+
+  extA = fakeExt "a" {
+    piEntrypoint = [ "/nix/store/fake-a" ];
+    piSkills = [ "/nix/store/fake-a/skills" ];
+    piPrompts = [ ];
+    settings = {
+      alpha = true;
+      shared.fromA = 1;
+    };
+    promptFragment = null;
+  };
+
+  extB = fakeExt "b" {
+    piEntrypoint = [
+      "/nix/store/fake-b/one.ts"
+      "/nix/store/fake-b/two.ts"
+    ];
+    piSkills = [ ];
+    piPrompts = [ "/nix/store/fake-b/prompts" ];
+    settings = {
+      beta = 2;
+      shared.fromB = 2;
+    };
+    promptFragment = "Use the beta tool when beta-ing.";
+  };
+
+  withExts = evalPi {
+    pi.coding-agent.extensionPackages = [
+      extA
+      extB
+    ];
+  };
+
+  flagValues =
+    args: flag:
+    let
+      indexed = lib.imap0 (i: a: { inherit i a; }) args;
+    in
+    map (e: builtins.elemAt args (e.i + 1)) (lib.filter (e: e.a == flag) indexed);
 in
 # The fork ships the Bun build by default. Upstream's option declares
 # `default = coding-agent`; a mkDefault from extra-options.nix outranks it
@@ -108,6 +157,29 @@ assert argPair both.finalArgs "--append-system-prompt" == "${both.finalRules}";
 assert lib.elem "--provider" withExtra.finalArgs;
 assert argPair withExtra.finalArgs "--provider" == "openai";
 assert lib.elem "--system-prompt" withExtra.finalArgs;
+# Every entrypoint of every enabled extension becomes its own --extension flag.
+assert
+  flagValues withExts.finalArgs "--extension" == [
+    "/nix/store/fake-a"
+    "/nix/store/fake-b/one.ts"
+    "/nix/store/fake-b/two.ts"
+  ];
+assert flagValues withExts.finalArgs "--skill" == [ "/nix/store/fake-a/skills" ];
+assert flagValues withExts.finalArgs "--prompt-template" == [ "/nix/store/fake-b/prompts" ];
+# settings are deep-merged, so two extensions can contribute to one subtree.
+assert withExts.settings.alpha == true;
+assert withExts.settings.beta == 2;
+assert
+  withExts.settings.shared == {
+    fromA = 1;
+    fromB = 2;
+  };
+# A non-null promptFragment is appended, never used to replace the prompt.
+assert lib.length (flagValues withExts.finalArgs "--append-system-prompt") == 1;
+# An extension with no fragment contributes nothing at all.
+assert
+  flagValues (evalPi { pi.coding-agent.extensionPackages = [ extA ]; }).finalArgs
+    "--append-system-prompt" == [ ];
 pkgs.runCommand "pi-nix-options-tests" { } ''
   set -euo pipefail
   # The written prompt must be the literal text, with no wrapper or frontmatter.

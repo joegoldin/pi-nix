@@ -44,6 +44,32 @@ let
     "--system-prompt"
     "${systemPromptPath}"
   ];
+
+  extPkgs = cfg.extensionPackages;
+
+  extEntrypoints = lib.concatMap (p: p.passthru.piEntrypoint or [ ]) extPkgs;
+  extSkills = lib.concatMap (p: p.passthru.piSkills or [ ]) extPkgs;
+  extPrompts = lib.concatMap (p: p.passthru.piPrompts or [ ]) extPkgs;
+
+  # Deep merge, so two extensions contributing to one settings subtree compose
+  # rather than the later one erasing the earlier.
+  extSettings = lib.foldl' lib.recursiveUpdate { } (map (p: p.passthru.settings or { }) extPkgs);
+
+  # promptFragment is an escape hatch for an extension that supplies no
+  # promptSnippet or promptGuidelines of its own. Normally every entry is null
+  # and this list is empty.
+  promptFragments = lib.filter (f: f != null) (map (p: p.passthru.promptFragment or null) extPkgs);
+
+  promptFragmentFile = pkgs.writeText "pi-extension-prompt-fragments.md" (
+    lib.concatStringsSep "\n\n" promptFragments
+  );
+
+  # Appended, never used with --system-prompt: an extension may add guidance,
+  # it may not replace the prompt.
+  promptFragmentArgs = lib.optionals (promptFragments != [ ]) [
+    "--append-system-prompt"
+    "${promptFragmentFile}"
+  ];
 in
 {
   options = lib.setAttrByPath optionPath {
@@ -62,6 +88,28 @@ in
         appends; replacement is a separate flag and a separate option.
       '';
       example = lib.literalExpression "./SYSTEM.md";
+    };
+
+    extensionPackages = lib.mkOption {
+      type = lib.types.listOf lib.types.package;
+      default = [ ];
+      description = ''
+        pi extension derivations to enable, normally taken from this flake's
+        `packages.ext-*` outputs or built with `lib.builders.<system>.mkPiPlugin`.
+
+        Each derivation carries its own wiring on `passthru`: `piEntrypoint`
+        becomes `--extension` flags, `piSkills` becomes `--skill`, `piPrompts`
+        becomes `--prompt-template`, `settings` is deep-merged into
+        `settings.json`, and a non-null `promptFragment` is appended to the
+        system prompt. Removing an extension therefore removes its
+        configuration too — there is nothing left dangling.
+      '';
+      example = lib.literalExpression ''
+        with inputs.pi-nix.packages.''${pkgs.system}; [
+          ext-pi-mcp-adapter
+          ext-pi-subagents
+        ]
+      '';
     };
 
     finalSystemPrompt = lib.mkOption {
@@ -83,6 +131,11 @@ in
     # mkAfter so our flags land behind anything the user set, and behind
     # upstream's resourceArgs (which are concatenated before extraArgs in
     # options.nix's wrapper).
-    extraArgs = lib.mkAfter systemPromptArgs;
+    extraArgs = lib.mkAfter (systemPromptArgs ++ promptFragmentArgs);
+
+    extensions = extEntrypoints;
+    skills = extSkills;
+    promptTemplates = extPrompts;
+    settings = extSettings;
   };
 }
