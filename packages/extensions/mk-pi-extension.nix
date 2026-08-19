@@ -52,6 +52,21 @@
   # *which* extensions are enabled, so adding or removing one is a single list
   # edit with no dangling config.
   settings ? { },
+  # Extension-owned config files. Key is a path relative to
+  # $PI_CODING_AGENT_DIR; value is any JSON-serialisable attrset.
+  #
+  # settings.json is not the only configuration surface an extension reads, and
+  # for some packages it is the wrong one. pi-intercom reads
+  # $PI_CODING_AGENT_DIR/intercom/config.json, and its inboundTrigger setting —
+  # which decides whether an unauthenticated local peer may start a model turn
+  # in this session — has no environment override at all. Without this field
+  # that default cannot be set from Nix.
+  configFiles ? { },
+  # Shell appended to the unpack/patch phase, run with the package root as the
+  # working directory. Written with substituteInPlace --replace-fail so an
+  # upstream edit that moves a patch target breaks the build rather than
+  # silently reverting whatever the patch was protecting.
+  patchPhaseExtra ? "",
   # Escape hatch for an extension that supplies no promptSnippet or
   # promptGuidelines of its own. Normally null.
   promptFragment ? null,
@@ -83,11 +98,16 @@ let
         find $out -name '*.test.ts' -delete
         find $out -name '*.nix' -delete
         rm -f $out/tsconfig.json
+        ${lib.optionalString (patchPhaseExtra != "") "cd $out"}
+        ${patchPhaseExtra}
       ''
     else if bundled then
       runCommand "pi-ext-${slug}-${version}" { src = tarball; } ''
         mkdir -p $out
         tar -xzf $src -C $out --strip-components=1
+        chmod -R u+w $out
+        ${lib.optionalString (patchPhaseExtra != "") "cd $out"}
+        ${patchPhaseExtra}
       ''
     else
       stdenv.mkDerivation {
@@ -139,6 +159,7 @@ let
         postPatch = ''
           ${normalisePackageJson}
           cp ${bunLock} bun.lock
+          ${patchPhaseExtra}
         '';
 
         # These are source packages, not build products: pi loads the .ts files
@@ -171,6 +192,7 @@ drv
     piPrompts = prefix prompts;
     inherit
       settings
+      configFiles
       promptFragment
       pname
       version

@@ -16,5 +16,6 @@ in
   update-app = import ./update-app-test.nix args;
   options = import ./options-test.nix args;
   additive = import ./additive-test.nix args;
+  extension-contract = import ./extension-contract-test.nix args;
 }
 // import ./extension-tests.nix args
