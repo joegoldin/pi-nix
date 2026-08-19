@@ -137,6 +137,68 @@ let
     PI_AUTO_MODE_CONFIG.value = "${autoModeConfigFile}";
   };
 
+  # Design §9's outermost layer. Upstream's default is `[ network mount-cwd ]`,
+  # which is enough to reach a model API and edit the working directory and
+  # nothing else — no git, no node, no dbus. This widens it to the toolchain pi
+  # shells out to plus the same four read-only paths modules/ai/claude.nix
+  # allows Claude, so one machine has one answer.
+  #
+  # It arrives as mkDefault rather than as an edit to the option's own default,
+  # because coding-agent/options.nix is upstream's file and stays byte-identical
+  # (tests/additive-test.nix hashes it). mkDefault is priority 1000 against the
+  # option default's 1500, so this wins over upstream and loses to any consumer
+  # who writes `jail.permissions = ...` themselves. Function-typed options do
+  # not merge (F802), so replacement is the only composition available either
+  # way.
+  #
+  # Every combinator is written `combinators.x` rather than pulled in with
+  # `with combinators;`. `with` loses to an enclosing let binding, and this file
+  # already binds `notifications = cfg.notifications`, so `with combinators; [
+  # notifications ]` silently hands jail.nix an option submodule instead of a
+  # permission. It fails late, at finalPackage, with "attempt to call something
+  # which is not a function but a set".
+  jailPermissions = combinators: [
+    combinators.network
+    combinators.mount-cwd
+    # pi-notify shells out to notify-send, which needs a talk permission on
+    # org.freedesktop.Notifications. Without this the extension is silently
+    # inert inside the jail: exec succeeds, nothing appears.
+    combinators.notifications
+    (combinators.add-pkg-deps [
+      pkgs.gitMinimal
+      pkgs.openssh
+      pkgs.gnumake
+      pkgs.jq
+      pkgs.nodejs
+      pkgs.python3
+      pkgs.ripgrep
+      pkgs.fd
+      pkgs.gh
+      pkgs.libnotify
+    ])
+    # Mirrors modules/ai/claude.nix's extraSandbox.filesystem.allowRead, which
+    # is these four paths and no others. 1Password's agent socket covers
+    # agent-backed SSH and signing; known_hosts and ~/.ssh/config cover
+    # host-key verification and per-host config. Private key files
+    # (~/.ssh/id_*) are deliberately ABSENT — the 1Password agent is the
+    # supported path here, and the jail is the layer that makes that omission
+    # mean something.
+    #
+    # The agent socket is read-only, which was measured rather than assumed.
+    # F7 predicted a read-only bind would refuse the AF_UNIX connect, because
+    # connect() wants write on the inode. Under bubblewrap's --ro-bind-try it
+    # does not: `ssh-add -l` inside this jail listed the key with the socket
+    # bound read-only. If a kernel ever disagrees the failure is loud
+    # ("Error connecting to agent: Permission denied") and the fix is to change
+    # this one line to try-readwrite. Do not widen the three ~/.ssh entries
+    # with it: those are genuinely read-only data.
+    (combinators.try-readonly (combinators.noescape "~/.1password/agent.sock"))
+    (combinators.try-readonly (combinators.noescape "~/.ssh/known_hosts"))
+    (combinators.try-readonly (combinators.noescape "~/.ssh/known_hosts2"))
+    (combinators.try-readonly (combinators.noescape "~/.ssh/config"))
+    (combinators.try-fwd-env "SSH_AUTH_SOCK")
+  ];
+
   notifications = cfg.notifications;
 
   notificationsPackage =
@@ -530,6 +592,8 @@ in
     # upstream's resourceArgs (which are concatenated before extraArgs in
     # options.nix's wrapper).
     extraArgs = lib.mkAfter (systemPromptArgs ++ promptFragmentArgs ++ statuslineArgs);
+
+    jail.permissions = lib.mkDefault jailPermissions;
 
     autoMode.configFile = autoModeConfigFile;
     notifications.configFile = notifyConfigFile;
