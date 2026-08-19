@@ -1700,8 +1700,29 @@ in
                     # which is the same silent-empty failure the design already
                     # documents for API keys. /dev/snd is not needed: audiomemo
                     # shells to `ffmpeg -f pulse` and never touches ALSA.
-                    combinators.pulse
-                    combinators.pipewire
+                    #
+                    # Hand-rolled rather than `combinators.pulse` and
+                    # `combinators.pipewire`, and only because both open with
+                    # `fwd-env "XDG_RUNTIME_DIR"`, which EXITS NON-ZERO when the
+                    # variable is unset. That variable is a desktop session's,
+                    # so with those combinators pi refuses to start over SSH, on
+                    # a TTY, or anywhere else without one. Voice is a feature to
+                    # lose on such a host, not a reason to have no agent.
+                    #
+                    # The bodies are otherwise copied from those two: the same
+                    # four binds, all already `--bind-try`, so an absent socket
+                    # was never the problem. Only the environment forwarding is
+                    # changed, from hard to `try-`, and the two runtime-dir binds
+                    # are wrapped in the shell's `${VAR+...}` so they are emitted
+                    # only when there is a runtime dir to interpolate. Without
+                    # that guard they would expand to a bare "/pipewire-0" on a
+                    # headless host and bind a path nobody meant.
+                    (combinators.try-fwd-env "XDG_RUNTIME_DIR")
+                    (combinators.try-fwd-env "PULSE_SERVER")
+                    (combinators.unsafe-add-raw-args "--bind-try /run/pulse /run/pulse")
+                    (combinators.unsafe-add-raw-args "--bind-try /run/pipewire /run/pipewire")
+                    (combinators.unsafe-add-raw-args "\${XDG_RUNTIME_DIR+--bind-try \"$XDG_RUNTIME_DIR/pulse\" \"$XDG_RUNTIME_DIR/pulse\"}")
+                    (combinators.unsafe-add-raw-args "\${XDG_RUNTIME_DIR+--bind-try \"$XDG_RUNTIME_DIR/pipewire-0\" \"$XDG_RUNTIME_DIR/pipewire-0\"}")
                     (combinators.add-pkg-deps [ config.audiomemo ])
                   ]
                   ++ lib.optional (config.configFile != null) (combinators.try-readonly config.configFile)

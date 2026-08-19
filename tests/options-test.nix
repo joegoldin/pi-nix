@@ -292,6 +292,7 @@ let
     add-pkg-deps = ps: "add-pkg-deps:${toString (builtins.length ps)}";
     set-env = n: v: "set-env:${n}=${v}";
     jail-to-host-channel = name: _script: "jail-to-host-channel:${name}";
+    unsafe-add-raw-args = a: "raw:${a}";
   };
 
   # The jail default itself, which is where the toolchain and the shell live.
@@ -599,15 +600,31 @@ assert (envValue withVoice "ELEVENLABS_API_KEY_FILE").value == "/run/agenix/elev
 assert envValue withVoice "ELEVENLABS_API_KEY" == null;
 # Without these the microphone is not merely restricted inside the jail: it is
 # absent, and audiomemo reports an empty device list with no error.
-assert lib.elem "pulse" voicePermissions;
-assert lib.elem "pipewire" voicePermissions;
+#
+# The sockets are bound by hand rather than through combinators.pulse and
+# combinators.pipewire, because both of those open with a hard
+# `fwd-env "XDG_RUNTIME_DIR"` that exits non-zero when the variable is unset.
+# That is a desktop session's variable, so those combinators stop pi starting
+# over SSH or on a TTY. These assertions pin the tolerant form: the runtime-dir
+# binds are guarded by the shell so they vanish on a host with no session, and
+# the forwarding is `try-`, so voice degrades and the agent still runs.
+assert lib.elem "try-fwd-env:XDG_RUNTIME_DIR" voicePermissions;
+assert lib.elem "raw:--bind-try /run/pulse /run/pulse" voicePermissions;
+assert lib.elem "raw:--bind-try /run/pipewire /run/pipewire" voicePermissions;
+assert lib.any (p: lib.hasInfix "\${XDG_RUNTIME_DIR+" p && lib.hasInfix "pulse" p) voicePermissions;
+assert lib.any (
+  p: lib.hasInfix "\${XDG_RUNTIME_DIR+" p && lib.hasInfix "pipewire-0" p
+) voicePermissions;
+# No unguarded forwarding of a desktop-session variable anywhere in the set.
+assert !(lib.elem "fwd-env:XDG_RUNTIME_DIR" voicePermissions);
 assert lib.elem "add-pkg-deps:1" voicePermissions;
 assert lib.elem "try-readonly:/home/joe/.config/audiomemo/config.toml" voicePermissions;
 assert lib.elem "try-readonly:/run/agenix/elevenlabs_api_key" voicePermissions;
 # The module's own jail default already carries them, so a consumer who never
 # touches jail.permissions still gets a working microphone.
-assert lib.elem "pulse" (withVoice.jail.permissions fakeCombinators);
-assert !(lib.elem "pulse" (voiceOff.jail.permissions fakeCombinators));
+assert lib.elem "raw:--bind-try /run/pulse /run/pulse" (withVoice.jail.permissions fakeCombinators);
+assert
+  !(lib.elem "raw:--bind-try /run/pulse /run/pulse" (voiceOff.jail.permissions fakeCombinators));
 # Enabled without an audiomemo package must fail loudly: the jail binds the
 # closure of the exact derivation named there, so there is nothing to guess.
 assert voiceUnpackaged.success == false;
