@@ -27,6 +27,11 @@ let
   # file that asks the question.
   inherit (self.packages.${system}) coding-agent-bun;
 
+  # The shared schema lives in agent-statusline so claude-nix and pi-nix cannot
+  # drift. Each consumer mounts it under its own namespace.
+  statuslineLib = self.inputs.agent-statusline.lib.${system};
+  statuslinePkgs = self.inputs.agent-statusline.packages.${system};
+
   cfg = lib.attrByPath optionPath { } config;
 
   toFile =
@@ -70,6 +75,30 @@ let
     "--append-system-prompt"
     "${promptFragmentFile}"
   ];
+
+  statusline = cfg.statusline;
+
+  statuslineConfigFile = statuslineLib.renderConfig statusline;
+
+  # The package root, not a file: pi's resolveExtensionEntries reads the pi
+  # manifest inside agent-statusline's extension package.json and loads what it
+  # declares, so the entrypoint filename stays that repo's business.
+  statuslineArgs = lib.optionals statusline.enable [
+    "--extension"
+    "${statusline.extension}"
+  ];
+
+  # Upstream's `environment` is nullOr (either path attrs), so this definition
+  # and a user's own compose only when both are attrsets. A guard that reads
+  # cfg.environment to say so cannot exist: it would be a definition of
+  # `environment` whose value forces `environment`, which is an infinite
+  # recursion no matter where the read sits. The module system's own "defined
+  # multiple times" error is what a consumer sees instead, and the option
+  # description below says which form to use.
+  statuslineEnv = {
+    AGENT_STATUSLINE_BIN.value = "${statusline.package}/bin/agent-statusline";
+    AGENT_STATUSLINE_CONFIG.value = "${statuslineConfigFile}";
+  };
 in
 {
   options = lib.setAttrByPath optionPath {
@@ -112,6 +141,42 @@ in
       '';
     };
 
+    statusline = lib.mkOption {
+      default = { };
+      description = ''
+        Statusline rendered under pi, via the agent-statusline pi extension.
+
+        The option schema is imported from agent-statusline and is the same one
+        `programs.claude-nix.statusLine` mounts, so a widget added there appears
+        here with no change on this side.
+
+        Enabling this exports `AGENT_STATUSLINE_BIN` and
+        `AGENT_STATUSLINE_CONFIG` through `environment`, so `environment` must
+        be in its attribute-set form. A shell-environment-file value cannot
+        merge with these and the evaluation fails.
+      '';
+      type = lib.types.submodule {
+        options = statuslineLib.statuslineOptions // {
+          # mkOption returns a plain attrset, so overriding `default` this way
+          # keeps the shared type and description while supplying the package
+          # this flake's input provides.
+          package = statuslineLib.statuslineOptions.package // {
+            default = statuslinePkgs.agent-statusline;
+          };
+
+          extension = lib.mkOption {
+            type = lib.types.package;
+            default = statuslinePkgs.pi-extension;
+            description = ''
+              The agent-statusline pi extension package. Handed to pi as
+              `--extension <dir>`; pi reads the `pi` manifest in its
+              package.json to find the entrypoint.
+            '';
+          };
+        };
+      };
+    };
+
     finalSystemPrompt = lib.mkOption {
       type = lib.types.nullOr lib.types.path;
       internal = true;
@@ -131,7 +196,9 @@ in
     # mkAfter so our flags land behind anything the user set, and behind
     # upstream's resourceArgs (which are concatenated before extraArgs in
     # options.nix's wrapper).
-    extraArgs = lib.mkAfter (systemPromptArgs ++ promptFragmentArgs);
+    extraArgs = lib.mkAfter (systemPromptArgs ++ promptFragmentArgs ++ statuslineArgs);
+
+    environment = lib.mkIf statusline.enable statuslineEnv;
 
     extensions = extEntrypoints;
     skills = extSkills;

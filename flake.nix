@@ -10,6 +10,10 @@
       inputs.systems.follows = "systems";
     };
     jail-nix.url = "sourcehut:~alexdavid/jail.nix";
+    agent-statusline = {
+      url = "github:joegoldin/agent-statusline";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   nixConfig = {
@@ -30,6 +34,7 @@
       systems,
       bun2nix,
       jail-nix,
+      agent-statusline,
     }:
     let
       current = builtins.fromJSON (builtins.readFile ./VERSION.json);

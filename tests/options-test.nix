@@ -1,26 +1,12 @@
 # Module tests are pure evaluation: build the same module list mkCodingAgent
 # builds, then assert on finalArgs. `self` is stubbed so the test does not
 # need the real coding-agent closure to check argument construction.
-{ pkgs, ... }:
+{ pkgs, self, ... }:
 let
   lib = pkgs.lib;
   system = pkgs.stdenv.hostPlatform.system;
 
-  statuslineStub = {
-    statuslineOptions = {
-      enable = lib.mkEnableOption "the agent statusline";
-      package = lib.mkOption {
-        type = lib.types.package;
-        description = "The agent-statusline package to use.";
-      };
-      padding = lib.mkOption {
-        type = lib.types.int;
-        default = 0;
-        description = "Left padding, in columns.";
-      };
-    };
-    renderConfig = _cfg: pkgs.writeText "agent-statusline-config.json" ''{"padding":0}'';
-  };
+  statuslineLib = self.inputs.agent-statusline.lib.${system};
 
   selfStub = {
     packages.${system} = {
@@ -29,13 +15,7 @@ let
       # below cannot pass by accident.
       coding-agent-bun = pkgs.cowsay;
     };
-    inputs.agent-statusline = {
-      lib.${system} = statuslineStub;
-      packages.${system} = {
-        agent-statusline = pkgs.hello;
-        pi-extension = pkgs.hello;
-      };
-    };
+    inputs.agent-statusline = self.inputs.agent-statusline;
   };
 
   evalPi =
@@ -137,6 +117,22 @@ let
       indexed = lib.imap0 (i: a: { inherit i a; }) args;
     in
     map (e: builtins.elemAt args (e.i + 1)) (lib.filter (e: e.a == flag) indexed);
+
+  slOff = evalPi { };
+
+  slOn = evalPi {
+    pi.coding-agent.statusline = {
+      enable = true;
+      padding = 2;
+    };
+  };
+
+  envValue =
+    c: name:
+    let
+      e = c.environment;
+    in
+    if e == null then null else (e.${name} or null);
 in
 # The fork ships the Bun build by default. Upstream's option declares
 # `default = coding-agent`; a mkDefault from extra-options.nix outranks it
@@ -180,9 +176,25 @@ assert lib.length (flagValues withExts.finalArgs "--append-system-prompt") == 1;
 assert
   flagValues (evalPi { pi.coding-agent.extensionPackages = [ extA ]; }).finalArgs
     "--append-system-prompt" == [ ];
+# Disabled is inert: no flag, no environment, nothing in the closure.
+assert flagValues slOff.finalArgs "--extension" == [ ];
+assert envValue slOff "AGENT_STATUSLINE_BIN" == null;
+# Enabled adds exactly one --extension, pointing at the extension package root
+# so pi resolves entries from its own pi manifest.
+assert lib.length (flagValues slOn.finalArgs "--extension") == 1;
+assert builtins.head (flagValues slOn.finalArgs "--extension") == "${slOn.statusline.extension}";
+assert envValue slOn "AGENT_STATUSLINE_BIN" != null;
+assert envValue slOn "AGENT_STATUSLINE_CONFIG" != null;
+# The shared schema is mounted verbatim, so every option claude-nix has is here.
+assert slOn.statusline.padding == 2;
 pkgs.runCommand "pi-nix-options-tests" { } ''
   set -euo pipefail
   # The written prompt must be the literal text, with no wrapper or frontmatter.
   grep -qxF 'You are terse.' ${inline.finalSystemPrompt}
+  # renderConfig must emit the padding the option carries, proving the shared
+  # schema is actually driving the JSON rather than a default being re-rendered.
+  test "$(${pkgs.jq}/bin/jq -r .padding ${statuslineLib.renderConfig slOn.statusline})" = 2
+  # The binary the module points at must exist under the package it selected.
+  test -x ${slOn.statusline.package}/bin/agent-statusline
   touch $out
 ''

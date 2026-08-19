@@ -1,5 +1,25 @@
 {
   "nodes": {
+    "agent-statusline": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1787095847,
+        "narHash": "sha256-bz5NdaflEW+pMS0KSn3xDNrV5PqtuJPcBpPjeki962M=",
+        "owner": "joegoldin",
+        "repo": "agent-statusline",
+        "rev": "2828df3d630b0e6d69ed6018b22f2b158dcbce5a",
+        "type": "github"
+      },
+      "original": {
+        "owner": "joegoldin",
+        "repo": "agent-statusline",
+        "type": "github"
+      }
+    },
     "bun2nix": {
       "inputs": {
         "flake-parts": "flake-parts",
@@ -80,6 +100,7 @@
     },
     "root": {
       "inputs": {
+        "agent-statusline": "agent-statusline",
         "bun2nix": "bun2nix",
         "jail-nix": "jail-nix",
         "nixpkgs": "nixpkgs",
