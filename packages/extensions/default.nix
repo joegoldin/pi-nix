@@ -76,14 +76,19 @@ let
     ext-pi-voice = bunPkgs.callPackage ./pi-voice { inherit mkPiExtension; };
   };
 
-  # pi-intercom is pinned like the others but built by its own file, because it
-  # is the one package that carries a patch and a configFiles entry. Defined
-  # after the generic loop so this definition is the one that wins.
+  # Two pins are still listed in extensions.json but built by their own file:
+  # pi-intercom carries a patch and a configFiles entry, and
+  # @czottmann/pi-automode is taken from our fork rather than from npm. Defined
+  # after the generic loop so these definitions are the ones that win.
   patched = {
     ext-pi-intercom = bunPkgs.callPackage ./pi-intercom.nix {
       inherit mkPiExtension;
       pin = pins."pi-intercom";
       inherit (bunPkgs.callPackage ./pi-intercom-patches.nix { }) securityPatch;
+    };
+    ext-czottmann-pi-automode = bunPkgs.callPackage ./czottmann-pi-automode.nix {
+      inherit mkPiExtension;
+      pin = pins."@czottmann/pi-automode";
     };
   };
 in
