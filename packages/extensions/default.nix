@@ -72,6 +72,7 @@ let
   # `extensionPackages` treats every extension alike.
   firstParty = {
     ext-pi-auto-mode = bunPkgs.callPackage ./pi-auto-mode { inherit mkPiExtension; };
+    ext-pi-notify = bunPkgs.callPackage ./pi-notify { inherit mkPiExtension; };
   };
 in
 lib.mapAttrs' (name: pin: lib.nameValuePair "ext-${slugOf name}" (mkOne name pin)) pins

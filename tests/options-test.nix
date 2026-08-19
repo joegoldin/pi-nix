@@ -14,7 +14,7 @@ let
       # Distinguishable from coding-agent so the default-package assertion
       # below cannot pass by accident.
       coding-agent-bun = pkgs.cowsay;
-      inherit (self.packages.${system}) ext-pi-auto-mode;
+      inherit (self.packages.${system}) ext-pi-auto-mode ext-pi-notify;
     };
     inputs.agent-statusline = self.inputs.agent-statusline;
   };
@@ -157,6 +157,16 @@ let
     };
   };
 
+  # unsafeDiscardStringContext because the rendered notifier is a store path and
+  # fromJSON refuses a string carrying context.
+  notifyJson = builtins.fromJSON (
+    builtins.unsafeDiscardStringContext (builtins.readFile notifyOn.notifications.configFile)
+  );
+
+  # The option default is the real first-party extension, so `enable = true`
+  # alone must be enough.
+  notifyDefaults = evalPi { pi.coding-agent.notifications.enable = true; };
+
   autoOff = evalPi { };
 
   autoOn = evalPi {
@@ -182,7 +192,14 @@ let
   autoJson = builtins.fromJSON (builtins.readFile autoOn.autoMode.configFile);
 
   notifyUnpackaged = builtins.tryEval (
-    lib.deepSeq (evalPi { pi.coding-agent.notifications.enable = true; }).finalArgs "unreachable"
+    lib.deepSeq
+      (evalPi {
+        pi.coding-agent.notifications = {
+          enable = true;
+          package = null;
+        };
+      }).finalArgs
+      "unreachable"
   );
 in
 # The fork ships the Bun build by default. Upstream's option declares
@@ -239,16 +256,30 @@ assert envValue slOn "AGENT_STATUSLINE_CONFIG" != null;
 # The shared schema is mounted verbatim, so every option claude-nix has is here.
 assert slOn.statusline.padding == 2;
 # Disabled contributes nothing at all.
+assert notifyOff.notifications.configFile == null;
+assert envValue notifyOff "PI_NOTIFY_CONFIG" == null;
 assert !(notifyOff.settings ? piNotify);
-# Enabled with a package wires both the flag and the settings block.
+# Enabled wires the extension and the config env var.
 assert lib.elem "/nix/store/fake-notify/index.ts" (flagValues notifyOn.finalArgs "--extension");
+assert envValue notifyOn "PI_NOTIFY_CONFIG" != null;
+assert (envValue notifyOn "PI_NOTIFY_CONFIG").value == "${notifyOn.notifications.configFile}";
+# Config reaches the extension through the environment, never settings.json:
+# pi hands extensions no settings reader, so a piNotify block there would be
+# config nothing can read.
+assert !(notifyOn.settings ? piNotify);
+# The event list becomes the three booleans the extension switches on, and the
+# threshold crosses from seconds to milliseconds exactly once.
+assert notifyJson.enabled == true;
+assert notifyJson.events.agentSettled == true;
+assert notifyJson.events.permissionPrompt == true;
+assert notifyJson.events.longToolCall == false;
+assert notifyJson.longToolCallThresholdMs == 45000;
+assert lib.hasPrefix "/nix/store/" notifyJson.notifier;
+assert notifyJson.appName == "pi";
+# The default package is this flake's own pi-notify, so enable alone works.
 assert
-  notifyOn.settings.piNotify.events == [
-    "settled"
-    "needs_input"
-  ];
-assert notifyOn.settings.piNotify.longRunningToolSeconds == 45;
-assert lib.hasPrefix "/nix/store/" notifyOn.settings.piNotify.notifierCommand;
+  flagValues notifyDefaults.finalArgs "--extension"
+  == selfStub.packages.${system}.ext-pi-notify.passthru.piEntrypoint;
 # Disabled contributes no extension, no environment, and no config file.
 assert autoOff.autoMode.configFile == null;
 assert envValue autoOff "PI_AUTO_MODE_CONFIG" == null;

@@ -147,37 +147,51 @@ let
         pi.coding-agent.notifications.enable is set, but
         pi.coding-agent.notifications.package is null.
 
-        pi ships no notification support and the npm ecosystem has no vetted
-        extension, so pi-nix carries a first-party pi-notify — which does not
-        exist yet (phase 3 of docs/plans/2026-08-18-pi-nix-agent-stack-design.md).
-        Either set notifications.package explicitly or leave
-        notifications.enable off.
+        The option defaults to this flake's packages.ext-pi-notify, so a null
+        here is an explicit choice. Set it to an extension package or leave
+        notifications.enable off: "notifications are on" with no notifier is
+        exactly the state a user would not notice.
       ''
     else
       notifications.package;
 
-  notificationArgs = lib.optionals (notificationsPackage != null) (
+  notificationEntrypoints = lib.optionals (notificationsPackage != null) (
     notificationsPackage.passthru.piEntrypoint or [ ]
   );
 
-  notificationFlags = lib.concatMap (p: [
-    "--extension"
-    p
-  ]) notificationArgs;
+  hasEvent = name: lib.elem name notifications.events;
 
-  # Read by pi-notify at runtime. The notifier path is resolved at build time
-  # so the extension never has to search PATH inside the jail.
-  notificationSettings = lib.optionalAttrs (notificationsPackage != null) {
-    piNotify = {
-      inherit (notifications) notifierCommand events longRunningToolSeconds;
-    };
+  # Read by pi-notify at runtime through PI_NOTIFY_CONFIG. Not settings.json:
+  # ExtensionContext exposes no settings reader (F6), so a piNotify block there
+  # would be config the extension cannot see. The notifier path is resolved at
+  # build time so nothing searches PATH inside the jail.
+  notifyConfigFile =
+    if notificationsPackage == null then
+      null
+    else
+      pkgs.writeText "pi-notify.json" (
+        builtins.toJSON {
+          enabled = true;
+          notifier = notifications.notifierCommand;
+          inherit (notifications) style appName;
+          longToolCallThresholdMs = notifications.longRunningToolSeconds * 1000;
+          events = {
+            permissionPrompt = hasEvent "needs_input";
+            agentSettled = hasEvent "settled";
+            longToolCall = hasEvent "long_running_tool";
+          };
+        }
+      );
+
+  notifyEnv = lib.optionalAttrs (notifyConfigFile != null) {
+    PI_NOTIFY_CONFIG.value = "${notifyConfigFile}";
   };
 
   # One definition of `environment`, assembled from every feature that needs a
   # variable. Merging them here rather than contributing three separate
   # definitions keeps the "defined multiple times" failure that F206 describes
   # to a single boundary: the consumer's own definition against ours.
-  extraEnv = lib.optionalAttrs statusline.enable statuslineEnv // autoModeEnv;
+  extraEnv = lib.optionalAttrs statusline.enable statuslineEnv // autoModeEnv // notifyEnv;
 in
 {
   options = lib.setAttrByPath optionPath {
@@ -398,12 +412,42 @@ in
 
       package = lib.mkOption {
         type = lib.types.nullOr lib.types.package;
-        default = null;
+        default = self.packages.${system}.ext-pi-notify;
+        defaultText = lib.literalExpression "pi-nix's packages.ext-pi-notify";
         description = ''
-          The `pi-notify` extension derivation. Null until pi-nix ships it;
-          setting `enable` without a package is an error rather than a silent
-          no-op, because "notifications on, no notifier" is precisely the state
-          a user would not notice.
+          The `pi-notify` extension derivation. Setting `enable` with a null
+          package is an error rather than a silent no-op, because
+          "notifications on, no notifier" is precisely the state a user would
+          not notice.
+        '';
+      };
+
+      style = lib.mkOption {
+        type = lib.types.enum [
+          "notify-send"
+          "terminal-notifier"
+          "osascript"
+        ];
+        default = if pkgs.stdenv.hostPlatform.isDarwin then "terminal-notifier" else "notify-send";
+        defaultText = lib.literalExpression ''if pkgs.stdenv.hostPlatform.isDarwin then "terminal-notifier" else "notify-send"'';
+        description = ''
+          Which command-line contract `notifierCommand` speaks. The three differ
+          in argument shape, not in capability: `notify-send` takes
+          `--app-name`/`--urgency` then title and body, `terminal-notifier` takes
+          `-title`/`-message`/`-group`, and `osascript` takes one `-e` statement
+          with the text escaped into it.
+
+          Change this together with `notifierCommand`. A mismatch is silent:
+          the wrong binary gets a well-formed argv it does not understand.
+        '';
+      };
+
+      appName = lib.mkOption {
+        type = lib.types.str;
+        default = "pi";
+        description = ''
+          Notification title, and on Linux the `--app-name` value the desktop
+          groups notifications by.
         '';
       };
 
@@ -457,6 +501,13 @@ in
           Duration a tool must exceed before `long_running_tool` fires.
         '';
       };
+
+      configFile = lib.mkOption {
+        type = lib.types.nullOr lib.types.path;
+        internal = true;
+        readOnly = true;
+        description = "Rendered config handed to pi-notify as PI_NOTIFY_CONFIG.";
+      };
     };
 
     finalSystemPrompt = lib.mkOption {
@@ -478,17 +529,16 @@ in
     # mkAfter so our flags land behind anything the user set, and behind
     # upstream's resourceArgs (which are concatenated before extraArgs in
     # options.nix's wrapper).
-    extraArgs = lib.mkAfter (
-      systemPromptArgs ++ promptFragmentArgs ++ statuslineArgs ++ notificationFlags
-    );
+    extraArgs = lib.mkAfter (systemPromptArgs ++ promptFragmentArgs ++ statuslineArgs);
 
     autoMode.configFile = autoModeConfigFile;
+    notifications.configFile = notifyConfigFile;
 
     environment = lib.mkIf (extraEnv != { }) extraEnv;
 
-    extensions = extEntrypoints ++ autoModeEntrypoints;
+    extensions = extEntrypoints ++ autoModeEntrypoints ++ notificationEntrypoints;
     skills = extSkills;
     promptTemplates = extPrompts;
-    settings = lib.recursiveUpdate extSettings notificationSettings;
+    settings = extSettings;
   };
 }

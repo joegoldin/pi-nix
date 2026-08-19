@@ -37,6 +37,7 @@ let
     "ext-pi-background-tasks"
     "ext-pi-cache-optimizer"
     "ext-pi-mcp-adapter"
+    "ext-pi-notify"
     "ext-pi-subagents"
   ];
 
@@ -70,7 +71,11 @@ let
     assert exts.ext-pi-auto-mode.passthru.settings == { };
     assert exts.ext-pi-auto-mode.passthru.promptFragment == null;
     # It carries no pin, so extensions.json must not have grown one.
+    assert exts.ext-pi-notify.passthru.piEntrypoint == [ "${exts.ext-pi-notify}/src/index.ts" ];
+    # Neither first-party extension carries a pin, so extensions.json must not
+    # have grown one.
     assert !(pins ? pi-auto-mode);
+    assert !(pins ? pi-notify);
     # Exactly one pin takes the bundled branch, and it is the one with no
     # runtime dependencies. If a future bump gives pi-cache-optimizer a
     # dependency, this fires before anything ships a broken node_modules.

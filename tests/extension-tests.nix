@@ -102,4 +102,5 @@ let
 in
 lib.mapAttrs mkTest {
   pi-auto-mode = ../packages/extensions/pi-auto-mode;
+  pi-notify = ../packages/extensions/pi-notify;
 }
