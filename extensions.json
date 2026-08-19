@@ -107,5 +107,14 @@
     "prompts": [],
     "repositoryUnverifiable": "https://github.com/nicobailon/pi-intercom",
     "pinVerification": "npm publishes no repository field; see plan Task 2 Step 1"
+  },
+  "@czottmann/pi-automode": {
+    "version": "1.11.0",
+    "url": "https://registry.npmjs.org/@czottmann/pi-automode/-/pi-automode-1.11.0.tgz",
+    "hash": "sha512-Q4Jn3yMpH0VPgd8i0YWv0reWZ/X59qFRzwrv3cUvAa7svHKCr7WJ3YPzC/6rAKFn43M3sQSTkpfWGXbLYhTfZw==",
+    "bundled": true,
+    "entrypoints": [],
+    "skills": [],
+    "prompts": []
   }
 }

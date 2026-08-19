@@ -26,6 +26,7 @@ let
   };
 
   expectedNames = [
+    "ext-czottmann-pi-automode"
     "ext-gotgenes-pi-permission-system"
     "ext-heyhuynhgiabuu-pi-pretty"
     "ext-juicesharp-rpiv-ask-user-question"
@@ -88,19 +89,24 @@ let
     assert !(pins ? pi-auto-mode);
     assert !(pins ? pi-notify);
     assert !(pins ? pi-voice);
-    # Two pins take the bundled branch, and both need no node_modules:
-    # pi-cache-optimizer declares no runtime dependency at all, and pi-intercom
-    # declares only tsx, which is never reached because the module launches the
-    # broker with bun. If a future bump gives either one a dependency that is
-    # actually loaded, this fires before anything ships a broken node_modules.
+    # Three pins take the bundled branch, and none needs node_modules:
+    # pi-cache-optimizer and @czottmann/pi-automode declare no runtime
+    # dependency at all (pi-automode's only declared deps are peers on
+    # @earendil-works/*, which the host process already provides), and
+    # pi-intercom declares only tsx, which is never reached because the module
+    # launches the broker with bun. If a future bump gives one of them a
+    # dependency that is actually loaded, this fires before anything ships a
+    # broken node_modules.
     assert pins."pi-cache-optimizer".bundled;
     assert pins."pi-intercom".bundled;
+    assert pins."@czottmann/pi-automode".bundled;
     assert lib.all (n: !pins.${n}.bundled) (
       lib.filter (
         n:
         !(lib.elem n [
           "pi-cache-optimizer"
           "pi-intercom"
+          "@czottmann/pi-automode"
         ])
       ) (builtins.attrNames pins)
     );
@@ -140,6 +146,7 @@ pkgs.runCommand "pi-nix-extensions-tests" { nativeBuildInputs = [ pkgs.jq ]; } '
   check ${exts.ext-narumitw-pi-btw} deps
   check ${exts.ext-heyhuynhgiabuu-pi-pretty} deps
   check ${exts.ext-pi-cache-optimizer} nodeps
+  check ${exts.ext-czottmann-pi-automode} nodeps
 
   # Skills and prompts advertised through the passthru must be real directories.
   test -d ${exts.ext-pi-mcp-adapter}/skills
@@ -155,6 +162,7 @@ pkgs.runCommand "pi-nix-extensions-tests" { nativeBuildInputs = [ pkgs.jq ]; } '
   # pi-cache-optimizer has no dependencies at all; a node_modules here would
   # mean the bundled branch quietly grew a bun install.
   ! test -e ${exts.ext-pi-cache-optimizer}/node_modules
+  ! test -e ${exts.ext-czottmann-pi-automode}/node_modules
 
   touch $out
 ''

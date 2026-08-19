@@ -16,13 +16,14 @@ let
   slugOf = name: lib.replaceStrings [ "@" "/" ] [ "" "-" ] name;
 
   # Nix-side configuration per extension, merged into settings.json when the
-  # extension is enabled. Every entry is `{ }` today: verified on 2026-08-18,
-  # none of the eleven pins reads pi's settings.json. pi-mcp-adapter reads
+  # extension is enabled. Every entry is `{ }` today: verified on 2026-08-19,
+  # none of the twelve pins reads pi's settings.json. pi-mcp-adapter reads
   # ~/.config/mcp/mcp.json and ~/.agents/mcp.json; the @juicesharp packages
   # read their own rpiv-* config; pi-pretty and pi-cache-optimizer both write
-  # under getAgentDir(). The mechanism is here for
-  # pins that do, and is exercised by the synthetic case in
-  # tests/extensions-test.nix.
+  # under getAgentDir(); @czottmann/pi-automode reads
+  # ~/.pi/agent/automode.json, which the autoMode option writes through
+  # configFiles. The mechanism is here for pins that do, and is exercised by
+  # the synthetic case in tests/extensions-test.nix.
   settingsFor = {
     pi-mcp-adapter = { };
     pi-subagents = { };

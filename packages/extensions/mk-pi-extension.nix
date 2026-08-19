@@ -21,9 +21,10 @@
 #           regenerates both.
 #
 # Design assumption A4 predicted `bundled = true` would be the common case
-# because packages would ship a self-contained dist. That is false for all
-# eleven pins. The branch survives for an unrelated reason: pi-cache-optimizer
-# has zero runtime dependencies, so there is nothing for bun to install.
+# because packages would ship a self-contained dist. No pin ships one. The
+# branch survives for an unrelated reason: pi-cache-optimizer and
+# @czottmann/pi-automode have zero runtime dependencies, so there is nothing
+# for bun to install.
 {
   pname,
   version,
