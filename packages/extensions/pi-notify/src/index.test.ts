@@ -79,6 +79,25 @@ describe("registerHandlers", () => {
 		expect(h.exec).toHaveBeenCalledTimes(1);
 	});
 
+	// PermissionUiPromptEvent has no toolName. The display name lives in
+	// `surface` (the permission system's permission-events.ts), so reading
+	// toolName made every one of these notifications say "a tool call".
+	it("names the surface from a pi-permission-system prompt", async () => {
+		const h = host();
+		registerHandlers(h as never, config, () => 0);
+		h.emit(PERMISSIONS_UI_PROMPT_CHANNEL, { requestId: "r1", surface: "bash", value: "git push" });
+		await settle();
+		expect((h.exec.mock.calls[0]![1] as string[]).join(" ")).toContain("bash");
+	});
+
+	it("falls back to a generic phrase when the prompt names nothing", async () => {
+		const h = host();
+		registerHandlers(h as never, config, () => 0);
+		h.emit(PERMISSIONS_UI_PROMPT_CHANNEL, { requestId: "r1" });
+		await settle();
+		expect((h.exec.mock.calls[0]![1] as string[]).join(" ")).toContain("a tool call");
+	});
+
 	it("stays silent for a tool call under the threshold", async () => {
 		const h = host();
 		let clock = 0;

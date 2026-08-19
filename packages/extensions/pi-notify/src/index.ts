@@ -70,7 +70,16 @@ export function registerHandlers(pi: NotifyHost, config: NotifyConfig, now: () =
 
 		const onPrompt = (data: unknown) => {
 			const d = (data ?? {}) as Record<string, unknown>;
-			const tool = typeof d.toolName === "string" && d.toolName !== "" ? d.toolName : "a tool call";
+			// PermissionUiPromptEvent carries `surface` ("bash", "skill", "read"),
+			// never `toolName`, so reading toolName alone made every one of these
+			// say "a tool call" and named nothing. toolName is still consulted
+			// second because the auto-mode prompt channel is declared with that
+			// shape, and the generic phrase is the honest answer when a prompt
+			// identifies nothing at all.
+			const named = [d.surface, d.toolName].find(
+				(v) => typeof v === "string" && v !== "",
+			);
+			const tool = typeof named === "string" ? named : "a tool call";
 			const requestId = typeof d.requestId === "string" && d.requestId !== "" ? d.requestId : null;
 			// Tracking an ask that carries no requestId would leak a handle that
 			// nothing can ever match, so those notifications are fire and forget.

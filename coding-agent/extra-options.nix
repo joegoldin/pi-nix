@@ -461,6 +461,11 @@ let
           pkgs.fd
           pkgs.gh
           pkgs.libnotify
+          # gdbus, for closing a notification once its ask is answered.
+          # CloseNotification is a D-Bus method with no CLI of its own, and the
+          # `notifications` combinator already grants talk on that destination,
+          # so this is the only missing piece.
+          pkgs.glib.bin
           # The shell pi's bash tool actually runs, and the one a person types
           # into. pi resolves its shell as /bin/bash, then bash on PATH, then
           # bare `sh` (pi-coding-agent's dist/utils/shell.js). Inside
@@ -712,6 +717,8 @@ let
           notifier = notifications.notifierCommand;
           inherit (notifications) style appName;
           longToolCallThresholdMs = notifications.longRunningToolSeconds * 1000;
+          inherit (notifications) dismissOnResolve;
+          dismisser = notifications.dismisserCommand;
           events = {
             permissionPrompt = hasEvent "needs_input";
             agentSettled = hasEvent "settled";
@@ -1304,6 +1311,41 @@ in
         default = 30;
         description = ''
           Duration a tool must exceed before `long_running_tool` fires.
+        '';
+      };
+
+      dismissOnResolve = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = ''
+          Close the `needs_input` notification once the permission ask has been
+          answered, rather than leaving it up until it times out. It is raised
+          at critical urgency, which on most Linux desktops means it never
+          times out at all.
+
+          Driven by pi-permission-system's `permissions:decision` broadcast,
+          correlated to the prompt by `requestId`. A prompt from any other
+          source carries no request id and is left alone.
+        '';
+      };
+
+      dismisserCommand = lib.mkOption {
+        type = lib.types.str;
+        default = if pkgs.stdenv.hostPlatform.isDarwin then "" else "${pkgs.glib.bin}/bin/gdbus";
+        defaultText = lib.literalExpression ''
+          if pkgs.stdenv.hostPlatform.isDarwin then "" else "''${pkgs.glib.bin}/bin/gdbus"
+        '';
+        description = ''
+          Absolute path to the D-Bus client that closes a notify-send
+          notification, resolved at build time for the same reason
+          `notifierCommand` is. `org.freedesktop.Notifications.CloseNotification`
+          is a D-Bus method with no CLI of its own, so without a client here a
+          notify-send notification is left to time out.
+
+          Unused by the `terminal-notifier` and `osascript` styles:
+          terminal-notifier removes by group through its own binary, and
+          Notification Center exposes no way to close an osascript notification
+          at all. Empty is the correct value on Darwin.
         '';
       };
 
