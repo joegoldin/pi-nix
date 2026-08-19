@@ -564,7 +564,8 @@ let
     # consumer who writes a plain (non-mkDefault) definition replaces this whole
     # list, and a microphone that is simply absent reports no error at all. The
     # same function is exposed as `voice.jailPermissions` for exactly that case.
-    ++ cfg.voice.jailPermissions combinators;
+    ++ cfg.voice.jailPermissions combinators
+    ++ extrasJailPermissions combinators;
 
   msg = cfg.messaging;
 
@@ -677,6 +678,48 @@ let
 
   voiceEntrypoints = lib.optionals voice.enable voice.package.passthru.piEntrypoint;
 
+  extras = cfg.extras;
+
+  # The clipboard crosses the jail boundary as text, not as a socket.
+  #
+  # jail.nix ships a `wayland` combinator, and it is the wrong tool here twice
+  # over. It hard-fails: `fwd-env` exits non-zero when the variable is unset and
+  # `readonly` errors when the path is missing, so adding it stops pi starting
+  # on a TTY, over SSH, or on any host without a compositor. And it grants a
+  # live compositor connection to copy a line of text, which is far more
+  # authority than the job needs.
+  #
+  # `jail-to-host-channel` is the primitive that fits: one named program inside
+  # the jail whose single argument is piped to a script outside it. No socket is
+  # bound, no WAYLAND_DISPLAY is forwarded, and a headless host degrades to a
+  # failing copy rather than a session that will not start.
+  extrasClipboardChannel = "piExtrasCopyToHost";
+
+  # The channel takes its text as argv[1]; the extension writes to stdin
+  # (clipboard.ts's spawnRunner). This shim is the whole bridge.
+  extrasClipboardShim = pkgs.writeShellApplication {
+    name = "pi-extras-copy";
+    text = ''
+      exec ${extrasClipboardChannel} "$(cat)"
+    '';
+  };
+
+  extrasEnv = lib.optionalAttrs extras.enable {
+    PI_EXTRAS_CLIPBOARD.value = "${lib.getExe extrasClipboardShim}";
+    PI_EXTRAS_GIT_EDITOR.value = extras.gitEditorCommand;
+  };
+
+  extrasEntrypoints = lib.optionals extras.enable extras.package.passthru.piEntrypoint;
+
+  extrasJailPermissions =
+    combinators:
+    lib.optionals (extras.enable && extras.clipboardCommand != null) [
+      (combinators.jail-to-host-channel extrasClipboardChannel ''
+        printf '%s' "$1" | ${extras.clipboardCommand}
+      '')
+      (combinators.add-pkg-deps [ extrasClipboardShim ])
+    ];
+
   foreignSkillsEntrypoints = lib.optionals cfg.foreignSkills.enable cfg.foreignSkills.package.passthru.piEntrypoint;
 
   notifications = cfg.notifications;
@@ -740,7 +783,8 @@ let
     // autoModeEnv
     // notifyEnv
     // messagingEnv
-    // voiceEnv;
+    // voiceEnv
+    // extrasEnv;
 in
 {
   options = lib.setAttrByPath optionPath {
@@ -1357,6 +1401,71 @@ in
       };
     };
 
+    extras = {
+      enable = lib.mkEnableOption ''
+        prompt stash, chord keybindings, registers and session shortcuts.
+
+        A first-party extension covering what @mrclrchtr/supi-extras and
+        @pi-unipi/input-shortcuts each provide: /exit, /clear, /clone-session
+        and a /stash overlay, a persistent prompt stash with ten numbered
+        registers, undo and redo over the input, clipboard copy and cut, a
+        thinking-level cycle, and a terminal tab title that shows when the
+        agent is working.
+
+        It deliberately draws no status line of its own. Both upstreams render
+        a footer, and this stack already has one
+      '';
+
+      package = lib.mkOption {
+        type = lib.types.package;
+        default = self.packages.${system}.ext-pi-extras;
+        defaultText = lib.literalExpression "pi-nix's packages.ext-pi-extras";
+        description = "The extension providing the stash, chords and shortcuts.";
+      };
+
+      clipboardCommand = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default =
+          if pkgs.stdenv.hostPlatform.isDarwin then
+            "${pkgs.pbcopy or pkgs.coreutils}/bin/pbcopy"
+          else
+            "${pkgs.wl-clipboard}/bin/wl-copy";
+        defaultText = lib.literalExpression ''"''${pkgs.wl-clipboard}/bin/wl-copy", or pbcopy on darwin'';
+        description = ''
+          The command that receives copied text, run OUTSIDE the jail.
+
+          The text crosses the boundary through jail.nix's
+          `jail-to-host-channel`: one named program inside the jail whose
+          argument is piped to this command outside it. No compositor socket is
+          bound and no `WAYLAND_DISPLAY` is forwarded.
+
+          That matters twice over. jail.nix's `wayland` combinator hard-fails,
+          because `fwd-env` exits non-zero on an unset variable and `readonly`
+          errors on a missing path, so binding the socket would stop pi starting
+          on a TTY, over SSH, or on any host with no compositor. And a live
+          compositor connection is far more authority than copying a line of
+          text needs.
+
+          Set to null to drop the copy and cut chords entirely; the extension
+          treats an absent clipboard as an ordinary state rather than an error.
+        '';
+      };
+
+      gitEditorCommand = lib.mkOption {
+        type = lib.types.str;
+        default = "${pkgs.coreutils}/bin/true";
+        defaultText = lib.literalExpression ''"''${pkgs.coreutils}/bin/true"'';
+        description = ''
+          What GIT_EDITOR and EDITOR are set to for commands the agent runs.
+
+          A git command that opens an editor waits for a human who is not
+          there, and the session hangs until it is killed. `true` exits zero
+          immediately, which makes git take the message it already has instead
+          of blocking.
+        '';
+      };
+    };
+
     foreignSkills = {
       enable = lib.mkEnableOption ''
         loading skills from another agent's directory layout.
@@ -1676,7 +1785,8 @@ in
       ++ notificationEntrypoints
       ++ messagingEntrypoints
       ++ voiceEntrypoints
-      ++ foreignSkillsEntrypoints;
+      ++ foreignSkillsEntrypoints
+      ++ extrasEntrypoints;
     skills = extSkills ++ messagingSkills;
     promptTemplates = extPrompts;
     settings = extSettings;

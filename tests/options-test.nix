@@ -19,6 +19,7 @@ let
         ext-pi-notify
         ext-pi-voice
         ext-pi-foreign-skills
+        ext-pi-extras
         ;
     };
     inputs.agent-statusline = self.inputs.agent-statusline;
@@ -290,6 +291,7 @@ let
     try-fwd-env = v: "try-fwd-env:${v}";
     add-pkg-deps = ps: "add-pkg-deps:${toString (builtins.length ps)}";
     set-env = n: v: "set-env:${n}=${v}";
+    jail-to-host-channel = name: _script: "jail-to-host-channel:${name}";
   };
 
   # The jail default itself, which is where the toolchain and the shell live.
@@ -457,6 +459,18 @@ assert
     enabled = true;
     classifierIo = false;
   };
+# pi-extras is off by default and contributes its entrypoint when enabled. The
+# clipboard crosses the jail as text through a host channel, never as a bound
+# compositor socket, so enabling it adds no wayland permission.
+assert !(lib.any (e: lib.hasInfix "pi-extras" e) (evalPi { }).extensions);
+assert lib.any (e: lib.hasInfix "pi-extras" e)
+  (evalPi { pi.coding-agent.extras.enable = true; }).extensions;
+assert
+  let
+    perms = (evalPi { pi.coding-agent.extras.enable = true; }).jail.permissions fakeCombinators;
+  in
+  !(lib.any (p: lib.hasInfix "wayland" p) perms);
+
 # The foreign-skills extension is off by default and contributes its entrypoint
 # when enabled. `.claude/skills` is not one of pi's skill roots and settings.json
 # cannot add it, so this extension is the only path to it.
