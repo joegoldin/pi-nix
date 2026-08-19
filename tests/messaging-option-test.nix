@@ -119,7 +119,9 @@ let
     }
     {
       name = "the untrusted-peer prompt fragment reaches the appended prompt";
-      ok = lib.any (t: t == on.messaging.package.passthru.promptFragment) appendedPrompts;
+      ok =
+        lib.any (t: t == on.messaging.package.passthru.promptFragment) appendedPrompts
+        && lib.any (t: lib.hasInfix "peer" (lib.toLower t)) appendedPrompts;
     }
   ];
 

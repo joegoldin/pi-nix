@@ -21,5 +21,6 @@ in
   pi-intercom-broker-tests = import ./pi-intercom-broker-tests.nix args;
   pi-intercom-smoke = import ./pi-intercom-smoke-test.nix args;
   messaging-option = import ./messaging-option-test.nix args;
+  prompt-fragment-inventory = import ./prompt-lint.nix args;
 }
 // import ./extension-tests.nix args
