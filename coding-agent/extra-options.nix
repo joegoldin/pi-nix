@@ -168,55 +168,64 @@ let
   # notifications ]` silently hands jail.nix an option submodule instead of a
   # permission. It fails late, at finalPackage, with "attempt to call something
   # which is not a function but a set".
-  jailPermissions = combinators: [
-    combinators.network
-    combinators.mount-cwd
-    # pi-notify shells out to notify-send, which needs a talk permission on
-    # org.freedesktop.Notifications. Without this the extension is silently
-    # inert inside the jail: exec succeeds, nothing appears.
-    combinators.notifications
-    # The messaging broker is a separate process the extension spawns from
-    # inside the sandbox, so its interpreter has to be in there with it. That
-    # interpreter is bun, the same runtime pi already is, which is why this is
-    # one package rather than the nodejs plus tsx pair upstream's default launch
-    # path would have needed.
-    (combinators.add-pkg-deps (
-      [
-        pkgs.gitMinimal
-        pkgs.openssh
-        pkgs.gnumake
-        pkgs.jq
-        pkgs.nodejs
-        pkgs.python3
-        pkgs.ripgrep
-        pkgs.fd
-        pkgs.gh
-        pkgs.libnotify
-      ]
-      ++ messagingRuntimeInputs
-    ))
-    # Mirrors modules/ai/claude.nix's extraSandbox.filesystem.allowRead, which
-    # is these four paths and no others. 1Password's agent socket covers
-    # agent-backed SSH and signing; known_hosts and ~/.ssh/config cover
-    # host-key verification and per-host config. Private key files
-    # (~/.ssh/id_*) are deliberately ABSENT — the 1Password agent is the
-    # supported path here, and the jail is the layer that makes that omission
-    # mean something.
-    #
-    # The agent socket is read-only, which was measured rather than assumed.
-    # F7 predicted a read-only bind would refuse the AF_UNIX connect, because
-    # connect() wants write on the inode. Under bubblewrap's --ro-bind-try it
-    # does not: `ssh-add -l` inside this jail listed the key with the socket
-    # bound read-only. If a kernel ever disagrees the failure is loud
-    # ("Error connecting to agent: Permission denied") and the fix is to change
-    # this one line to try-readwrite. Do not widen the three ~/.ssh entries
-    # with it: those are genuinely read-only data.
-    (combinators.try-readonly (combinators.noescape "~/.1password/agent.sock"))
-    (combinators.try-readonly (combinators.noescape "~/.ssh/known_hosts"))
-    (combinators.try-readonly (combinators.noescape "~/.ssh/known_hosts2"))
-    (combinators.try-readonly (combinators.noescape "~/.ssh/config"))
-    (combinators.try-fwd-env "SSH_AUTH_SOCK")
-  ];
+  jailPermissions =
+    combinators:
+    [
+      combinators.network
+      combinators.mount-cwd
+      # pi-notify shells out to notify-send, which needs a talk permission on
+      # org.freedesktop.Notifications. Without this the extension is silently
+      # inert inside the jail: exec succeeds, nothing appears.
+      combinators.notifications
+      # The messaging broker is a separate process the extension spawns from
+      # inside the sandbox, so its interpreter has to be in there with it. That
+      # interpreter is bun, the same runtime pi already is, which is why this is
+      # one package rather than the nodejs plus tsx pair upstream's default launch
+      # path would have needed.
+      (combinators.add-pkg-deps (
+        [
+          pkgs.gitMinimal
+          pkgs.openssh
+          pkgs.gnumake
+          pkgs.jq
+          pkgs.nodejs
+          pkgs.python3
+          pkgs.ripgrep
+          pkgs.fd
+          pkgs.gh
+          pkgs.libnotify
+        ]
+        ++ messagingRuntimeInputs
+      ))
+      # Mirrors modules/ai/claude.nix's extraSandbox.filesystem.allowRead, which
+      # is these four paths and no others. 1Password's agent socket covers
+      # agent-backed SSH and signing; known_hosts and ~/.ssh/config cover
+      # host-key verification and per-host config. Private key files
+      # (~/.ssh/id_*) are deliberately ABSENT — the 1Password agent is the
+      # supported path here, and the jail is the layer that makes that omission
+      # mean something.
+      #
+      # The agent socket is read-only, which was measured rather than assumed.
+      # F7 predicted a read-only bind would refuse the AF_UNIX connect, because
+      # connect() wants write on the inode. Under bubblewrap's --ro-bind-try it
+      # does not: `ssh-add -l` inside this jail listed the key with the socket
+      # bound read-only. If a kernel ever disagrees the failure is loud
+      # ("Error connecting to agent: Permission denied") and the fix is to change
+      # this one line to try-readwrite. Do not widen the three ~/.ssh entries
+      # with it: those are genuinely read-only data.
+      (combinators.try-readonly (combinators.noescape "~/.1password/agent.sock"))
+      (combinators.try-readonly (combinators.noescape "~/.ssh/known_hosts"))
+      (combinators.try-readonly (combinators.noescape "~/.ssh/known_hosts2"))
+      (combinators.try-readonly (combinators.noescape "~/.ssh/config"))
+      (combinators.try-fwd-env "SSH_AUTH_SOCK")
+    ]
+    # Spliced rather than left for the consumer to remember. jail.permissions is
+    # function-typed, and `functionTo (listOf raw)` does merge: every definition
+    # is applied to the same combinators and the results concatenate. But a
+    # consumer who writes a plain (non-mkDefault) definition replaces this whole
+    # list, and a microphone that is simply absent reports no error at all. The
+    # same function is exposed as `voice.jailPermissions` for exactly that case.
+    ++ cfg.voice.jailPermissions combinators;
 
   msg = cfg.messaging;
 
@@ -297,6 +306,37 @@ let
     PI_INTERCOM_ASK_TIMEOUT_MS.value = toString (msg.askTimeoutSeconds * 1000);
   };
 
+  voice = cfg.voice;
+
+  # `--stream` and `-t` are added by the extension itself, so this carries only
+  # what Nix has an opinion about. The device is named here rather than left to
+  # audiomemo's own `record.device`, because its picker is an interactive TUI
+  # and `--stream` is headless.
+  voiceArgs =
+    lib.optionals (voice.device != null) [
+      "-D"
+      voice.device
+    ]
+    ++ voice.extraArgs;
+
+  voiceEnv = lib.optionalAttrs voice.enable (
+    {
+      # An absolute store path, not `record` on PATH: inside the jail nothing is
+      # on PATH unless a permission put it there, and the closure this points at
+      # is the one add-pkg-deps binds.
+      PI_VOICE_RECORD_BIN.value = "${voice.audiomemo}/bin/record";
+      PI_VOICE_RECORD_ARGS.value = lib.concatStringsSep " " voiceArgs;
+      PI_VOICE_BAR_WIDTH.value = toString voice.barWidth;
+      PI_VOICE_PLACEMENT.value = voice.placement;
+    }
+    # Key *paths*, never key values. audiomemo opens the file itself
+    # (internal/config/config.go), so no secret enters the store or this
+    # process's environment.
+    // lib.mapAttrs (_: path: { value = path; }) voice.keyFiles
+  );
+
+  voiceEntrypoints = lib.optionals voice.enable voice.package.passthru.piEntrypoint;
+
   notifications = cfg.notifications;
 
   notificationsPackage =
@@ -352,7 +392,11 @@ let
   # definitions keeps the "defined multiple times" failure that F206 describes
   # to a single boundary: the consumer's own definition against ours.
   extraEnv =
-    lib.optionalAttrs statusline.enable statuslineEnv // autoModeEnv // notifyEnv // messagingEnv;
+    lib.optionalAttrs statusline.enable statuslineEnv
+    // autoModeEnv
+    // notifyEnv
+    // messagingEnv
+    // voiceEnv;
 in
 {
   options = lib.setAttrByPath optionPath {
@@ -752,6 +796,159 @@ in
       };
     };
 
+    voice = lib.mkOption {
+      default = { };
+      description = ''
+        Dictation through the first-party pi-voice extension, which drives
+        `audiomemo record --stream` and pastes what it hears into the editor.
+
+        Every decision about devices, backends, formats, and secrets stays in
+        audiomemo. This option surface is the wiring: which binary, which
+        device, and which files the sandbox has to be able to reach.
+      '';
+      type = lib.types.submodule (
+        { config, ... }:
+        {
+          options = {
+            enable = lib.mkEnableOption "pi-voice dictation";
+
+            package = lib.mkOption {
+              type = lib.types.package;
+              default = self.packages.${system}.ext-pi-voice;
+              defaultText = lib.literalExpression "pi-nix's packages.ext-pi-voice";
+              description = ''
+                The pi-voice extension package. Must satisfy the mkPiExtension
+                passthru contract.
+              '';
+            };
+
+            audiomemo = lib.mkOption {
+              type = lib.types.package;
+              description = ''
+                The audiomemo package providing `record`. Its runtime closure
+                carries ffmpeg, so binding that closure is what makes recording
+                possible inside the jail.
+
+                There is deliberately no default. The jail binds the closure of
+                the exact derivation named here, so guessing would produce a
+                sandbox whose microphone silently lists no devices.
+              '';
+            };
+
+            device = lib.mkOption {
+              type = lib.types.nullOr lib.types.str;
+              default = null;
+              example = "mic";
+              description = ''
+                Device alias, group, or raw name passed as `-D`. Null uses
+                `record.device` from audiomemo's own config, which is where
+                that decision belongs. But audiomemo's picker is an interactive
+                TUI and `--stream` is headless, so a machine with no configured
+                default wants a name here.
+              '';
+            };
+
+            extraArgs = lib.mkOption {
+              type = lib.types.listOf lib.types.str;
+              default = [ ];
+              example = [ "--temp" ];
+              description = ''
+                Further arguments for `record`. `--stream` and `-t` are always
+                passed by the extension and cannot be removed here.
+              '';
+            };
+
+            barWidth = lib.mkOption {
+              type = lib.types.ints.between 1 64;
+              default = 12;
+              description = "Width of the VU bar, in terminal cells.";
+            };
+
+            placement = lib.mkOption {
+              type = lib.types.enum [
+                "aboveEditor"
+                "belowEditor"
+              ];
+              default = "belowEditor";
+              description = "Where the voice widget sits relative to the input editor.";
+            };
+
+            keyFiles = lib.mkOption {
+              type = lib.types.attrsOf lib.types.str;
+              default = { };
+              example = lib.literalExpression ''
+                {
+                  ELEVENLABS_API_KEY_FILE = "/run/agenix/elevenlabs_api_key";
+                  DEEPGRAM_API_KEY_FILE = "/run/agenix/deepgram_api_key";
+                }
+              '';
+              description = ''
+                Paths to files holding API keys, exported as `*_API_KEY_FILE`.
+                audiomemo opens the files itself, so no secret enters the store
+                or any process environment. Each path is also bound read-only
+                into the jail.
+
+                Recognised names: ELEVENLABS_API_KEY_FILE,
+                DEEPGRAM_API_KEY_FILE, OPENAI_API_KEY_FILE,
+                MISTRAL_API_KEY_FILE, HF_TOKEN_FILE. An unset variable reads as
+                "this backend is unconfigured", which is the right answer for a
+                machine with no such key.
+              '';
+            };
+
+            configFile = lib.mkOption {
+              type = lib.types.nullOr lib.types.str;
+              default = null;
+              example = "/home/joe/.config/audiomemo/config.toml";
+              description = ''
+                audiomemo's config file, used to build the jail's read bind.
+                jail.nix's base permission puts a tmpfs over $HOME, so without
+                this the file is absent, `record` decides it needs onboarding,
+                and it dies opening /dev/tty. Not an optional nicety.
+              '';
+            };
+
+            jailPermissions = lib.mkOption {
+              type = lib.types.functionTo (lib.types.listOf lib.types.raw);
+              readOnly = true;
+              default =
+                combinators:
+                lib.optionals config.enable (
+                  [
+                    # Measured on 2026-08-18, not assumed: with the PulseAudio
+                    # socket bound, `audiomemo record -L` inside a jail-shaped
+                    # bwrap lists every device and ffmpeg captures audio.
+                    # Without it the list is empty and the exit status is zero,
+                    # which is the same silent-empty failure the design already
+                    # documents for API keys. /dev/snd is not needed: audiomemo
+                    # shells to `ffmpeg -f pulse` and never touches ALSA.
+                    combinators.pulse
+                    combinators.pipewire
+                    (combinators.add-pkg-deps [ config.audiomemo ])
+                  ]
+                  ++ lib.optional (config.configFile != null) (combinators.try-readonly config.configFile)
+                  ++ map combinators.try-readonly (lib.attrValues config.keyFiles)
+                );
+              description = ''
+                The permissions this option needs from jail.nix, exposed so a
+                consumer who replaces `jail.permissions` outright can splice
+                them back in:
+
+                  jail.permissions = c:
+                    (with c; [ network mount-cwd ])
+                    ++ config.programs.pi.coding-agent.voice.jailPermissions c;
+
+                A consumer who leaves `jail.permissions` alone, or defines it
+                with mkDefault, needs none of this: the module's own default
+                already carries these entries and function-typed list options
+                merge by concatenation.
+              '';
+            };
+          };
+        }
+      );
+    };
+
     finalConfigFiles = lib.mkOption {
       type = lib.types.attrsOf lib.types.attrs;
       internal = true;
@@ -800,7 +997,11 @@ in
     environment = lib.mkIf (extraEnv != { }) extraEnv;
 
     extensions =
-      extEntrypoints ++ autoModeEntrypoints ++ notificationEntrypoints ++ messagingEntrypoints;
+      extEntrypoints
+      ++ autoModeEntrypoints
+      ++ notificationEntrypoints
+      ++ messagingEntrypoints
+      ++ voiceEntrypoints;
     skills = extSkills ++ messagingSkills;
     promptTemplates = extPrompts;
     settings = extSettings;

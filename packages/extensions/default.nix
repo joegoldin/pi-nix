@@ -73,6 +73,7 @@ let
   firstParty = {
     ext-pi-auto-mode = bunPkgs.callPackage ./pi-auto-mode { inherit mkPiExtension; };
     ext-pi-notify = bunPkgs.callPackage ./pi-notify { inherit mkPiExtension; };
+    ext-pi-voice = bunPkgs.callPackage ./pi-voice { inherit mkPiExtension; };
   };
 
   # pi-intercom is pinned like the others but built by its own file, because it

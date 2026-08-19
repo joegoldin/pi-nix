@@ -115,6 +115,46 @@ This fork adds:
 | `messaging.confirmSend` | bool | `false` | Confirm ordinary outbound messages. Replies are never gated. |
 | `messaging.askTimeoutSeconds` | int | `300` | How long a blocking request to a peer waits. Upstream's default is 600. |
 | `messaging.installSkill` | bool | `false` | Also pass the extension's bundled skills via `--skill`. |
+| `voice.enable` | bool | `false` | Dictation through the first-party `pi-voice` extension, over `audiomemo record --stream`. |
+| `voice.package` | package | `ext-pi-voice` | The `pi-voice` derivation. Must satisfy the `mkPiExtension` passthru contract. |
+| `voice.audiomemo` | package | *(none)* | The audiomemo package providing `record`. No default: the jail binds this exact derivation's closure. |
+| `voice.device` | `null \| str` | `null` | Device alias or name passed as `-D`. Null defers to audiomemo's own config, whose picker is an interactive TUI. |
+| `voice.extraArgs` | `[str]` | `[ ]` | Further `record` arguments. `--stream` and `-t` are always passed. |
+| `voice.barWidth` | int | `12` | Width of the VU bar, in cells. |
+| `voice.placement` | enum | `belowEditor` | Where the voice widget sits relative to the editor. |
+| `voice.keyFiles` | `{str: str}` | `{ }` | `*_API_KEY_FILE` paths. audiomemo opens the files itself, so no secret enters the store. Each is bound read-only into the jail. |
+| `voice.configFile` | `null \| str` | `null` | audiomemo's config file, bound read-only into the jail. Without it `record` tries to onboard and dies on `/dev/tty`. |
+| `voice.jailPermissions` | function | read-only | The jail entries voice needs, for a consumer who replaces `jail.permissions` outright. |
+
+### Voice
+
+`/voice` starts and stops dictation. pi-voice spawns `audiomemo record
+--stream`, which writes one JSON object per line while it records: the mic
+level, the live partial text, the committed text, and one final transcript.
+The extension draws two rows below the editor: a record dot, a clock, a VU
+bar, a dB readout, and the transcript with the moving partial dimmed. The
+finished text arrives in the editor through `ctx.ui.pasteToEditor`.
+
+Every decision about devices, backends, formats, and secrets stays in
+audiomemo. Keys travel as `*_API_KEY_FILE` paths and audiomemo opens the files
+itself, so no key value reaches the store or any process environment.
+
+While the microphone is live, pi-voice merges `{"voice":{"enabled":true,"mode":
+"toggle"}}` into `$CLAUDE_CONFIG_DIR/settings.local.json`, which is the file
+agent-statusline's `voice` widget already reads. The contract is
+harness-independent: any producer that owns the microphone can write it, and
+the same widget lights under pi and under Claude Code. Stopping writes
+`enabled: false` rather than deleting the key, because an absent key lets a
+lower settings layer answer instead.
+
+Inside the jail the microphone is not merely restricted without
+`voice.jailPermissions`: it is absent. `audiomemo record -L` with no audio
+socket bound lists zero devices and exits zero, the same silent-empty failure
+this fork already documents for API keys. Measured on 2026-08-18: 0 lines
+without the bind, 8 with it. `/dev/snd` is not involved, because audiomemo
+shells to `ffmpeg -f pulse` and never touches ALSA. The module's own `jail.permissions`
+default already carries these entries, so a consumer who leaves that option
+alone, or defines it with `mkDefault`, needs nothing further.
 
 ### Messaging
 

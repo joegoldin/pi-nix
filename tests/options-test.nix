@@ -14,7 +14,7 @@ let
       # Distinguishable from coding-agent so the default-package assertion
       # below cannot pass by accident.
       coding-agent-bun = pkgs.cowsay;
-      inherit (self.packages.${system}) ext-pi-auto-mode ext-pi-notify;
+      inherit (self.packages.${system}) ext-pi-auto-mode ext-pi-notify ext-pi-voice;
     };
     inputs.agent-statusline = self.inputs.agent-statusline;
   };
@@ -191,6 +191,41 @@ let
 
   autoJson = builtins.fromJSON (builtins.readFile autoOn.autoMode.configFile);
 
+  # A stand-in for jail.nix's combinator set, so the permission list can be
+  # asserted without building a jail.
+  fakeCombinators = {
+    pulse = "pulse";
+    pipewire = "pipewire";
+    network = "network";
+    mount-cwd = "mount-cwd";
+    notifications = "notifications";
+    noescape = p: p;
+    try-readonly = p: "try-readonly:${p}";
+    try-readwrite = p: "try-readwrite:${p}";
+    try-fwd-env = v: "try-fwd-env:${v}";
+    add-pkg-deps = ps: "add-pkg-deps:${toString (builtins.length ps)}";
+  };
+
+  voiceOff = evalPi { };
+
+  withVoice = evalPi {
+    pi.coding-agent.voice = {
+      enable = true;
+      # pkgs.hello stands in for audiomemo: the assertions are about the shape
+      # of the path and of the closure bind, not about ffmpeg.
+      audiomemo = pkgs.hello;
+      device = "mic";
+      keyFiles.ELEVENLABS_API_KEY_FILE = "/run/agenix/elevenlabs_api_key";
+      configFile = "/home/joe/.config/audiomemo/config.toml";
+    };
+  };
+
+  voicePermissions = withVoice.voice.jailPermissions fakeCombinators;
+
+  voiceUnpackaged = builtins.tryEval (
+    lib.deepSeq (evalPi { pi.coding-agent.voice.enable = true; }).environment "unreachable"
+  );
+
   notifyUnpackaged = builtins.tryEval (
     lib.deepSeq
       (evalPi {
@@ -312,6 +347,38 @@ assert autoJson.delegateToPermissionSystem == false;
 # nothing, because "notifications are on" and "no notifier exists" is exactly
 # the state a user would not notice.
 assert notifyUnpackaged.success == false;
+# Disabled contributes no extension, no environment, and no permission.
+assert !(lib.any (lib.hasInfix "pi-voice") (flagValues voiceOff.finalArgs "--extension"));
+assert envValue voiceOff "PI_VOICE_RECORD_BIN" == null;
+assert voiceOff.voice.jailPermissions fakeCombinators == [ ];
+# Enabled hands pi the entrypoint from the extension's own passthru.
+assert lib.elem (builtins.head selfStub.packages.${system}.ext-pi-voice.passthru.piEntrypoint) (
+  flagValues withVoice.finalArgs "--extension"
+);
+# The record binary is an absolute store path, not whatever `record` happens to
+# resolve to on a PATH the jail does not provide.
+assert lib.hasSuffix "/bin/record" (envValue withVoice "PI_VOICE_RECORD_BIN").value;
+assert lib.hasPrefix "/nix/store/" (envValue withVoice "PI_VOICE_RECORD_BIN").value;
+assert (envValue withVoice "PI_VOICE_RECORD_ARGS").value == "-D mic";
+assert (envValue withVoice "PI_VOICE_BAR_WIDTH").value == "12";
+assert (envValue withVoice "PI_VOICE_PLACEMENT").value == "belowEditor";
+# Keys travel as paths. A value here would put a secret in the store.
+assert (envValue withVoice "ELEVENLABS_API_KEY_FILE").value == "/run/agenix/elevenlabs_api_key";
+assert envValue withVoice "ELEVENLABS_API_KEY" == null;
+# Without these the microphone is not merely restricted inside the jail: it is
+# absent, and audiomemo reports an empty device list with no error.
+assert lib.elem "pulse" voicePermissions;
+assert lib.elem "pipewire" voicePermissions;
+assert lib.elem "add-pkg-deps:1" voicePermissions;
+assert lib.elem "try-readonly:/home/joe/.config/audiomemo/config.toml" voicePermissions;
+assert lib.elem "try-readonly:/run/agenix/elevenlabs_api_key" voicePermissions;
+# The module's own jail default already carries them, so a consumer who never
+# touches jail.permissions still gets a working microphone.
+assert lib.elem "pulse" (withVoice.jail.permissions fakeCombinators);
+assert !(lib.elem "pulse" (voiceOff.jail.permissions fakeCombinators));
+# Enabled without an audiomemo package must fail loudly: the jail binds the
+# closure of the exact derivation named there, so there is nothing to guess.
+assert voiceUnpackaged.success == false;
 pkgs.runCommand "pi-nix-options-tests" { } ''
   set -euo pipefail
   # The written prompt must be the literal text, with no wrapper or frontmatter.

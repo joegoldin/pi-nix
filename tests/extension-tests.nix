@@ -1,5 +1,5 @@
-# Test derivations for the first-party extensions, `pi-auto-mode` and
-# `pi-notify`. Both run twice over the same tree:
+# Test derivations for the first-party extensions: `pi-auto-mode`, `pi-notify`,
+# and `pi-voice`. Each runs twice over the same tree:
 #
 #   bun test — the unit suite. No node_modules and no network: the packages
 #     declare no dependencies at all, and `import type` from @earendil-works/*
@@ -34,7 +34,8 @@ let
     hash = "sha512-l4E+B7hgXKWddRo8bC/eSue2aWZjEgJ9xIpf5p0Og+lq8a2TArCwJ0HCoCPCgaBP/tN4zbYH/wOwvx9pJpeLCA==";
   };
 
-  # Both extensions read a config file with node:fs, so tsc needs node's types.
+  # Every one of them reaches node:fs or node:child_process, so tsc needs
+  # node's types.
   # skipLibCheck covers undici-types, which this tarball references and which is
   # not fetched.
   nodeTypes = pkgs.fetchurl {
@@ -87,7 +88,7 @@ let
 
         export HOME="$TMPDIR"
 
-        # bun writes nothing and fetches nothing: neither package declares a
+        # bun writes nothing and fetches nothing: no package declares a
         # dependency, so a lockfile would be empty and an install a no-op.
         bun test
 
@@ -103,4 +104,5 @@ in
 lib.mapAttrs mkTest {
   pi-auto-mode = ../packages/extensions/pi-auto-mode;
   pi-notify = ../packages/extensions/pi-notify;
+  pi-voice = ../packages/extensions/pi-voice;
 }

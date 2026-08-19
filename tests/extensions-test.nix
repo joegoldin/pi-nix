@@ -40,6 +40,7 @@ let
     "ext-pi-mcp-adapter"
     "ext-pi-notify"
     "ext-pi-subagents"
+    "ext-pi-voice"
   ];
 
   # A pin is complete when its tarball coordinates are real. There is no
@@ -79,10 +80,14 @@ let
     assert exts.ext-pi-auto-mode.passthru.promptFragment == null;
     # It carries no pin, so extensions.json must not have grown one.
     assert exts.ext-pi-notify.passthru.piEntrypoint == [ "${exts.ext-pi-notify}/src/index.ts" ];
-    # Neither first-party extension carries a pin, so extensions.json must not
-    # have grown one.
+    assert exts.ext-pi-voice.passthru.piEntrypoint == [ "${exts.ext-pi-voice}/src/index.ts" ];
+    assert exts.ext-pi-voice.passthru.settings == { };
+    assert exts.ext-pi-voice.passthru.promptFragment == null;
+    # No first-party extension carries a pin, so extensions.json must not have
+    # grown one.
     assert !(pins ? pi-auto-mode);
     assert !(pins ? pi-notify);
+    assert !(pins ? pi-voice);
     # Two pins take the bundled branch, and both need no node_modules:
     # pi-cache-optimizer declares no runtime dependency at all, and pi-intercom
     # declares only tsx, which is never reached because the module launches the

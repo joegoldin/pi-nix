@@ -5,8 +5,9 @@
 // cwd } and exec resolves once with the whole of stdout, so it cannot deliver
 // partials as they arrive.
 
-import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
+import { type ChildProcessByStdio, spawn } from "node:child_process";
 import { homedir } from "node:os";
+import type { Readable } from "node:stream";
 
 import { renderVoiceRows, type VoiceTheme, type VoiceUiState, FLOOR_DB } from "./render.ts";
 import { clearVoiceState, pidIsAlive, reconcileStaleState, voiceStatePath, writeVoiceState } from "./state.ts";
@@ -54,6 +55,10 @@ function emptyState(): VoiceUiState {
 	return { recording: false, elapsedMs: 0, level: 0, db: FLOOR_DB, committed: "", partial: "", note: "" };
 }
 
+/** stdin is "ignore" and both output streams are pipes, which is exactly what
+ *  spawn's overload returns for that stdio tuple. */
+type RecordProcess = ChildProcessByStdio<null, Readable, Readable>;
+
 function env(): Record<string, string | undefined> {
 	return process.env as Record<string, string | undefined>;
 }
@@ -64,7 +69,7 @@ export class VoiceSession {
 	private readonly ctx: VoiceContext;
 	private readonly cfg: VoiceConfig;
 	private readonly statePath: string;
-	private child: ChildProcessWithoutNullStreams | undefined;
+	private child: RecordProcess | undefined;
 	private streamOpen = false;
 	private stopRequested = false;
 	private stopFallback: ReturnType<typeof setTimeout> | undefined;
@@ -95,7 +100,7 @@ export class VoiceSession {
 		this.startedAt = Date.now();
 		this.lastLevelAt = this.startedAt;
 
-		let child: ChildProcessWithoutNullStreams;
+		let child: RecordProcess;
 		try {
 			child = spawn(this.cfg.recordBin, this.cfg.recordArgs, { stdio: ["ignore", "pipe", "pipe"] });
 		} catch (err) {
