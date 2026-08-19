@@ -143,8 +143,8 @@ The only difference between case 3 and case 10 is one array in one file, and it
 decides whether the classifier is consulted at all.
 
 Cases 8 and 9 are the delegated pre-pass. In delegated mode auto mode's own
-`tool_call` handler runs only the tiers that cost no model call — the operator's
-deny list, the deterministic hard-deny checks, the path deny list — and holds
+`tool_call` handler runs only the tiers that cost no model call (the operator's
+deny list, the deterministic hard-deny checks, the path deny list) and holds
 the classifier for the chain link. So a permission-system `allow` cannot wave
 past a rule the operator wrote on the auto-mode side, and no action is
 classified twice. Case 1 is the other half of that: the classifier is not
@@ -157,7 +157,7 @@ running the two together at all.
 The chain owner caps a link's verdict at a bounded-delegation checkpoint: an
 `allow` from a link on the `path` or `external_directory` surface is downgraded
 to `defer` (`src/authority/delegation-envelope.ts`), so it falls through to the
-terminal — a dialog. A `deny` is not capped. So the classifier can refuse an
+terminal, which is a dialog. A `deny` is not capped. So the classifier can refuse an
 outside-the-tree file access but cannot approve one; that stays a prompt no
 matter what auto mode thinks. `bash`, `tool`, `mcp` and `skill` asks are not
 capped, and bash is where the volume is.

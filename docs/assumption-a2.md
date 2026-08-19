@@ -1,6 +1,6 @@
 # Assumption A2: is `tool_call` handler ordering observable?
 
-**Yes, and it decides which gate runs — which is why the answer is not to
+**Yes, and it decides which gate runs, which is why the answer is not to
 order them.** Verified 2026-08-19 against pi 0.84.2's own dispatch code and the
 pinned `@gotgenes/pi-permission-system` 26.3.0 and `@czottmann/pi-automode`
 1.11.0 tarballs, not against their docs.
@@ -77,7 +77,7 @@ class of problem.
 
 `joegoldin/pi-automode` v1.11.0-jg.1 adds one module,
 `extensions/auto-mode/permission-chain.ts`, and six lines in the entrypoint.
-`extensions/auto-mode/extension.ts` — the file holding the decision pipeline —
+`extensions/auto-mode/extension.ts`, the file holding the decision pipeline,
 is upstream's byte for byte. The wrapper intercepts the factory's
 `pi.on("tool_call", …)` registration rather than editing the handler, and calls
 that same handler from the chain link, so a verdict the link returns and a
@@ -87,17 +87,17 @@ the fork's own `docs/REBASING.md` names what an upstream change would cost.
 
 Three properties the module is built around:
 
-- **Absent means inert.** The symbol slot is read off `globalThis` rather than
+- **Absent means inert:** the symbol slot is read off `globalThis` rather than
   imported. With the permission system not installed the slot is empty, nothing
   registers, and the gate runs exactly as upstream's does. There is no
   dependency in either direction.
-- **One pipeline.** The link reviews the real tool-call event — auto mode is
-  loaded ahead of the permission system so its handler sees the call before the
-  ask is raised — and returns whatever the gate returns. In delegated mode the
+- **One pipeline:** the link reviews the real tool-call event, because auto
+  mode is loaded ahead of the permission system and its handler sees the call
+  before the ask is raised, and returns whatever the gate returns. In delegated mode the
   gate itself runs only the tiers that cost no model call, so nothing is
   classified twice and the permission system's own deterministic rules still
   resolve what they can.
-- **`defer`, never `allow`, on failure.** A chain link that fails open widens
+- **`defer`, never `allow`, on failure:** a chain link that fails open widens
   permissions. A fail-closed *block* from the pipeline is a verdict and travels
   as a `deny`; an exception inside the link is not, and travels as a `defer`,
   which hands the ask back to the chain owner's own prompt.

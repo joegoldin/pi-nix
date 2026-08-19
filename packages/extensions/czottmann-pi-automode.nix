@@ -33,7 +33,7 @@
 }:
 let
   upstreamVersion = "1.11.0";
-  forkVersion = "${upstreamVersion}-jg.1";
+  forkVersion = "${upstreamVersion}-jg.2";
 in
 assert lib.assertMsg (pin.version == upstreamVersion) ''
   packages/extensions/czottmann-pi-automode.nix is built from the fork at
@@ -55,7 +55,7 @@ mkPiExtension {
     owner = "joegoldin";
     repo = "pi-automode";
     rev = "v${forkVersion}";
-    hash = "sha256-2/fWS09VjQUHPA862jakVpmGrmLjbXjowSwXYadVUmI=";
+    hash = "sha256-EKsQVWTrdt32BGfNfi9klIVBFEOl22mg+urbiRfMuhw=";
   };
 
   inherit (pin) entrypoints skills prompts;
