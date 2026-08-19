@@ -34,9 +34,21 @@ the wiring. The other half is an operator edit on the permission system's side:
 
     { "authorizerChain": ["pi-auto-mode"] }
 
-Phase 7 adds `passthru.configFiles` to the extension contract for exactly this
-class of problem (a package whose settings live outside `settings.json`). When
-that lands, this option can write the chain entry itself.
+Phase 7 added `passthru.configFiles` to the extension contract for exactly this
+class of problem (a package whose settings live outside `settings.json`), and
+the launcher now installs every entry under `$PI_CODING_AGENT_DIR`. So the
+mechanism exists: giving `ext-gotgenes-pi-permission-system` a
+
+    configFiles."extensions/pi-permission-system/config.json" = {
+      authorizerChain = [ "pi-auto-mode" ];
+    };
+
+would write the chain entry from Nix, at 0600, on every launch. That edit is not
+made here, because `authorizerChain` is the operator's list rather than one
+extension's to claim: writing it unconditionally would silently overwrite a
+chain a consumer had ordered themselves. Wiring it to
+`autoMode.delegateToPermissionSystem` is the shape that fits, and it belongs
+with that option rather than with the messaging work that built the mechanism.
 
 Until then, `pi-auto-mode` does not disarm on the strength of a registration it
 cannot confirm was activated. With `delegated` true it stops classifying on

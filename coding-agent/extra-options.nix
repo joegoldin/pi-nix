@@ -60,6 +60,15 @@ let
   # rather than the later one erasing the earlier.
   extSettings = lib.foldl' lib.recursiveUpdate { } (map (p: p.passthru.settings or { }) extPkgs);
 
+  # The same treatment for config that does not live in settings.json. An
+  # extension whose settings live in its own file under the agent directory
+  # carries them on passthru.configFiles, and the launcher installs each one.
+  # pi-permission-system's authorizerChain (docs/assumption-a2.md) is the second
+  # case in this class after pi-intercom's inboundTrigger.
+  extConfigFiles = lib.foldl' lib.recursiveUpdate { } (
+    map (p: p.passthru.configFiles or { }) extPkgs
+  );
+
   # promptFragment is an escape hatch for an extension that supplies no
   # promptSnippet or promptGuidelines of its own. Normally every entry is null
   # and this list is empty.
@@ -221,14 +230,16 @@ let
   # "node" resolved through PATH whenever the interpreter is not Node, and under
   # coding-agent-bun it never is. With brokerArgs empty the broker is launched
   # as `bun <broker.ts>`, so tsx is never invoked either.
-  configFiles = lib.optionalAttrs msg.enable (
-    lib.recursiveUpdate msg.package.passthru.configFiles {
-      "intercom/config.json" = {
-        brokerCommand = lib.getExe pkgs.bun;
-        brokerArgs = [ ];
-        inherit (msg) inboundTrigger confirmSend;
-      };
-    }
+  configFiles = lib.recursiveUpdate extConfigFiles (
+    lib.optionalAttrs msg.enable (
+      lib.recursiveUpdate msg.package.passthru.configFiles {
+        "intercom/config.json" = {
+          brokerCommand = lib.getExe pkgs.bun;
+          brokerArgs = [ ];
+          inherit (msg) inboundTrigger confirmSend;
+        };
+      }
+    )
   );
 
   configFilesPrelude = lib.concatStringsSep "\n" (
