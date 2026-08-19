@@ -1,0 +1,20 @@
+{
+	"name": "pi-extras",
+	"version": "0.1.0",
+	"type": "module",
+	"description": "Prompt stash, chord keybindings, registers, and session shortcuts for pi.",
+	"keywords": [
+		"pi-package",
+		"pi-extension",
+		"stash",
+		"keybindings"
+	],
+	"pi": {
+		"extensions": [
+			"./src/index.ts"
+		]
+	},
+	"scripts": {
+		"test": "bun test"
+	}
+}

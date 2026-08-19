@@ -105,4 +105,5 @@ lib.mapAttrs mkTest {
   pi-notify = ../packages/extensions/pi-notify;
   pi-voice = ../packages/extensions/pi-voice;
   pi-foreign-skills = ../packages/extensions/pi-foreign-skills;
+  pi-extras = ../packages/extensions/pi-extras;
 }

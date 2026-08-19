@@ -75,6 +75,7 @@ let
     ext-pi-notify = bunPkgs.callPackage ./pi-notify { inherit mkPiExtension; };
     ext-pi-voice = bunPkgs.callPackage ./pi-voice { inherit mkPiExtension; };
     ext-pi-foreign-skills = bunPkgs.callPackage ./pi-foreign-skills { inherit mkPiExtension; };
+    ext-pi-extras = bunPkgs.callPackage ./pi-extras { inherit mkPiExtension; };
   };
 
   # Two pins are still listed in extensions.json but built by their own file:
