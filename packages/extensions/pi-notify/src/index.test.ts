@@ -1,8 +1,15 @@
 import { describe, expect, it, mock } from "bun:test";
 import { DEFAULT_CONFIG } from "./config.ts";
-import { AUTO_MODE_PROMPT_CHANNEL, PERMISSIONS_UI_PROMPT_CHANNEL, registerHandlers } from "./index.ts";
+import {
+	AUTO_MODE_PROMPT_CHANNEL,
+	PERMISSIONS_DECISION_CHANNEL,
+	PERMISSIONS_UI_PROMPT_CHANNEL,
+	registerHandlers,
+} from "./index.ts";
 
-function host() {
+const ok = (stdout = "") => ({ stdout, stderr: "", code: 0, killed: false });
+
+function host(exec: (command: string, args: string[]) => Promise<unknown> = async () => ok()) {
 	const handlers = new Map<string, (event: unknown, ctx?: unknown) => unknown>();
 	const channels = new Map<string, (data: unknown) => void>();
 	return {
@@ -13,7 +20,7 @@ function host() {
 				return () => channels.delete(channel);
 			},
 		},
-		exec: mock(async () => ({ stdout: "", stderr: "", code: 0, killed: false })),
+		exec: mock(exec),
 		fire: (event: string, payload: unknown) => handlers.get(event)?.(payload),
 		emit: (channel: string, payload: unknown) => channels.get(channel)?.(payload),
 		handlers,
@@ -121,6 +128,122 @@ describe("registerHandlers", () => {
 	});
 });
 
+describe("dismissing a permission notification once the ask is answered", () => {
+	const dismissing = { ...config, dismisser: "/bin/gdbus" };
+
+	const raise = async (h: ReturnType<typeof host>, requestId = "r1") => {
+		h.emit(PERMISSIONS_UI_PROMPT_CHANNEL, { requestId, surface: "bash", toolName: "bash" });
+		await settle();
+	};
+	const resolve = async (h: ReturnType<typeof host>, requestId = "r1") => {
+		h.emit(PERMISSIONS_DECISION_CHANNEL, { requestId, surface: "bash", value: "ls", result: "allow" });
+		await settle();
+	};
+
+	it("asks notify-send to print its id, without which there is nothing to close", async () => {
+		const h = host();
+		registerHandlers(h as never, dismissing, () => 0);
+		await raise(h);
+		expect(h.exec.mock.calls[0]![1]).toContain("--print-id");
+	});
+
+	it("closes the notification with the id notify-send printed", async () => {
+		const h = host(async () => ok("42\n"));
+		registerHandlers(h as never, dismissing, () => 0);
+		await raise(h);
+		await resolve(h);
+		expect(h.exec).toHaveBeenCalledTimes(2);
+		const [command, args] = h.exec.mock.calls[1]! as [string, string[]];
+		expect(command).toBe("/bin/gdbus");
+		expect(args).toContain("org.freedesktop.Notifications.CloseNotification");
+		expect(args[args.length - 1]).toBe("42");
+	});
+
+	it("stays put when no id came back, because there is no handle to close", async () => {
+		const h = host(async () => ok(""));
+		registerHandlers(h as never, dismissing, () => 0);
+		await raise(h);
+		await resolve(h);
+		expect(h.exec).toHaveBeenCalledTimes(1);
+	});
+
+	it("ignores a decision for a request it never notified about", async () => {
+		const h = host(async () => ok("42\n"));
+		registerHandlers(h as never, dismissing, () => 0);
+		await raise(h, "r1");
+		await resolve(h, "r2");
+		expect(h.exec).toHaveBeenCalledTimes(1);
+	});
+
+	it("closes an ask once, so a second decision on the same request is a no-op", async () => {
+		const h = host(async () => ok("42\n"));
+		registerHandlers(h as never, dismissing, () => 0);
+		await raise(h);
+		await resolve(h);
+		await resolve(h);
+		expect(h.exec).toHaveBeenCalledTimes(2);
+	});
+
+	it("does nothing when dismissal is switched off", async () => {
+		const h = host(async () => ok("42\n"));
+		registerHandlers(h as never, { ...dismissing, dismissOnResolve: false }, () => 0);
+		await raise(h);
+		await resolve(h);
+		expect(h.exec).toHaveBeenCalledTimes(1);
+		expect(h.exec.mock.calls[0]![1]).not.toContain("--print-id");
+	});
+
+	it("degrades silently under osascript, which has no close API", async () => {
+		const h = host(async () => ok("42\n"));
+		registerHandlers(h as never, { ...dismissing, style: "osascript" }, () => 0);
+		await raise(h);
+		await resolve(h);
+		expect(h.exec).toHaveBeenCalledTimes(1);
+	});
+
+	it("degrades silently when no D-Bus client was baked into the config", async () => {
+		const h = host(async () => ok("42\n"));
+		registerHandlers(h as never, { ...dismissing, dismisser: "" }, () => 0);
+		await raise(h);
+		await resolve(h);
+		expect(h.exec).toHaveBeenCalledTimes(1);
+	});
+
+	it("removes the terminal-notifier group rather than a D-Bus id", async () => {
+		const h = host(async () => ok(""));
+		registerHandlers(h as never, { ...dismissing, style: "terminal-notifier" }, () => 0);
+		await raise(h);
+		await resolve(h);
+		expect(h.exec).toHaveBeenCalledTimes(2);
+		const [command, args] = h.exec.mock.calls[1]! as [string, string[]];
+		expect(command).toBe("/bin/notify-send");
+		expect(args).toEqual(["-remove", "pi-ask"]);
+	});
+
+	it("swallows a failing dismissal, exactly as it swallows a failing send", async () => {
+		let calls = 0;
+		const h = host(async () => {
+			calls += 1;
+			if (calls > 1) throw new Error("no dbus");
+			return ok("42\n");
+		});
+		registerHandlers(h as never, dismissing, () => 0);
+		await raise(h);
+		await resolve(h);
+		expect(calls).toBe(2);
+	});
+
+	it("registers no decision listener when permission prompts are off", () => {
+		const h = host();
+		registerHandlers(
+			h as never,
+			{ ...dismissing, events: { permissionPrompt: false, agentSettled: true, longToolCall: true } },
+			() => 0,
+		);
+		expect(h.channels.has(PERMISSIONS_DECISION_CHANNEL)).toBe(false);
+	});
+});
+
 describe("the channel names pi-notify listens on", () => {
 	it("matches pi-auto-mode's exported literal", () => {
 		expect(AUTO_MODE_PROMPT_CHANNEL).toBe("pi-auto-mode:prompt");
@@ -128,5 +251,9 @@ describe("the channel names pi-notify listens on", () => {
 
 	it("matches pi-permission-system's PERMISSIONS_UI_PROMPT_CHANNEL", () => {
 		expect(PERMISSIONS_UI_PROMPT_CHANNEL).toBe("permissions:ui_prompt");
+	});
+
+	it("matches pi-permission-system's PERMISSIONS_DECISION_CHANNEL", () => {
+		expect(PERMISSIONS_DECISION_CHANNEL).toBe("permissions:decision");
 	});
 });

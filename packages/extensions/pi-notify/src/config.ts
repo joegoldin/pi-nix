@@ -22,6 +22,14 @@ export interface NotifyConfig {
 	events: NotifyEvents;
 	longToolCallThresholdMs: number;
 	appName: string;
+	/** Close the permission notification once the ask has been answered. */
+	dismissOnResolve: boolean;
+	/**
+	 * Absolute path to the D-Bus client that closes a notify-send notification,
+	 * resolved at build time. Empty means the module baked none in, and a
+	 * notify-send notification then lives until it times out.
+	 */
+	dismisser: string;
 }
 
 export const DEFAULT_CONFIG: NotifyConfig = {
@@ -31,6 +39,8 @@ export const DEFAULT_CONFIG: NotifyConfig = {
 	events: { permissionPrompt: true, agentSettled: true, longToolCall: true },
 	longToolCallThresholdMs: 30000,
 	appName: "pi",
+	dismissOnResolve: true,
+	dismisser: "",
 };
 
 const STYLES = new Set<NotifierStyle>(["notify-send", "terminal-notifier", "osascript"]);
@@ -75,5 +85,7 @@ export function loadConfig(read: (path: string) => string, env: Record<string, s
 		},
 		longToolCallThresholdMs: threshold,
 		appName: typeof o.appName === "string" && o.appName !== "" ? o.appName : DEFAULT_CONFIG.appName,
+		dismissOnResolve: bool(o.dismissOnResolve, DEFAULT_CONFIG.dismissOnResolve),
+		dismisser: typeof o.dismisser === "string" ? o.dismisser : DEFAULT_CONFIG.dismisser,
 	};
 }

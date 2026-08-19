@@ -9,12 +9,26 @@
 import { readFileSync } from "node:fs";
 import type { NotifyConfig } from "./config.ts";
 import { loadConfig } from "./config.ts";
-import { createToolClock, longToolNotification, type Notification, notifierArgs } from "./notifier.ts";
+import {
+	createToolClock,
+	dismissCommand,
+	longToolNotification,
+	type Notification,
+	type NotificationHandle,
+	notificationHandle,
+	notifierArgs,
+} from "./notifier.ts";
 
 /** pi-auto-mode's channel; see packages/extensions/pi-auto-mode/src/config.ts. */
 export const AUTO_MODE_PROMPT_CHANNEL = "pi-auto-mode:prompt";
 /** @gotgenes/pi-permission-system's PERMISSIONS_UI_PROMPT_CHANNEL. */
 export const PERMISSIONS_UI_PROMPT_CHANNEL = "permissions:ui_prompt";
+/**
+ * @gotgenes/pi-permission-system's PERMISSIONS_DECISION_CHANNEL, emitted after
+ * every gate resolution and carrying the same `requestId` the UI prompt did.
+ * It is the only signal on the bus that says an ask stopped waiting.
+ */
+export const PERMISSIONS_DECISION_CHANNEL = "permissions:decision";
 
 export interface NotifyHost {
 	on(event: string, handler: (event: never, ctx?: never) => unknown): void;
@@ -25,13 +39,21 @@ export interface NotifyHost {
 export function registerHandlers(pi: NotifyHost, config: NotifyConfig, now: () => number = Date.now): void {
 	if (!config.enabled || config.notifier === "") return;
 
-	const send = async (note: Notification): Promise<void> => {
+	// Null distinguishes "the command failed" from "it ran and said nothing",
+	// which is what tells the caller whether there is a live notification to
+	// remember. Failure is silent by design: a notification must never break a
+	// session, and neither must the attempt to take one down again.
+	const run = async (command: string, args: string[]): Promise<string | null> => {
 		try {
-			await pi.exec(config.notifier, notifierArgs(config, note));
+			const result = (await pi.exec(command, args)) as { stdout?: unknown } | undefined;
+			return typeof result?.stdout === "string" ? result.stdout : "";
 		} catch {
-			// A notification must never break a session. Failure is silent by design.
+			return null;
 		}
 	};
+
+	const send = async (note: Notification, dismissible = false): Promise<string | null> =>
+		run(config.notifier, notifierArgs(config, note, dismissible));
 
 	if (config.events.agentSettled) {
 		pi.on("agent_settled", async () => {
@@ -40,13 +62,46 @@ export function registerHandlers(pi: NotifyHost, config: NotifyConfig, now: () =
 	}
 
 	if (config.events.permissionPrompt) {
+		// Keyed by requestId, which is what ties a decision back to the prompt that
+		// raised it. A tool call runs several gates and so raises several requests;
+		// only the ones that reached the UI are in here, so a decision that never
+		// prompted finds nothing and does nothing.
+		const live = new Map<string, NotificationHandle>();
+
 		const onPrompt = (data: unknown) => {
 			const d = (data ?? {}) as Record<string, unknown>;
 			const tool = typeof d.toolName === "string" && d.toolName !== "" ? d.toolName : "a tool call";
-			void send({ title: config.appName, body: `Needs your decision on ${tool}`, urgency: "critical" });
+			const requestId = typeof d.requestId === "string" && d.requestId !== "" ? d.requestId : null;
+			// Tracking an ask that carries no requestId would leak a handle that
+			// nothing can ever match, so those notifications are fire and forget.
+			const dismissible = config.dismissOnResolve && requestId !== null;
+			void (async () => {
+				const stdout = await send(
+					{ title: config.appName, body: `Needs your decision on ${tool}`, urgency: "critical" },
+					dismissible,
+				);
+				if (!dismissible || requestId === null || stdout === null) return;
+				const handle = notificationHandle(config, stdout);
+				if (handle !== null) live.set(requestId, handle);
+			})();
 		};
 		pi.events.on(AUTO_MODE_PROMPT_CHANNEL, onPrompt);
 		pi.events.on(PERMISSIONS_UI_PROMPT_CHANNEL, onPrompt);
+
+		if (config.dismissOnResolve) {
+			pi.events.on(PERMISSIONS_DECISION_CHANNEL, (data: unknown) => {
+				const d = (data ?? {}) as Record<string, unknown>;
+				if (typeof d.requestId !== "string") return;
+				const handle = live.get(d.requestId);
+				if (handle === undefined) return;
+				// Dropped before the close runs, so a repeated decision on the same
+				// request cannot fire a second close at an id already reused.
+				live.delete(d.requestId);
+				const command = dismissCommand(config, handle);
+				if (command === null) return;
+				void run(command.command, command.args);
+			});
+		}
 	}
 
 	if (config.events.longToolCall) {
