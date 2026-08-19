@@ -94,5 +94,18 @@
     "entrypoints": [],
     "skills": [],
     "prompts": []
+  },
+  "pi-intercom": {
+    "version": "0.10.1",
+    "url": "https://registry.npmjs.org/pi-intercom/-/pi-intercom-0.10.1.tgz",
+    "hash": "sha256-3j/X2r1AWSaShIz0I9BH2nxmVLY5BKpuRirI5X19zEI=",
+    "bundled": true,
+    "entrypoints": [],
+    "skills": [
+      "skills"
+    ],
+    "prompts": [],
+    "repositoryUnverifiable": "https://github.com/nicobailon/pi-intercom",
+    "pinVerification": "npm publishes no repository field; see plan Task 2 Step 1"
   }
 }

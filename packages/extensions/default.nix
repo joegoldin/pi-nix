@@ -74,6 +74,18 @@ let
     ext-pi-auto-mode = bunPkgs.callPackage ./pi-auto-mode { inherit mkPiExtension; };
     ext-pi-notify = bunPkgs.callPackage ./pi-notify { inherit mkPiExtension; };
   };
+
+  # pi-intercom is pinned like the others but built by its own file, because it
+  # is the one package that carries a patch and a configFiles entry. Defined
+  # after the generic loop so this definition is the one that wins.
+  patched = {
+    ext-pi-intercom = bunPkgs.callPackage ./pi-intercom.nix {
+      inherit mkPiExtension;
+      pin = pins."pi-intercom";
+      inherit (bunPkgs.callPackage ./pi-intercom-patches.nix { }) securityPatch;
+    };
+  };
 in
 lib.mapAttrs' (name: pin: lib.nameValuePair "ext-${slugOf name}" (mkOne name pin)) pins
 // firstParty
+// patched
