@@ -109,6 +109,65 @@ This fork adds:
 | `autoMode.userTurnLimit` | int | `6` | How many user turns the classifier sees, which is what makes `soft_deny` clearable. |
 | `autoMode.timeoutMs` | int | `20000` | Classifier timeout. On expiry auto mode fails closed. |
 | `autoMode.delegateToPermissionSystem` | bool | `false` | Register on `@gotgenes/pi-permission-system`'s authorizer chain. See `docs/assumption-a2.md`: this also needs an `authorizerChain` entry on that package's side. |
+| `messaging.enable` | bool | `false` | Peer messaging between separately launched pi instances, over a local unix socket. |
+| `messaging.package` | package | `ext-pi-intercom` | The messaging extension. Must satisfy the `mkPiExtension` passthru contract. |
+| `messaging.inboundTrigger` | enum | `replies` | Whether an inbound peer message may start a model turn. Upstream ships `always`; this fork does not. |
+| `messaging.confirmSend` | bool | `false` | Confirm ordinary outbound messages. Replies are never gated. |
+| `messaging.askTimeoutSeconds` | int | `300` | How long a blocking request to a peer waits. Upstream's default is 600. |
+| `messaging.installSkill` | bool | `false` | Also pass the extension's bundled skills via `--skill`. |
+
+### Messaging
+
+pi has no equivalent of Claude Code's `ListAgents` and `SendMessage`, so two pi
+sessions started in different terminals cannot see or reach each other.
+`messaging.enable` fixes that with `pi-intercom` over a unix domain socket at
+`$PI_CODING_AGENT_DIR/intercom/broker.sock`. No relay, no daemon, no network,
+and no remote or phone access: the package contains no network code at all.
+
+Two defaults differ from upstream's, and both are security decisions rather
+than taste.
+
+**`inboundTrigger` is `replies`.** The broker authenticates nobody. Any process
+running as this user can open the socket, register, and send. Upstream's
+`always` makes such a message start a model turn immediately, with the text
+arriving as a *user* message, which routes around every permission layer: those
+gate tool calls, not the provenance of instructions. Under `replies` only a
+reply to a request this session originated may start a turn. Unsolicited
+messages are still delivered and rendered. Raising this to `always` is a
+per-host choice, not a convenience.
+
+**The broker refuses a live session-ID collision.** Upstream lets a client pick
+its own `sessionId` at register time and, when a live session already holds it,
+ends the incumbent's socket and hands the ID over. No flag is needed, and the ID
+is not secret: any registered peer may call `list`, and `list` returns every
+session's UUID along with its cwd, model and pid. `packages/extensions/pi-intercom-patches.nix`
+replaces that branch with a refusal, and `checks.pi-intercom-smoke` fails
+against the unpatched tarball.
+
+What neither fixes: a process under this uid can still connect, still enumerate
+every session, and still deliver text. The package exposes no peer credential to
+check, so presence on the socket cannot be refused. `prompt/untrusted-peer-input.md`
+is what tells the model that the name a message arrives under is a claim rather
+than a fact.
+
+`brokerCommand` is written as a bun store path with empty `brokerArgs`.
+Upstream's default launch path calls `getNodeCommand(process.execPath)`, which
+falls back to the literal string `node` resolved through `PATH` whenever the
+interpreter is not Node, and under the Bun build it never is. Pointing it at a
+store path means nothing resolves through `PATH` and `tsx` is never invoked, so
+the package needs no `node_modules`.
+
+### Verified assumptions
+
+Design assumptions the messaging work resolved by measurement rather than by
+reading documentation. Each row names the command that settled it.
+
+| # | Assumption | Outcome | How |
+| --- | --- | --- | --- |
+| A6 | pi resolves an extension's bare imports through the `NODE_PATH` its wrapper exports, including under Bun | **holds** | `NODE_PATH=$(nix build .#coding-agent-bun)/lib/node_modules bun probe.js` resolved `typebox` to a function |
+| A7 | `bun broker/broker.ts` starts the broker with no `node_modules`, so `tsx` can be dropped | **holds** | ran it in the unpacked tarball with no `node_modules`: `Intercom broker started`, and `0700`/`0600` on the socket tree |
+| A9 | A broker auto-spawned inside one bubblewrap jail is reachable from a second, differently-mounted jail | **holds** | `./scripts/verify-jail-socket.sh`: jail A binds the socket, jail B registers across it |
+| A8 | `inboundTrigger = "replies"` still *delivers* unsolicited sends rather than dropping them | **open** | needs a live pi in two terminals; not resolvable by a check |
 
 ### Auto mode
 
