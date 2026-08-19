@@ -36,6 +36,7 @@ let
     "ext-pi-auto-mode"
     "ext-pi-background-tasks"
     "ext-pi-cache-optimizer"
+    "ext-pi-intercom"
     "ext-pi-mcp-adapter"
     "ext-pi-notify"
     "ext-pi-subagents"
@@ -44,11 +45,17 @@ let
   # A pin is complete when its tarball coordinates are real. There is no
   # dependency hash to check: bun2nix keeps those in the per-pin bun.nix, and
   # Step 6's guard proves every unbundled pin has one on disk.
+  # Either SRI algorithm is a real hash. Every pin but one carries npm's own
+  # dist.integrity, which is sha512; pi-intercom carries a sha256 computed from
+  # the downloaded tarball, because that package publishes no repository field
+  # and the plan that pinned it recorded a hash it derived itself rather than
+  # one the registry asserted. `nix run .#update-extensions` will rewrite it to
+  # sha512 at the next bump, which pins the same bytes.
   pinComplete =
     _name: pin:
     pin.version != ""
     && lib.hasPrefix "https://registry.npmjs.org/" pin.url
-    && lib.hasPrefix "sha512-" pin.hash;
+    && (lib.hasPrefix "sha512-" pin.hash || lib.hasPrefix "sha256-" pin.hash);
 
   evalAssertions =
     assert lib.sort (a: b: a < b) (builtins.attrNames exts) == expectedNames;
@@ -76,12 +83,21 @@ let
     # have grown one.
     assert !(pins ? pi-auto-mode);
     assert !(pins ? pi-notify);
-    # Exactly one pin takes the bundled branch, and it is the one with no
-    # runtime dependencies. If a future bump gives pi-cache-optimizer a
-    # dependency, this fires before anything ships a broken node_modules.
+    # Two pins take the bundled branch, and both need no node_modules:
+    # pi-cache-optimizer declares no runtime dependency at all, and pi-intercom
+    # declares only tsx, which is never reached because the module launches the
+    # broker with bun. If a future bump gives either one a dependency that is
+    # actually loaded, this fires before anything ships a broken node_modules.
     assert pins."pi-cache-optimizer".bundled;
+    assert pins."pi-intercom".bundled;
     assert lib.all (n: !pins.${n}.bundled) (
-      lib.filter (n: n != "pi-cache-optimizer") (builtins.attrNames pins)
+      lib.filter (
+        n:
+        !(lib.elem n [
+          "pi-cache-optimizer"
+          "pi-intercom"
+        ])
+      ) (builtins.attrNames pins)
     );
     assert lib.all (n: pinComplete n pins.${n}) (builtins.attrNames pins);
     true;
