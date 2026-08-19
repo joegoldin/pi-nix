@@ -92,10 +92,65 @@ This fork adds:
 | `statusline.*` | submodule | `{ }` | The shared agent-statusline schema, mounted under pi's namespace. |
 | `statusline.extension` | package | this flake's `pi-extension` | The extension package handed to `--extension`. |
 | `notifications.enable` | bool | `false` | Desktop notifications via the first-party `pi-notify` extension. |
-| `notifications.package` | `null \| package` | `null` | The `pi-notify` derivation. Enabling without one is an error, not a no-op. |
+| `notifications.package` | `null \| package` | `ext-pi-notify` | The `pi-notify` derivation. Enabling with a null one is an error, not a no-op. |
 | `notifications.notifierCommand` | str | `notify-send` / `terminal-notifier` | Absolute path to the notifier, resolved at build time so it survives the jail. |
+| `notifications.style` | enum | `notify-send` / `terminal-notifier` | Which argv contract `notifierCommand` speaks. Change the two together: a mismatch is silent. |
+| `notifications.appName` | str | `pi` | Title, and the `--app-name` the desktop groups by. |
 | `notifications.events` | `[enum]` | all three | `needs_input`, `settled`, `long_running_tool`. |
 | `notifications.longRunningToolSeconds` | int | `30` | Threshold for `long_running_tool`. |
+| `autoMode.enable` | bool | `false` | The `pi-auto-mode` permission classifier. |
+| `autoMode.allow` | `[str]` | `[ ]` | Pre-approved actions, as plain sentences for the classifier. |
+| `autoMode.soft_deny` | `[str]` | `[ ]` | Destructive actions that explicit user intent clears. |
+| `autoMode.hard_deny` | `[str]` | `[ ]` | Security boundaries. Intent does not clear these and cannot. |
+| `autoMode.environment` | `[str]` | `[ ]` | Facts about the machine. Not permissions. |
+| `autoMode.deterministic.allow` | `[str]` | `[ ]` | Claude Code rule syntax, resolved without a model call: `Bash(git status:*)`, `Read(/home/joe/**)`. |
+| `autoMode.deterministic.deny` | `[str]` | `[ ]` | Same syntax. Deny beats allow. |
+| `autoMode.model` | `null \| { provider; modelId; }` | `null` | Classifier model. Null uses the session's own. |
+| `autoMode.userTurnLimit` | int | `6` | How many user turns the classifier sees, which is what makes `soft_deny` clearable. |
+| `autoMode.timeoutMs` | int | `20000` | Classifier timeout. On expiry auto mode fails closed. |
+| `autoMode.delegateToPermissionSystem` | bool | `false` | Register on `@gotgenes/pi-permission-system`'s authorizer chain. See `docs/assumption-a2.md`: this also needs an `authorizerChain` entry on that package's side. |
+
+### Auto mode
+
+Three layers, outermost first: the jail contains, a deterministic matcher
+resolves the clear-cut majority with no model call, and a classifier judges only
+what the matcher left as `ask`.
+
+Two properties are load-bearing, and both are tested against a live pi in
+`docs/phase-3-acceptance.md`.
+
+**It fails closed.** A classifier that errors, times out, returns unparseable
+output, or has no model never lets a call through. With a UI it degrades to a
+confirmation dialog; in `print` and `json` mode it blocks. A malformed config
+file enables auto mode with nothing pre-approved rather than disabling it.
+
+**`hard_deny` is a floor, not a preference.** The gate blocks a `hard_deny` even
+when the classifier answers `allow`, and does not offer the operator a dialog to
+wave it through. The model is not trusted to enforce the one rule it is told it
+may not clear, so text injected into a file or a tool call cannot talk its way
+past one.
+
+One sharp edge worth knowing about the deterministic layer: it has no shell
+parser, so a `Bash(...)` prefix rule refuses to **allow** any command containing
+a control operator. `git status && rm -rf /` starts with `git status `, and the
+matcher would otherwise wave it through. Such a command falls to the classifier
+instead. Deny rules are unaffected, because refusing to deny is the unsafe
+direction. Delegating to `@gotgenes/pi-permission-system` is what closes this
+gap properly: that package carries tree-sitter-bash.
+
+Config reaches both first-party extensions as a store path in an environment
+variable, `PI_AUTO_MODE_CONFIG` and `PI_NOTIFY_CONFIG`, never through
+`settings.json`. pi's `ExtensionContext` exposes no settings reader, so a
+`settings.json` block would be config nothing can read.
+
+### The jail
+
+`jail.enable = true` wraps pi in bubblewrap. The fork replaces upstream's
+two-entry default with the toolchain pi shells out to, a dbus talk permission on
+`org.freedesktop.Notifications`, and the same four read-only paths
+`modules/ai/claude.nix` allows Claude, private keys deliberately excluded. It
+arrives as `mkDefault`, so your own `jail.permissions` still wins and the
+option's `defaultText` still shows upstream's. `docs/jail.md` is the real list.
 
 Turning `statusline.enable` on exports two variables through `environment`, so
 `environment` has to be in its attribute-set form. The shell-environment-file
@@ -115,6 +170,23 @@ Pinned extensions are exposed as `packages.<system>.ext-<slug>`:
 | `ext-narumitw-pi-btw` | `@narumitw/pi-btw` | side questions off the main thread |
 | `ext-pi-cache-optimizer` | `pi-cache-optimizer` | prefix-cache hit rate |
 | `ext-heyhuynhgiabuu-pi-pretty` | `@heyhuynhgiabuu/pi-pretty` | TUI syntax highlighting |
+
+Two more are first-party, built from `packages/extensions/` in this repo rather
+than from a pin. They carry no lockfile because they have no runtime
+dependency: both import from `@earendil-works/*` with `import type` only, which
+TypeScript erases.
+
+| Attribute | Source | What it adds |
+| --- | --- | --- |
+| `ext-pi-auto-mode` | `packages/extensions/pi-auto-mode` | Claude-Code-style auto mode: deterministic rules plus a fail-closed classifier |
+| `ext-pi-notify` | `packages/extensions/pi-notify` | Desktop notifications on prompts, settle, and long tool calls |
+
+Their tests run under `nix flake check` as `pi-auto-mode` and `pi-notify`. Each
+check runs the suite twice over one tree: `bun test`, with
+`PI_CODING_AGENT_SRC` pointed at the pi source `packages.coding-agent` builds
+from so the contract tests read pi's real tool schemas, and then `tsc --strict`
+against pi 0.84.2's published `.d.ts`. A pi bump that moves the extension API
+fails there rather than at load.
 
 Bump every pin, and pi itself, with one command:
 
