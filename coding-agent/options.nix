@@ -437,7 +437,20 @@ in
               '')
               (combinators.try-fwd-env "PI_CODING_AGENT_DIR")
             ];
-            permissions = jail.permissions combinators ++ [ configPermission ];
+            # After configPermission, and it has to be: bwrap applies mount
+            # operations in order, and this tmpfs sits under the agent
+            # directory that fragment binds. Both land in RUNTIME_ARGS, which
+            # the wrapper expands last, so the order here is the order the
+            # kernel sees.
+            privateAgentSubdirPermission = combinators.add-runtime (
+              lib.concatMapStringsSep "\n" (rel: ''
+                RUNTIME_ARGS+=(--tmpfs "$agent_dir/${rel}")
+              '') jail.privateAgentSubdirs
+            );
+            permissions =
+              jail.permissions combinators
+              ++ [ configPermission ]
+              ++ lib.optional (jail.privateAgentSubdirs != [ ]) privateAgentSubdirPermission;
           in
           jailBuilder "pi" wrapped permissions
         else

@@ -1,14 +1,19 @@
 # @czottmann/pi-automode, built from joegoldin/pi-automode rather than from npm.
 #
-# The fork carries one commit on top of upstream's v1.11.0: auto mode registers
-# itself on `@gotgenes/pi-permission-system`'s authorizer chain, so the two
-# packages compose instead of contending for pi's `tool_call` event.
+# The fork carries two commits on top of upstream's v1.11.0. The first: auto
+# mode registers itself on `@gotgenes/pi-permission-system`'s authorizer chain,
+# so the two packages compose instead of contending for pi's `tool_call` event.
 # `docs/assumption-a2.md` has the whole argument; the short version is that pi's
 # `emitToolCall` returns on the first extension that blocks, so two gates on one
 # event means the first one loaded answers every ask and the second is dead
 # code. The permission system publishes a seam for exactly this — a typed
 # service on `Symbol.for("@gotgenes/pi-permission-system:service")` with
 # `registerAuthorizer` — and upstream does not use it.
+#
+# The second: `PI_AUTOMODE_NO_STATUS_SLOT` makes auto mode stop drawing its own
+# status slot and republish the same tally on a `pi-automode:status` channel,
+# for a host that already renders a status line and wants the tally on a row of
+# its own rather than twice.
 #
 # Kept additive, so upstream replays underneath: one new module plus six lines
 # in the entrypoint, and `extensions/auto-mode/extension.ts` byte-identical.
@@ -33,7 +38,7 @@
 }:
 let
   upstreamVersion = "1.11.0";
-  forkVersion = "${upstreamVersion}-jg.2";
+  forkVersion = "${upstreamVersion}-jg.3";
 in
 assert lib.assertMsg (pin.version == upstreamVersion) ''
   packages/extensions/czottmann-pi-automode.nix is built from the fork at
@@ -55,7 +60,7 @@ mkPiExtension {
     owner = "joegoldin";
     repo = "pi-automode";
     rev = "v${forkVersion}";
-    hash = "sha256-EKsQVWTrdt32BGfNfi9klIVBFEOl22mg+urbiRfMuhw=";
+    hash = "sha256-II0wBRErESOJRnLiyaV0Nw5th3Ox9buiTMGii6TFhyE=";
   };
 
   inherit (pin) entrypoints skills prompts;

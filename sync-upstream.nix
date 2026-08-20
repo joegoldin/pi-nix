@@ -57,7 +57,7 @@ pkgs.writeShellApplication {
       # `nixos-rebuild` into minutes of apparent hang.
       #
       # The rewrite hands each member to a function that returns a DERIVATION
-      # instead. `${src}/packages/x` inside a builder is a store-path reference,
+      # instead. `''${src}/packages/x` inside a builder is a store-path reference,
       # which nix resolves when it schedules the build rather than while it is
       # still evaluating.
       sed -i '/^  fetchurl,$/a\  workspaceSubdir ? throw "coding-agent/bun.nix requires workspaceSubdir (see package-bun.nix)",' "$tmpdir/bun.nix"

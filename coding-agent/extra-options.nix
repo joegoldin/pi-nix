@@ -917,6 +917,39 @@ in
       '';
     };
 
+    jail.privateAgentSubdirs = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ ];
+      example = [ "pi-pretty" ];
+      description = ''
+        Paths under the coding-agent directory, relative to it, that each
+        jailed session gets as its own tmpfs instead of the host's shared
+        directory. Empty by default, and it costs whatever persistence the
+        named path held.
+
+        The reason is an interaction between the jail and any extension that
+        keeps an LMDB environment there. jail.nix passes `--unshare-pid`, so
+        every session's pi is pid 2 inside its own namespace. LMDB's reader
+        table takes an fcntl write lock on the byte at offset `pid` in
+        `lock.mdb` (`mdb_reader_pid`), so a second concurrent session asks the
+        kernel for a byte the first one already holds and `mdb_txn_begin`
+        returns EAGAIN. Observed as `@heyhuynhgiabuu/pi-pretty` refusing to
+        start a session while another was open:
+
+          Error: FFF init failed: Failed to start read transaction for
+          frecency database: Resource temporarily unavailable (os error 11)
+
+        and confirmed in /proc/locks as `POSIX ADVISORY WRITE <pid> <dev>:2 2`
+        against that lock file, offset 2 being the in-namespace pid.
+
+        A private inode per session is the whole fix, and it is also the whole
+        cost: two sessions cannot share the database, so whatever it
+        accumulated is per-session from here on. Nothing else works while
+        `--unshare-pid` stands, and dropping that would hand the agent the
+        host's /proc.
+      '';
+    };
+
     autoMode = {
       enable = lib.mkEnableOption "the @czottmann/pi-automode guardrail";
 
