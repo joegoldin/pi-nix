@@ -237,6 +237,29 @@ let
     };
   };
 
+  # The bounded-delegation checkpoint's excluded set. Null leaves the package's
+  # own literal alone, which means no variable at all rather than a variable
+  # naming upstream's default: the two are indistinguishable to the patched
+  # package, and the absent one cannot go stale if upstream moves.
+  autoChainNarrowedEnvelope = evalPi {
+    pi.coding-agent = {
+      autoMode.enable = true;
+      autoMode.permissionSystem.delegationExcludedSurfaces = [ "path" ];
+      extensionPackages = [ fakePermissionSystem ];
+    };
+  };
+
+  # Set without a link registered. There is no verdict to cap, so a variable
+  # here would describe a checkpoint that never runs.
+  autoChainNarrowedNoLink = evalPi {
+    pi.coding-agent = {
+      autoMode.enable = true;
+      autoMode.permissionSystem.enable = false;
+      autoMode.permissionSystem.delegationExcludedSurfaces = [ "path" ];
+      extensionPackages = [ fakePermissionSystem ];
+    };
+  };
+
   # The same pair with the link turned off: nothing is written, and the two
   # packages are back to contending.
   autoChainOff = evalPi {
@@ -660,6 +683,20 @@ assert
 # Enabled without an audiomemo package must fail loudly: the jail binds the
 # closure of the exact derivation named there, so there is nothing to guess.
 assert voiceUnpackaged.success == false;
+
+# The excluded-surface override reaches pi as an environment variable, because
+# upstream reads the set from a module-level literal and the build in this repo
+# patches it to consult one. Comma-separated, in the order given.
+assert
+  envValue autoChainNarrowedEnvelope "PI_PERMISSION_DELEGATION_EXCLUDED_SURFACES"
+  == {
+    value = "path";
+  };
+# Unset by default: the package keeps its own set.
+assert
+  envValue autoWithPermissionSystem "PI_PERMISSION_DELEGATION_EXCLUDED_SURFACES" == null;
+# And unset when no link is registered, however the option is written.
+assert envValue autoChainNarrowedNoLink "PI_PERMISSION_DELEGATION_EXCLUDED_SURFACES" == null;
 pkgs.runCommand "pi-nix-options-tests" { } ''
   set -euo pipefail
   # The written prompt must be the literal text, with no wrapper or frontmatter.

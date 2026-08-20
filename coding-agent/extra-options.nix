@@ -329,6 +329,17 @@ let
     "extensions/pi-permission-system/config.json" = permissionSystemSettings;
   };
 
+  # Not a settings.json key and not in that config file either: upstream reads
+  # the excluded set from a module-level literal, and the build in this repo
+  # patches it to consult this variable first. Gated on chainActive for the
+  # same reason the config file is -- with no link registered there is no
+  # verdict to cap, so the variable would describe a checkpoint that never runs.
+  permissionSystemEnv =
+    lib.optionalAttrs (chainActive && chain.delegationExcludedSurfaces != null)
+      {
+        PI_PERMISSION_DELEGATION_EXCLUDED_SURFACES.value = lib.concatStringsSep "," chain.delegationExcludedSurfaces;
+      };
+
   # pi-subagents resolves the permission system by package name so it can hand
   # it to the child, and tries two locations in order: `npm/node_modules/<name>`
   # and then `extensions/<name>` (its `resolvePermissionSystemExtension`). A Nix
@@ -855,6 +866,7 @@ let
   extraEnv =
     lib.optionalAttrs statusline.enable statuslineEnv
     // autoModeEnv
+    // permissionSystemEnv
     // notifyEnv
     // messagingEnv
     // voiceEnv
@@ -1313,6 +1325,49 @@ in
           '';
         };
 
+        delegationExcludedSurfaces = lib.mkOption {
+          type = lib.types.nullOr (lib.types.listOf lib.types.str);
+          default = null;
+          example = [ "path" ];
+          description = ''
+            The surfaces on which a chain link may never grant an `allow`. Null,
+            the default, leaves the package's own set alone:
+            `external_directory` and `path`.
+
+            ADR 0007 §5 calls this the bounded-delegation checkpoint. The chain
+            owner caps every link's verdict, so a link's `allow` on an excluded
+            surface is downgraded to `defer` and the ask falls through to a
+            prompt. It only ever tightens; nothing here can turn a `deny` into
+            an `allow`.
+
+            Upstream excludes both surfaces and says why: a finer,
+            secret-shaped-`path` exclusion is deferred to a later slice, so the
+            conservative whole-surface exclusion ships in the meantime. That is
+            the right default for a host where "outside the working directory"
+            means the entire filesystem.
+
+            Under {option}`jail.enable` it is the wrong shape. The only paths
+            that exist outside the working directory are the ones the wrapper
+            bound by name, and the ones that generate the prompts -- /etc,
+            /proc, /tmp -- are session-local mounts that cannot outlive the
+            process. Every `external_directory` ask is then a question about a
+            directory the operator already decided to bind, and the classifier
+            installed to answer that class of question is the one component
+            forbidden from touching it. Setting this to `[ "path" ]` hands it
+            back.
+
+            Leave `path` in the list. It is the cross-cutting gate that guards
+            secrets, a `path` deny cannot be overridden by a per-tool allow, and
+            it is what makes the narrower `external_directory` grant defensible.
+            An empty list is not a way to disable the checkpoint: the patched
+            package treats an empty parse as unset and falls back to its own
+            default, so a typo costs prompts rather than authority.
+
+            Requires the `@gotgenes/pi-permission-system` build from this repo,
+            which is the pinned one. Upstream hardcodes the set.
+          '';
+        };
+
         settings = lib.mkOption {
           type = lib.types.attrs;
           default = {
@@ -1524,7 +1579,15 @@ in
         denied everywhere except the paths named below, and reads are denied on
         the credential paths named below. It is a real boundary against a
         command that writes where it should not, and it is NOT equivalent to
-        the jail
+        the jail.
+
+        NOT VERIFIED, and off by default for that reason. The profile test
+        passed identically with and without the `(deny file-write*)` line, so
+        it demonstrates nothing: a check that cannot fail is not evidence that
+        the thing it checks works. Treat this as unfinished until that negative
+        control bites. It reached master by accident, swept into an unrelated
+        `git commit -a`; the code is dormant behind this flag, and the caveat is
+        written here rather than reverted so it is read by whoever turns it on
       '';
 
       writablePaths = lib.mkOption {
