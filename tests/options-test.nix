@@ -460,6 +460,38 @@ assert
     enabled = true;
     classifierIo = false;
   };
+# Seatbelt is darwin's answer to the jail, and on Linux it must change nothing:
+# `installedPackage` is what the two installers put on PATH, and here it has to
+# be `finalPackage` itself rather than a wrapper around it.
+assert (evalPi { }).installedPackage == (evalPi { }).finalPackage;
+assert
+  (evalPi { pi.coding-agent.sandbox.enable = true; }).installedPackage
+  == (evalPi { pi.coding-agent.sandbox.enable = true; }).finalPackage;
+# The profile is rendered only when asked for.
+assert (evalPi { }).sandbox.profile == null;
+assert (evalPi { pi.coding-agent.sandbox.enable = true; }).sandbox.profile != null;
+# What the profile says. Writes closed then granted back, so a path nobody
+# named is read-only rather than quietly writable, and the working directory
+# arrives as a -D parameter because it is not known until launch.
+assert
+  let
+    profile =
+      builtins.readFile
+        (evalPi {
+          pi.coding-agent.sandbox = {
+            enable = true;
+            writablePaths = [ "/Users/joe/Development" ];
+            unreadablePaths = [ "/Users/joe/.ssh" ];
+          };
+        }).sandbox.profile;
+  in
+  lib.hasInfix "(deny file-write*)" profile
+  && lib.hasInfix ''(subpath (param "CWD"))'' profile
+  && lib.hasInfix ''(subpath (param "AGENT_DIR"))'' profile
+  && lib.hasInfix ''(subpath "/Users/joe/Development")'' profile
+  && lib.hasInfix "(deny file-read*" profile
+  && lib.hasInfix ''(subpath "/Users/joe/.ssh")'' profile;
+
 # pi-extras is off by default and contributes its entrypoint when enabled. The
 # clipboard crosses the jail as text through a host channel, never as a bound
 # compositor socket, so enabling it adds no wayland permission.

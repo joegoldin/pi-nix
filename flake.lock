@@ -8,11 +8,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1787169892,
-        "narHash": "sha256-m/6E+NyWgg6zBekWJLpC59pyhHStcPSbOaLKuDaRNNM=",
+        "lastModified": 1787254291,
+        "narHash": "sha256-DOK4PBGNhylYoKr4UFUlEkGPmRHO2QpOn/ot/t6LJi8=",
         "owner": "joegoldin",
         "repo": "agent-statusline",
-        "rev": "2d96cb41b495a67aa04879fc2e42f9f038cba1d6",
+        "rev": "140a4b372b20b97d184c78f7abcd1d4f5e0a4823",
         "type": "github"
       },
       "original": {

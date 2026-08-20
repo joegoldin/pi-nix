@@ -35,7 +35,7 @@ in
   config = lib.mkIf cfg.enable (
     lib.mkMerge [
       {
-        environment.systemPackages = [ cfg.finalPackage ];
+        environment.systemPackages = [ cfg.installedPackage ];
       }
     ]
   );
