@@ -188,3 +188,63 @@ describe("ChordReader prefix repeats", () => {
 		});
 	});
 });
+
+describe("ChordReader and key releases", () => {
+	const reader = () => new ChordReader();
+
+	it("does not let the release of ctrl+s complete its own chord", () => {
+		// The exact shape ghostty sends with Kitty flags 7: the press, then the
+		// release of `s` reported with no modifier still held. That release used
+		// to read as a plain `s` and fire the stash the moment you pressed the
+		// prefix.
+		const r = reader();
+		expect(r.feed("\x1b[115;5u", 0)).toEqual({ consume: true, pending: true, stage: "prefix" });
+		expect(r.feed("\x1b[115;1:3u", 5)).toEqual({ consume: false, pending: true, stage: "prefix" });
+		expect(r.feed("\x1b[115;5:3u", 6)).toEqual({ consume: false, pending: true, stage: "prefix" });
+		// Still waiting, so the real second key still lands.
+		expect(r.feed("u", 10)).toEqual({ consume: true, pending: false, action: { kind: "undo" } });
+	});
+
+	it("keeps the menu up across a release, rather than reporting idle", () => {
+		const r = reader();
+		r.feed("\x13", 0);
+		const step = r.feed("\x1b[115;1:3u", 5);
+		expect(step.pending).toBe(true);
+		expect(step.consume).toBe(false);
+	});
+
+	it("reports the register stage through a release", () => {
+		const r = reader();
+		r.feed("\x13", 0);
+		r.feed("a", 5);
+		expect(r.feed("\x1b[97;1:3u", 6)).toEqual({ consume: false, pending: true, stage: "append" });
+		expect(r.feed("4", 10)).toEqual({
+			consume: true,
+			pending: false,
+			action: { kind: "append", register: "4" },
+		});
+	});
+
+	it("passes a release through untouched when no chord is open", () => {
+		expect(reader().feed("\x1b[115;1:3u", 0)).toEqual({ consume: false, pending: false });
+	});
+
+	it("does not mistake pasted text for a release", () => {
+		// A MAC address in a paste contains ":3F". pi-tui guards this case; so
+		// must this, or a paste would be swallowed as a key event.
+		const r = reader();
+		r.feed("\x13", 0);
+		const step = r.feed("\x1b[200~90:62:3F:A5\x1b[201~", 5);
+		expect(step.consume).toBe(true);
+	});
+
+	it("still acts on a real press that carries an event type of 1", () => {
+		const r = reader();
+		r.feed("\x13", 0);
+		expect(r.feed("\x1b[115;1:1u", 5)).toEqual({
+			consume: true,
+			pending: false,
+			action: { kind: "stash" },
+		});
+	});
+});

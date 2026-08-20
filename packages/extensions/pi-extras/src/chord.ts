@@ -71,6 +71,32 @@ function parseCsiU(data: string): ParsedKey | undefined {
 	return { codepoint: Number.parseInt(match[1], 10), modifier: modifier & ~LOCK_MASK };
 }
 
+/**
+ * Whether the sequence is a key RELEASE rather than a press.
+ *
+ * pi asks the terminal for Kitty keyboard protocol flags 7, and flag 2 is
+ * "report event types", so a terminal that honours it sends a release for every
+ * press. The event type rides in the field after the modifier -- 1 press,
+ * 2 repeat, 3 release -- and parseCsiU captures that field and then ignores it,
+ * which is how one physical ctrl+s used to fire twice.
+ *
+ * Worse than twice: the release is not always reported with the modifier still
+ * held. `\x1b[115;1:3u` is the release of `s` with no modifiers, which
+ * printableKey reads as a plain `s`, which SECOND_KEY reads as "stash". Press
+ * ctrl+s and the chord opened and immediately completed itself.
+ *
+ * The set of terminators matches pi-tui's own isKeyRelease (keys.ts), which
+ * cannot be imported here: pi injects that package as a jiti virtual module, so
+ * an import resolves under pi and not under `bun test`.
+ */
+export function isKeyRelease(data: string): boolean {
+	// Pasted text is not a key event, and can contain anything -- a MAC address
+	// like "90:62:3F:A5" would otherwise read as a release. pi-tui guards the
+	// same case the same way.
+	if (data.includes("\x1b[200~")) return false;
+	return /:3[u~ABCDHF]/.test(data);
+}
+
 /** ctrl+letter, either as the C0 control character or as a CSI-u sequence. */
 export function matchesCtrl(data: string, letter: string): boolean {
 	const codepoint = letter.charCodeAt(0);
@@ -135,7 +161,18 @@ export class ChordReader {
 		this.state = "idle";
 	}
 
+	/** A key that is not ours: passed to whoever is focused, without disturbing
+	 *  a chord already in progress. `pending` still reports the reader's state,
+	 *  so the caller does not take the menu down over a key it ignored. */
+	private passthrough(): ChordStep {
+		if (this.state === "idle") return IDLE;
+		return { consume: false, pending: true, stage: this.state === "append" ? "append" : "prefix" };
+	}
+
 	feed(data: string, now: number): ChordStep {
+		// Releases decide nothing. Every chord key is claimed on its press, and
+		// acting on the release too is how ctrl+s used to stash by itself.
+		if (isKeyRelease(data)) return this.passthrough();
 		if (this.state !== "idle" && now - this.since > CHORD_TIMEOUT_MS) this.state = "idle";
 
 		switch (this.state) {
