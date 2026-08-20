@@ -136,12 +136,22 @@ export class ExtrasSession {
 	}
 
 	/** Draw or clear the half-typed-chord prompt. Cheap enough to call on every
-	 *  keystroke: pi de-duplicates a widget set to the same content. */
+	 *  keystroke: pi de-duplicates a widget set to the same content.
+	 *
+	 *  aboveEditor, and that is not a cosmetic choice. agent-statusline takes
+	 *  pi's footer and draws every one of its rows inside a single belowEditor
+	 *  widget, because its dashboard and activity rows share one line budget and
+	 *  two components cannot see each other's line count. It then re-renders on
+	 *  a 1Hz tick. A second belowEditor widget lands in that same container and
+	 *  is blanked by the next tick -- observed as the prompt appearing and going
+	 *  black about a second later. Above the editor is a different container,
+	 *  nobody else's, and it puts the prompt next to what you are typing.
+	 */
 	private showHint(stage: "prefix" | "append" | undefined): void {
 		if (typeof this.ctx.ui.setWidget !== "function") return;
 		try {
 			this.ctx.ui.setWidget(HINT_WIDGET_KEY, stage ? hintRows(stage) : undefined, {
-				placement: "belowEditor",
+				placement: "aboveEditor",
 			});
 		} catch {
 			// A mode with no widgets. The chord still works, unprompted.

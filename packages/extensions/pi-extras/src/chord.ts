@@ -140,6 +140,15 @@ export class ChordReader {
 
 		switch (this.state) {
 			case "prefix": {
+				// A second prefix restarts rather than cancels. ctrl+s is not
+				// printable, so it used to fall past the SECOND_KEY lookup into
+				// CANCELLED: press the prefix twice, from hesitation or from a
+				// key repeat, and the chord was silently back at idle with the
+				// next letter going to the prompt.
+				if (matchesCtrl(data, "s")) {
+					this.since = now;
+					return WAITING_PREFIX;
+				}
 				const key = printableKey(data);
 				if (key === "a") {
 					this.state = "append";
@@ -151,6 +160,13 @@ export class ChordReader {
 				return action ? { consume: true, pending: false, action } : CANCELLED;
 			}
 			case "append": {
+				// Same again, one step further in: the prefix restarts the whole
+				// chord rather than cancelling from the register step.
+				if (matchesCtrl(data, "s")) {
+					this.state = "prefix";
+					this.since = now;
+					return WAITING_PREFIX;
+				}
 				this.state = "idle";
 				const key = printableKey(data);
 				if (key === undefined || !REGISTERS.has(key)) return CANCELLED;

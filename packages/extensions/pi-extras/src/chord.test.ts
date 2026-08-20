@@ -157,3 +157,34 @@ describe("ChordReader", () => {
 		expect(r.feed("s", 10)).toEqual({ consume: false, pending: false });
 	});
 });
+
+describe("ChordReader prefix repeats", () => {
+	const reader = () => new ChordReader();
+
+	it("restarts the chord when the prefix is pressed twice", () => {
+		const r = reader();
+		expect(r.feed("\x13", 0)).toEqual({ consume: true, pending: true, stage: "prefix" });
+		// Was CANCELLED: ctrl+s is not printable, so it fell past SECOND_KEY.
+		expect(r.feed("\x13", 10)).toEqual({ consume: true, pending: true, stage: "prefix" });
+		expect(r.feed("s", 20)).toEqual({ consume: true, pending: false, action: { kind: "stash" } });
+	});
+
+	it("restarts from the register step too", () => {
+		const r = reader();
+		r.feed("\x13", 0);
+		expect(r.feed("a", 10)).toEqual({ consume: true, pending: true, stage: "append" });
+		expect(r.feed("\x13", 20)).toEqual({ consume: true, pending: true, stage: "prefix" });
+		expect(r.feed("u", 30)).toEqual({ consume: true, pending: false, action: { kind: "undo" } });
+	});
+
+	it("keeps the window open from the latest prefix, not the first", () => {
+		const r = reader();
+		r.feed("\x13", 0);
+		r.feed("\x13", CHORD_TIMEOUT_MS - 1);
+		expect(r.feed("s", CHORD_TIMEOUT_MS + 100)).toEqual({
+			consume: true,
+			pending: false,
+			action: { kind: "stash" },
+		});
+	});
+});
