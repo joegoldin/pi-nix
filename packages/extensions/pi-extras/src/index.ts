@@ -25,7 +25,7 @@ import { gitEditorOverrides } from "./gitenv.ts";
 import { expandPathRefs, nextThinkingLevel, unresolvedRefs } from "./input.ts";
 import { type StashTheme, createStashComponent } from "./overlay.ts";
 import { type StashIO, StashStore, stashPath } from "./stash.ts";
-import { hintRows } from "./hint.ts";
+import { type HintStage, createHintComponent } from "./hint.ts";
 import { TitleSpinner, baseTitle } from "./title.ts";
 import { UndoBuffer } from "./undo.ts";
 
@@ -40,7 +40,6 @@ export interface ExtrasContext {
 		setEditorText?(text: string): void;
 		pasteToEditor?(text: string): void;
 		setTitle?(title: string): void;
-		setWidget?(key: string, content: string[] | undefined, options?: { placement?: string }): void;
 		onTerminalInput?(handler: (data: string) => { consume?: boolean; data?: string } | undefined): () => void;
 		custom?<T>(
 			factory: (
@@ -103,6 +102,10 @@ export class ExtrasSession {
 	private readonly chord = new ChordReader();
 	private readonly spinner: TitleSpinner;
 	private unsubscribe: (() => void) | undefined;
+	private hintOpen = false;
+	private hintStage: HintStage | undefined;
+	private hintDismiss: (() => void) | undefined;
+	private hintRender: (() => void) | undefined;
 	private inflight: Promise<void> = Promise.resolve();
 
 	constructor(pi: ExtrasHost, ctx: ExtrasContext, deps: ExtrasDeps) {
@@ -135,26 +138,69 @@ export class ExtrasSession {
 		}
 	}
 
-	/** Draw or clear the half-typed-chord prompt. Cheap enough to call on every
-	 *  keystroke: pi de-duplicates a widget set to the same content.
+	/** Open, follow, or dismiss the half-typed-chord menu.
 	 *
-	 *  aboveEditor, and that is not a cosmetic choice. agent-statusline takes
-	 *  pi's footer and draws every one of its rows inside a single belowEditor
-	 *  widget, because its dashboard and activity rows share one line budget and
-	 *  two components cannot see each other's line count. It then re-renders on
-	 *  a 1Hz tick. A second belowEditor widget lands in that same container and
-	 *  is blanked by the next tick -- observed as the prompt appearing and going
-	 *  black about a second later. Above the editor is a different container,
-	 *  nobody else's, and it puts the prompt next to what you are typing.
+	 *  An overlay rather than a widget. A widget shares its container with
+	 *  whatever else is in it, and agent-statusline puts every one of its rows
+	 *  in a single one while re-rendering on a 1Hz tick, so the menu was blanked
+	 *  within the second -- reported from a live session, twice, once per
+	 *  container. An overlay is the TUI's own, above everything, and lives until
+	 *  it is dismissed.
+	 *
+	 *  Called on every keystroke, so it must be idempotent: a stage that has not
+	 *  changed repaints nothing, and `hintOpen` is set before the await so two
+	 *  keys in one tick cannot mount two overlays.
 	 */
-	private showHint(stage: "prefix" | "append" | undefined): void {
-		if (typeof this.ctx.ui.setWidget !== "function") return;
+	private showHint(stage: HintStage | undefined): void {
+		if (stage === undefined) {
+			this.closeHint();
+			return;
+		}
+		const changed = this.hintStage !== stage;
+		this.hintStage = stage;
+		if (this.hintOpen) {
+			if (changed) this.hintRender?.();
+			return;
+		}
+		if (this.ctx.mode !== "tui" || typeof this.ctx.ui.custom !== "function") return;
+		const theme = this.ctx.ui.theme ?? { fg: (_slot: string, text: string) => text };
+		this.hintOpen = true;
 		try {
-			this.ctx.ui.setWidget(HINT_WIDGET_KEY, stage ? hintRows(stage) : undefined, {
-				placement: "aboveEditor",
-			});
+			void this.ctx.ui
+				.custom<void>(
+					(tui, activeTheme, _keybindings, done) => {
+						this.hintDismiss = () => done(undefined as void);
+						this.hintRender = () => tui.requestRender();
+						return createHintComponent(tui, activeTheme ?? theme, () => this.hintStage ?? "prefix");
+					},
+					// SizeValue is `number | "N%"`; "auto" is not one and would have
+					// been silently ignored. 28 columns fits the widest row the
+					// menu draws ("Append to register") with room to spare.
+					{ overlay: true, overlayOptions: { width: 28, maxHeight: "50%" } },
+				)
+				.catch(() => {
+					// An overlay that will not mount is not worth ending a session
+					// over. The chord still works, unprompted.
+				})
+				.finally(() => {
+					this.hintOpen = false;
+					this.hintDismiss = undefined;
+					this.hintRender = undefined;
+				});
 		} catch {
-			// A mode with no widgets. The chord still works, unprompted.
+			this.hintOpen = false;
+		}
+	}
+
+	/** Take the menu down. Safe to call when it is not up. */
+	private closeHint(): void {
+		this.hintStage = undefined;
+		const dismiss = this.hintDismiss;
+		this.hintDismiss = undefined;
+		try {
+			dismiss?.();
+		} catch {
+			// Already unmounted.
 		}
 	}
 
@@ -352,9 +398,6 @@ export class ExtrasSession {
 		});
 	}
 }
-
-/** Widget slot for the half-typed-chord prompt. */
-const HINT_WIDGET_KEY = "pi-extras:chord";
 
 export function registerHandlers(pi: ExtrasHost, deps: ExtrasDeps): void {
 	let session: ExtrasSession | undefined;
