@@ -70,8 +70,10 @@ describe("ChordReader", () => {
 		expect(reader().feed("s", 0)).toEqual({ consume: false, pending: false });
 	});
 
-	it("consumes the prefix and waits", () => {
-		expect(reader().feed("\x13", 0)).toEqual({ consume: true, pending: true });
+	it("consumes the prefix and waits, naming what it waits for", () => {
+		// `stage` is what the on-screen prompt is drawn from, so it is part of
+		// the contract rather than a detail.
+		expect(reader().feed("\x13", 0)).toEqual({ consume: true, pending: true, stage: "prefix" });
 	});
 
 	it.each([
@@ -90,7 +92,7 @@ describe("ChordReader", () => {
 	it("resolves a numbered register append through the second prefix", () => {
 		const r = reader();
 		r.feed("\x13", 0);
-		expect(r.feed("a", 10)).toEqual({ consume: true, pending: true });
+		expect(r.feed("a", 10)).toEqual({ consume: true, pending: true, stage: "append" });
 		expect(r.feed("4", 20)).toEqual({ consume: true, pending: false, action: { kind: "append", register: "4" } });
 	});
 
@@ -138,7 +140,7 @@ describe("ChordReader", () => {
 	it("starts a fresh chord when the prefix arrives after an expiry", () => {
 		const r = reader();
 		r.feed("\x13", 0);
-		expect(r.feed("\x13", CHORD_TIMEOUT_MS + 1)).toEqual({ consume: true, pending: true });
+		expect(r.feed("\x13", CHORD_TIMEOUT_MS + 1)).toEqual({ consume: true, pending: true, stage: "prefix" });
 	});
 
 	it("expires the append step too", () => {

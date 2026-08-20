@@ -25,6 +25,7 @@ import { gitEditorOverrides } from "./gitenv.ts";
 import { expandPathRefs, nextThinkingLevel, unresolvedRefs } from "./input.ts";
 import { type StashTheme, createStashComponent } from "./overlay.ts";
 import { type StashIO, StashStore, stashPath } from "./stash.ts";
+import { hintRows } from "./hint.ts";
 import { TitleSpinner, baseTitle } from "./title.ts";
 import { UndoBuffer } from "./undo.ts";
 
@@ -39,6 +40,7 @@ export interface ExtrasContext {
 		setEditorText?(text: string): void;
 		pasteToEditor?(text: string): void;
 		setTitle?(title: string): void;
+		setWidget?(key: string, content: string[] | undefined, options?: { placement?: string }): void;
 		onTerminalInput?(handler: (data: string) => { consume?: boolean; data?: string } | undefined): () => void;
 		custom?<T>(
 			factory: (
@@ -124,6 +126,7 @@ export class ExtrasSession {
 		try {
 			this.unsubscribe = this.ctx.ui.onTerminalInput((data) => {
 				const step = this.chord.feed(data, this.deps.now());
+				this.showHint(step.pending ? step.stage : undefined);
 				if (step.action) this.dispatch(step.action);
 				return step.consume ? { consume: true } : undefined;
 			});
@@ -132,7 +135,21 @@ export class ExtrasSession {
 		}
 	}
 
+	/** Draw or clear the half-typed-chord prompt. Cheap enough to call on every
+	 *  keystroke: pi de-duplicates a widget set to the same content. */
+	private showHint(stage: "prefix" | "append" | undefined): void {
+		if (typeof this.ctx.ui.setWidget !== "function") return;
+		try {
+			this.ctx.ui.setWidget(HINT_WIDGET_KEY, stage ? hintRows(stage) : undefined, {
+				placement: "belowEditor",
+			});
+		} catch {
+			// A mode with no widgets. The chord still works, unprompted.
+		}
+	}
+
 	detach(): void {
+		this.showHint(undefined);
 		this.chord.cancel();
 		this.spinner.stop();
 		this.unsubscribe?.();
@@ -325,6 +342,9 @@ export class ExtrasSession {
 		});
 	}
 }
+
+/** Widget slot for the half-typed-chord prompt. */
+const HINT_WIDGET_KEY = "pi-extras:chord";
 
 export function registerHandlers(pi: ExtrasHost, deps: ExtrasDeps): void {
 	let session: ExtrasSession | undefined;

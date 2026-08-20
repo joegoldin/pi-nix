@@ -30,15 +30,25 @@ export interface ChordStep {
 	consume: boolean;
 	/** True while the reader is waiting for a further key. */
 	pending: boolean;
+	/** Which key the reader is waiting for, for the caller to prompt with. */
+	stage?: "prefix" | "append";
 	action?: ChordAction;
 }
 
 /**
- * How long a half-typed chord survives. Long enough to be reachable with one
- * hand, short enough that a forgotten prefix does not swallow the next real
- * keystroke.
+ * How long a half-typed chord survives.
+ *
+ * This was 1500ms and that was too short to be usable. A chord nobody can see
+ * has to be recalled from memory, and 1.5s is under the time it takes to
+ * remember which letter you wanted -- press ctrl+s, pause to think, press `s`,
+ * and the prefix has already expired, so the `s` lands in the prompt and the
+ * feature reads as broken. Measured against the real TUI: the same two
+ * keystrokes open the stash at a 1.2s gap and type an `s` at 2.0s.
+ *
+ * The window is now long enough to think in, and the caller prompts on screen
+ * while it is open, so a forgotten prefix is visible rather than silent.
  */
-export const CHORD_TIMEOUT_MS = 1500;
+export const CHORD_TIMEOUT_MS = 5000;
 
 /** Caps Lock and Num Lock ride along in the Kitty modifier field. */
 const LOCK_MASK = 64 + 128;
@@ -103,10 +113,14 @@ const SECOND_KEY: Record<string, ChordAction> = {
 
 const REGISTERS = new Set<string>(["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "s"]);
 
+/** The second keys the reader accepts, for the on-screen prompt to name. */
+export const SECOND_KEY_LETTERS: readonly string[] = Object.keys(SECOND_KEY).concat("a");
+
 type State = "idle" | "prefix" | "append";
 
 const IDLE: ChordStep = { consume: false, pending: false };
-const WAITING: ChordStep = { consume: true, pending: true };
+const WAITING_PREFIX: ChordStep = { consume: true, pending: true, stage: "prefix" };
+const WAITING_APPEND: ChordStep = { consume: true, pending: true, stage: "append" };
 const CANCELLED: ChordStep = { consume: true, pending: false };
 
 export class ChordReader {
@@ -130,7 +144,7 @@ export class ChordReader {
 				if (key === "a") {
 					this.state = "append";
 					this.since = now;
-					return WAITING;
+					return WAITING_APPEND;
 				}
 				this.state = "idle";
 				const action = key === undefined ? undefined : SECOND_KEY[key];
@@ -146,7 +160,7 @@ export class ChordReader {
 				if (matchesCtrl(data, "s")) {
 					this.state = "prefix";
 					this.since = now;
-					return WAITING;
+					return WAITING_PREFIX;
 				}
 				if (matchesAlt(data, "i")) return { consume: true, pending: false, action: { kind: "tab" } };
 				return IDLE;
