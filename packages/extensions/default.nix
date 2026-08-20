@@ -78,15 +78,21 @@ let
     ext-pi-extras = bunPkgs.callPackage ./pi-extras { inherit mkPiExtension; };
   };
 
-  # Three pins are still listed in extensions.json but built by their own file:
-  # pi-intercom and @gotgenes/pi-permission-system each carry a patch, and
-  # @czottmann/pi-automode is taken from our fork rather than from npm. Defined
-  # after the generic loop so these definitions are the ones that win.
+  # Four pins are still listed in extensions.json but built by their own file:
+  # pi-intercom, @gotgenes/pi-permission-system and pi-cache-optimizer each
+  # carry a patch, and @czottmann/pi-automode is taken from our fork rather than
+  # from npm. Defined after the generic loop so these definitions are the ones
+  # that win.
   patched = {
     ext-pi-intercom = bunPkgs.callPackage ./pi-intercom.nix {
       inherit mkPiExtension;
       pin = pins."pi-intercom";
       inherit (bunPkgs.callPackage ./pi-intercom-patches.nix { }) securityPatch;
+    };
+    ext-pi-cache-optimizer = bunPkgs.callPackage ./pi-cache-optimizer.nix {
+      inherit mkPiExtension;
+      pin = pins."pi-cache-optimizer";
+      inherit (bunPkgs.callPackage ./pi-cache-optimizer-patches.nix { }) suppressibleStatusSlot;
     };
     ext-gotgenes-pi-permission-system = bunPkgs.callPackage ./gotgenes-pi-permission-system.nix {
       inherit mkPiExtension;
