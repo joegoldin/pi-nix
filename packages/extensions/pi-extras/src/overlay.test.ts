@@ -31,7 +31,7 @@ describe("overlayCommand", () => {
 		["\r", "restore"],
 		["\n", "restore"],
 		["r", "restore"],
-		["y", "copy"],
+		["c", "copy"],
 		["d", "delete"],
 		["D", "clearAll"],
 		["\x1b", "close"],
@@ -39,6 +39,12 @@ describe("overlayCommand", () => {
 		["\x03", "close"],
 	])("maps %j to %s", (data, kind) => {
 		expect(overlayCommand(data)).toEqual({ kind });
+	});
+
+	it('leaves "y" unbound, so copy is not one action under two keys', () => {
+		// It was y here and c in the chord, which meant the letter depended on
+		// which surface you happened to be looking at.
+		expect(overlayCommand("y")).toBeUndefined();
 	});
 
 	it("ignores a key it does not bind", () => {
@@ -291,7 +297,7 @@ describe("wrapHelp", () => {
 	it("breaks on the separator rather than mid-key", () => {
 		// The bug this replaces ended a narrow list on "/ f…", cutting off the
 		// name of a key you were meant to be able to read.
-		const rows = wrapHelp("enter restore · y copy · d delete · D clear all · / filter · esc close", 34);
+		const rows = wrapHelp("enter restore · c copy · d delete · D clear all · / filter · esc close", 34);
 		expect(rows.length).toBeGreaterThan(1);
 		for (const row of rows) expect([...row].length).toBeLessThanOrEqual(34);
 		expect(rows.join(" ")).toContain("/ filter");
@@ -299,7 +305,7 @@ describe("wrapHelp", () => {
 	});
 
 	it("loses no binding, however narrow", () => {
-		const help = "enter restore · y copy · d delete · D clear all · / filter · esc close";
+		const help = "enter restore · c copy · d delete · D clear all · / filter · esc close";
 		for (const width of [12, 20, 34, 50, 200]) {
 			const joined = wrapHelp(help, width).join(" ");
 			for (const key of ["enter", "copy", "delete", "clear all", "filter", "close"]) {

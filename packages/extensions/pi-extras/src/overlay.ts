@@ -81,7 +81,9 @@ const KEYS: Record<string, OverlayCommand> = {
 	"\r": { kind: "restore" },
 	"\n": { kind: "restore" },
 	r: { kind: "restore" },
-	y: { kind: "copy" },
+	// c, the same letter the chord uses. It was y here and c there, one action
+	// under two keys depending on which surface you were looking at.
+	c: { kind: "copy" },
 	d: { kind: "delete" },
 	D: { kind: "clearAll" },
 	q: { kind: "close" },
@@ -143,7 +145,7 @@ export function previewOf(text: string, width: number): string {
 	return `${chars.slice(0, Math.max(0, width - 1)).join("")}${ELLIPSIS}`;
 }
 
-const HELP = "enter restore · y copy · d delete · D clear all · / filter · esc close";
+const HELP = "enter restore · c copy · d delete · D clear all · / filter · esc close";
 const FILTER_HELP = "type to narrow · enter restore · esc leave the filter";
 
 /**
