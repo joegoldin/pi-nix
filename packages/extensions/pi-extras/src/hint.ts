@@ -4,82 +4,30 @@
 // screen does not change, and the only way to know it registered is to guess
 // the second key correctly inside the timeout.
 //
-// An overlay rather than a widget, and the reason is ownership. Widgets land in
-// a shared container, and agent-statusline draws every one of its rows inside a
-// single one of those while re-rendering on a 1Hz tick, so a second widget is
-// blanked within the second. An overlay is mounted by the TUI on its own,
-// above everything, and stays until it is dismissed.
+// A widget rather than an overlay, and the overlay was tried first. pi's inline
+// TUI composites overlays into its own rendered lines and grows the drawn
+// region to reach them: `minLinesNeeded = max(lines, row + overlayHeight)`
+// (pi-tui's compositeOverlays). The default anchor is `center`, and `row` is
+// resolved against the terminal height, so a nine-row menu in a forty-row
+// terminal padded twenty blank lines under the prompt to get there. It was not
+// overlaying anything -- there is no alt-screen under an inline session to
+// float above -- it was pushing the session down the terminal.
 //
-// It takes focus, which does not matter here: the chord reader runs on
-// onTerminalInput, and pi-tui consults input listeners before the focused
-// component (TUI.handleTerminalInput), so every chord key is consumed before
-// this component is offered it. handleInput is a no-op for exactly that reason.
+// A widget is one row, adjacent to the prompt, and costs nothing when it is
+// not there. It does not take focus either, which suits a reader that needs
+// the next raw keystroke.
+//
+// The earlier claim that a widget could not survive here was wrong. The menu
+// really did vanish, but the cause was the chord completing itself on a key
+// release, not the statusline's re-render; with that fixed, the widget holds
+// through four ticks of it.
 
-/** The subset of pi's Theme this overlay uses, declared structurally so the
- *  tests can pass a recorder in place of the real proxy. */
-export interface HintTheme {
-	fg(slot: string, text: string): string;
-}
-
-interface RenderHost {
-	requestRender(): void;
-}
-
-/** What the reader is waiting for, which decides what the menu offers. */
-export type HintStage = "prefix" | "append";
-
-const PREFIX_ENTRIES: ReadonlyArray<readonly [string, string]> = [
-	["s", "stash"],
-	["u", "undo"],
-	["r", "redo"],
-	["y", "copy"],
-	["d", "cut"],
-	["t", "thinking"],
-	["a", "append…"],
-];
-
-const APPEND_ENTRIES: ReadonlyArray<readonly [string, string]> = [
-	["0-9", "numbered slot"],
-	["s", "the stash"],
-];
-
-/** The menu body, themed. Title, one row per key, then how to get out. */
-export function renderHint(stage: HintStage, width: number, theme: HintTheme): string[] {
-	const title = stage === "append" ? "Append to register" : "Chord";
-	const rows = [theme.fg("toolTitle", title)];
-	for (const [key, label] of stage === "append" ? APPEND_ENTRIES : PREFIX_ENTRIES) {
-		rows.push(`  ${theme.fg("accent", key.padEnd(4))}${theme.fg("text", label)}`);
+/** One row for the key the reader is waiting on. */
+export function hintRows(stage: "prefix" | "append"): string[] {
+	if (stage === "append") {
+		return ["pi-extras  append to register:   0-9  a numbered slot   ·   s  the stash   ·   esc  cancel"];
 	}
-	rows.push(theme.fg("muted", "  esc  cancel"));
-	// width is part of the Component contract and the caller's layout already
-	// bounds this box; nothing here needs to wrap, so it is deliberately unused
-	// rather than silently truncating a two-word label.
-	void width;
-	return rows;
-}
-
-/**
- * The overlay component pi's ctx.ui.custom mounts. Structural rather than an
- * implementation of pi-tui's Component: pi injects that package as a jiti
- * virtual module, so importing it would break `bun test`.
- *
- * `stage` is read on every render rather than captured, so the same mounted
- * overlay can follow the reader from the prefix step into the register step
- * without being torn down and rebuilt.
- */
-export function createHintComponent(
-	tui: RenderHost,
-	theme: HintTheme,
-	stage: () => HintStage,
-): { render(width: number): string[]; handleInput(data: string): void; invalidate(): void } {
-	return {
-		render: (width: number) => renderHint(stage(), width, theme),
-		handleInput: () => {
-			// Deliberately nothing. Every key that means something to the chord
-			// has already been consumed by the reader's input listener.
-		},
-		invalidate: () => {
-			tui.requestRender();
-		},
-	};
+	return [
+		"pi-extras  s stash   ·   u undo   ·   r redo   ·   y copy   ·   d cut   ·   t thinking   ·   a append…   ·   esc cancel",
+	];
 }

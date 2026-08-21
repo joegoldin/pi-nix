@@ -1,64 +1,29 @@
 import { describe, expect, it } from "bun:test";
 import { SECOND_KEY_LETTERS } from "./chord.ts";
-import { createHintComponent, renderHint } from "./hint.ts";
+import { hintRows } from "./hint.ts";
 
-const plainTheme = { fg: (_slot: string, text: string) => text };
-
-describe("renderHint", () => {
+describe("hintRows", () => {
 	it("names every second key the reader accepts", () => {
-		const body = renderHint("prefix", 60, plainTheme).join("\n");
+		const row = hintRows("prefix")[0]!;
 		for (const key of SECOND_KEY_LETTERS) {
-			expect(body).toContain(`${key}   `);
+			expect(row).toContain(`${key} `);
 		}
 	});
 
 	it("says what the register step is waiting for", () => {
-		const body = renderHint("append", 60, plainTheme).join("\n");
-		expect(body).toContain("Append to register");
-		expect(body).toContain("numbered slot");
+		expect(hintRows("append")[0]!).toContain("register");
 	});
 
 	it("always offers a way out", () => {
 		for (const stage of ["prefix", "append"] as const) {
-			expect(renderHint(stage, 60, plainTheme).join("\n")).toContain("esc");
+			expect(hintRows(stage)[0]!).toContain("esc");
 		}
 	});
 
-	it("colours through the theme rather than with literals", () => {
-		const seen: string[] = [];
-		renderHint("prefix", 60, {
-			fg: (slot, text) => {
-				seen.push(slot);
-				return text;
-			},
-		});
-		expect(seen).toContain("toolTitle");
-		expect(seen).toContain("accent");
-		expect(seen).toContain("muted");
-	});
-});
-
-describe("createHintComponent", () => {
-	it("follows the reader from the prefix step into the register step", () => {
-		let stage: "prefix" | "append" = "prefix";
-		const c = createHintComponent({ requestRender() {} }, plainTheme, () => stage);
-		expect(c.render(60).join("\n")).toContain("stash");
-		stage = "append";
-		expect(c.render(60).join("\n")).toContain("Append to register");
-	});
-
-	it("swallows no keys: the reader has already taken the ones that matter", () => {
-		let renders = 0;
-		const c = createHintComponent({ requestRender: () => renders++ }, plainTheme, () => "prefix");
-		c.handleInput("s");
-		c.handleInput("\x1b");
-		expect(renders).toBe(0);
-	});
-
-	it("repaints when invalidated", () => {
-		let renders = 0;
-		const c = createHintComponent({ requestRender: () => renders++ }, plainTheme, () => "prefix");
-		c.invalidate();
-		expect(renders).toBe(1);
+	it("is a single row, so it never pushes the session down the terminal", () => {
+		// The overlay this replaced padded twenty blank lines under the prompt
+		// to reach a centre-anchored row. One row cannot.
+		expect(hintRows("prefix")).toHaveLength(1);
+		expect(hintRows("append")).toHaveLength(1);
 	});
 });
