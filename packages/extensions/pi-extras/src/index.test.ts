@@ -132,52 +132,52 @@ function session(h: ReturnType<typeof harness>): ExtrasSession {
 }
 
 describe("stash chords", () => {
-	it("ctrl+s s sets the current input aside and empties the editor", async () => {
+	it("ctrl+g s sets the current input aside and empties the editor", async () => {
 		const h = harness();
 		const s = session(h);
 		h.setText("a draft");
-		h.press("\x13", "s");
+		h.press("\x07", "s");
 		await s.settled();
 		expect(h.text()).toBe("");
 		expect(s.stash.list()).toEqual(["a draft"]);
 	});
 
-	it("ctrl+s u brings the newest draft back", async () => {
+	it("ctrl+g u brings the newest draft back", async () => {
 		const h = harness();
 		const s = session(h);
 		h.setText("a draft");
-		h.press("\x13", "s");
+		h.press("\x07", "s");
 		await s.settled();
 		expect(h.text()).toBe("");
-		h.press("\x13", "u");
+		h.press("\x07", "u");
 		await s.settled();
 		expect(h.text()).toBe("a draft");
 		expect(s.stash.list()).toEqual([]);
 	});
 
-	it("ctrl+s s twice stashes twice, rather than putting one back", async () => {
+	it("ctrl+g s twice stashes twice, rather than putting one back", async () => {
 		// The old binding toggled on whether the editor was empty, which made
 		// the same key mean two things depending on state.
 		const h = harness();
 		const s = session(h);
 		h.setText("first");
-		h.press("\x13", "s");
+		h.press("\x07", "s");
 		await s.settled();
 		h.setText("second");
-		h.press("\x13", "s");
+		h.press("\x07", "s");
 		await s.settled();
 		expect(s.stash.list()).toEqual(["second", "first"]);
 	});
 
-	it("ctrl+s U empties the stash into the prompt, newest first", async () => {
+	it("ctrl+g U empties the stash into the prompt, newest first", async () => {
 		const h = harness();
 		const s = session(h);
 		for (const draft of ["first", "second"]) {
 			h.setText(draft);
-			h.press("\x13", "s");
+			h.press("\x07", "s");
 			await s.settled();
 		}
-		h.press("\x13", "U");
+		h.press("\x07", "U");
 		await s.settled();
 		expect(h.text()).toBe("second\n\nfirst");
 		expect(s.stash.list()).toEqual([]);
@@ -187,10 +187,10 @@ describe("stash chords", () => {
 		const h = harness();
 		const s = session(h);
 		h.setText("stashed");
-		h.press("\x13", "s");
+		h.press("\x07", "s");
 		await s.settled();
 		h.setText("in progress");
-		h.press("\x13", "u");
+		h.press("\x07", "u");
 		await s.settled();
 		expect(h.text()).toBe("in progress\n\nstashed");
 	});
@@ -199,7 +199,7 @@ describe("stash chords", () => {
 		const h = harness();
 		const s = session(h);
 		h.setText("   ");
-		h.press("\x13", "s");
+		h.press("\x07", "s");
 		await s.settled();
 		expect(h.notified.join(" ")).toContain("nothing to stash");
 	});
@@ -207,50 +207,38 @@ describe("stash chords", () => {
 	it("says so when there is nothing to restore", async () => {
 		const h = harness();
 		const s = session(h);
-		h.press("\x13", "s");
+		h.press("\x07", "s");
 		await s.settled();
 		expect(h.notified.join(" ")).toContain("stash");
 	});
 
-	it("ctrl+s u puts back the text the stash took away", async () => {
+	it("ctrl+g u puts back the text the stash took away", async () => {
 		const h = harness();
 		const s = session(h);
 		h.setText("a draft");
-		h.press("\x13", "s");
+		h.press("\x07", "s");
 		await s.settled();
-		h.press("\x13", "u");
+		h.press("\x07", "u");
 		await s.settled();
 		expect(h.text()).toBe("a draft");
 	});
 
-	it("ctrl+s Z replays what the undo took back", async () => {
-		const h = harness();
-		const s = session(h);
-		h.setText("a draft");
-		h.press("\x13", "s");
-		await s.settled();
-		h.press("\x13", "z");
-		await s.settled();
-		h.press("\x13", "Z");
-		await s.settled();
-		expect(h.text()).toBe("");
-	});
 
-	it("ctrl+s y copies the input without changing it", async () => {
+	it("ctrl+g c copies the input without changing it", async () => {
 		const h = harness();
 		const s = session(h);
 		h.setText("copy me");
-		h.press("\x13", "y");
+		h.press("\x07", "c");
 		await s.settled();
 		expect(h.copied).toEqual(["copy me"]);
 		expect(h.text()).toBe("copy me");
 	});
 
-	it("ctrl+s d copies and then clears", async () => {
+	it("ctrl+g x copies and then clears", async () => {
 		const h = harness();
 		const s = session(h);
 		h.setText("cut me");
-		h.press("\x13", "d");
+		h.press("\x07", "x");
 		await s.settled();
 		expect(h.copied).toEqual(["cut me"]);
 		expect(h.text()).toBe("");
@@ -262,7 +250,7 @@ describe("stash chords", () => {
 		const h = harness({ runClipboard: async () => false });
 		const s = session(h);
 		h.setText("cut me");
-		h.press("\x13", "d");
+		h.press("\x07", "x");
 		await s.settled();
 		expect(h.text()).toBe("cut me");
 	});
@@ -271,22 +259,12 @@ describe("stash chords", () => {
 		const h = harness({ runClipboard: async () => false });
 		const s = session(h);
 		h.setText("copy me");
-		h.press("\x13", "y");
+		h.press("\x07", "c");
 		await s.settled();
 		expect(h.text()).toBe("copy me");
 		expect(h.copied).toEqual([]);
 	});
 
-	it("ctrl+s t advances the thinking level", async () => {
-		const h = harness();
-		const s = session(h);
-		h.press("\x13", "t");
-		await s.settled();
-		expect(h.thinking()).toBe("low");
-		h.press("\x13", "t");
-		await s.settled();
-		expect(h.thinking()).toBe("medium");
-	});
 
 
 
@@ -295,9 +273,9 @@ describe("stash chords", () => {
 		const h = harness();
 		const s = session(h);
 		h.setText("kept");
-		h.press("\x13", "s");
+		h.press("\x07", "s");
 		await s.settled();
-		h.press("\x13", "a", "0");
+		h.press("\x07", "a", "0");
 		await s.settled();
 		expect(s.stash.list()).toEqual(["kept"]);
 	});
@@ -316,8 +294,14 @@ describe("chord consumption", () => {
 	it("consumes the prefix and the key that completes it", () => {
 		const h = harness();
 		session(h);
-		expect(h.consumed("\x13")).toBe(true);
+		expect(h.consumed("\x07")).toBe(true);
 		expect(h.consumed("s")).toBe(true);
+	});
+
+	it("consumes ctrl+s, which acts without a chord at all", () => {
+		const h = harness();
+		session(h);
+		expect(h.consumed("\x13")).toBe(true);
 	});
 
 	it("lets ordinary typing through", () => {
@@ -332,7 +316,7 @@ describe("chord consumption", () => {
 		const h = harness();
 		const s = session(h);
 		h.setText("untouched");
-		expect(h.consumed("\x13")).toBe(true);
+		expect(h.consumed("\x07")).toBe(true);
 		expect(h.consumed("z")).toBe(true);
 		await s.settled();
 		expect(h.text()).toBe("untouched");
@@ -416,5 +400,59 @@ describe("registerHandlers", () => {
 		const bare = { cwd: "/repo", mode: "rpc", ui: { notify: () => {} } } as unknown as ExtrasContext;
 		registerHandlers(h.pi, h.deps);
 		expect(() => h.handlers.get("session_start")?.({} as never, bare as never)).not.toThrow();
+	});
+});
+
+describe("ctrl+s, the quick toggle", () => {
+	it("stashes when there is a prompt to stash", async () => {
+		const h = harness();
+		const s = session(h);
+		h.setText("a draft");
+		h.press("\x13");
+		await s.settled();
+		expect(h.text()).toBe("");
+		expect(s.stash.list()).toEqual(["a draft"]);
+	});
+
+	it("brings the last one back when the prompt is empty", async () => {
+		const h = harness();
+		const s = session(h);
+		h.setText("a draft");
+		h.press("\x13");
+		await s.settled();
+		h.press("\x13");
+		await s.settled();
+		expect(h.text()).toBe("a draft");
+		expect(s.stash.list()).toEqual([]);
+	});
+
+	it("takes the newest first, leaving the rest", async () => {
+		const h = harness();
+		const s = session(h);
+		for (const draft of ["first", "second"]) {
+			h.setText(draft);
+			h.press("\x13");
+			await s.settled();
+		}
+		h.press("\x13");
+		await s.settled();
+		expect(h.text()).toBe("second");
+		expect(s.stash.list()).toEqual(["first"]);
+	});
+
+	it("says so when there is nothing either way", async () => {
+		const h = harness();
+		const s = session(h);
+		h.press("\x13");
+		await s.settled();
+		expect(h.notified.join(" ")).toContain("the stash is empty");
+	});
+
+	it("needs no second key, so nothing is left pending", () => {
+		const h = harness();
+		session(h);
+		expect(h.consumed("\x13")).toBe(true);
+		// The next letter is the prompt's, not a chord's.
+		expect(h.consumed("s")).toBe(false);
 	});
 });

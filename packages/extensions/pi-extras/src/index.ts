@@ -27,7 +27,6 @@ import { type StashTheme, createStashComponent } from "./overlay.ts";
 import { type StashIO, StashStore, stashPath } from "./stash.ts";
 import { type HintStage, createHintComponent } from "./hint.ts";
 import { TitleSpinner, baseTitle } from "./title.ts";
-import { UndoBuffer } from "./undo.ts";
 
 /** The slice of pi's ExtensionContext this extension touches. Every member the
  *  non-interactive modes stub away is optional. */
@@ -88,7 +87,6 @@ const NOTIFY_PREFIX = "pi-extras";
 
 export class ExtrasSession {
 	readonly stash: StashStore;
-	readonly undo = new UndoBuffer();
 
 	private readonly pi: ExtrasHost;
 	private readonly ctx: ExtrasContext;
@@ -159,11 +157,17 @@ export class ExtrasSession {
 						return createHintComponent(tui, activeTheme ?? theme, () => this.hintStage ?? "prefix");
 					},
 					{
-						// SizeValue is `number | "N%"`. 26 columns fits the widest
-						// row with room to spare; row 0 is what keeps the session
-						// where it was.
+						// Bottom-left, next to the prompt the keys act on.
+						//
+						// The anchor is the whole story on padding: pi's inline TUI
+						// grows its drawn region to `row + height`, and `center`
+						// resolves `row` against the terminal, so a centred menu
+						// padded twenty blank rows to reach the middle. Anchored to
+						// the bottom, `row` lands where the session already ends.
+						// SizeValue is `number | "N%"`; 26 columns fits the widest
+						// row with room to spare.
 						overlay: true,
-						overlayOptions: { width: 26, row: 0, col: 2 },
+						overlayOptions: { width: 26, anchor: "bottom-left", offsetX: 2, offsetY: -1 },
 					},
 				)
 				.catch(() => {
@@ -221,6 +225,9 @@ export class ExtrasSession {
 
 	private async run(action: ChordAction): Promise<void> {
 		switch (action.kind) {
+			case "quick":
+				this.quickToggle();
+				return;
 			case "stash":
 				this.stashText();
 				return;
@@ -233,20 +240,11 @@ export class ExtrasSession {
 			case "list":
 				await this.openOverlay(this.ctx);
 				return;
-			case "undo":
-				this.step("undo");
-				return;
-			case "redo":
-				this.step("redo");
-				return;
 			case "copy":
 				await this.copy(this.text());
 				return;
 			case "cut":
 				await this.cut();
-				return;
-			case "thinking":
-				this.cycleThinking();
 				return;
 			case "tab":
 				this.ctx.ui.pasteToEditor?.("\t");
@@ -278,6 +276,19 @@ export class ExtrasSession {
 		}
 	}
 
+	/** ctrl+s, on its own: put the prompt away, or get the last one back.
+	 *
+	 *  Which it means is read off the prompt rather than aimed at: text in the
+	 *  editor is something to stash, an empty editor is a request for the last
+	 *  thing stashed. One key, no chord, no timeout. */
+	private quickToggle(): void {
+		if (this.text().trim() === "") {
+			this.unstash();
+			return;
+		}
+		this.stashText();
+	}
+
 	/** Put the prompt away. */
 	private stashText(): void {
 		const current = this.text();
@@ -285,7 +296,6 @@ export class ExtrasSession {
 			this.notify("nothing to stash");
 			return;
 		}
-		this.undo.record(current);
 		this.stash.push(current);
 		this.setText("");
 	}
@@ -298,7 +308,6 @@ export class ExtrasSession {
 			return;
 		}
 		const current = this.text();
-		this.undo.record(current);
 		// Whatever was being typed is kept, above what came back, rather than
 		// overwritten. ctrl+s z puts it back the way it was either way.
 		this.setText(current.trim() === "" ? restored : `${current}\n\n${restored}`);
@@ -312,21 +321,11 @@ export class ExtrasSession {
 			return;
 		}
 		const current = this.text();
-		this.undo.record(current);
 		const joined = all.join("\n\n");
 		this.setText(current.trim() === "" ? joined : `${current}\n\n${joined}`);
 		this.notify(`unstashed ${all.length}`);
 	}
 
-	private step(direction: "undo" | "redo"): void {
-		const current = this.text();
-		const next = direction === "undo" ? this.undo.undo(current) : this.undo.redo(current);
-		if (next === undefined) {
-			this.notify(`nothing to ${direction}`);
-			return;
-		}
-		this.setText(next);
-	}
 
 	private async copy(text: string): Promise<boolean> {
 		if (text === "") return false;
@@ -338,22 +337,12 @@ export class ExtrasSession {
 	private async cut(): Promise<void> {
 		const current = this.text();
 		if (!(await this.copy(current))) return;
-		this.undo.record(current);
 		this.setText("");
 	}
 
-	private cycleThinking(): void {
-		try {
-			const level = nextThinkingLevel(this.pi.getThinkingLevel?.());
-			this.pi.setThinkingLevel?.(level);
-			this.notify(`thinking ${level}`);
-		} catch {
-			// A model with no reasoning support rejects the level. Nothing else changes.
-		}
-	}
 
-	/** The stash overlay. Restore and cut share the undo buffer with the
-	 *  chords, so a restore from here is undoable the same way. */
+	/** The stash list: every saved draft, searchable, with the four things you
+	 *  can do to one. Also on ctrl+g, which skips the menu. */
 	async openOverlay(ctx: ExtrasContext): Promise<void> {
 		if (ctx.mode !== "tui" || typeof ctx.ui.custom !== "function") {
 			this.notify(`stash: ${this.stash.list().length} saved`);
@@ -372,7 +361,6 @@ export class ExtrasSession {
 							restore: (index) => {
 								const entry = this.stash.restore(index);
 								if (entry === undefined) return;
-								this.undo.record(this.text());
 								this.setText(entry);
 							},
 							copy: (index) => {

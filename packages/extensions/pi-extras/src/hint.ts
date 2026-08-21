@@ -32,16 +32,13 @@ const ENTRIES: ReadonlyArray<readonly [string, string]> = [
 	["u", "unstash"],
 	["U", "unstash all"],
 	["l", "list"],
-	["y", "copy"],
-	["d", "cut"],
-	["t", "thinking"],
-	["z", "undo"],
-	["Z", "redo"],
+	["c", "copy"],
+	["x", "cut"],
 ];
 
 /** The menu body: a title, one row per key, and how to get out. */
 export function renderHint(_stage: HintStage, width: number, theme: HintTheme): string[] {
-	const rows = [theme.fg("toolTitle", "Chord")];
+	const rows = [theme.fg("toolTitle", "Prompt stash")];
 	for (const [key, label] of ENTRIES) {
 		rows.push(`  ${theme.fg("accent", key.padEnd(4))}${theme.fg("text", label)}`);
 	}

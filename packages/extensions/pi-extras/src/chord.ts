@@ -14,15 +14,13 @@
 
 /** Registers the append step can name: the ten numbered slots, or the stash. */
 export type ChordAction =
+	| { kind: "quick" }
 	| { kind: "stash" }
 	| { kind: "unstash" }
 	| { kind: "unstashAll" }
 	| { kind: "list" }
-	| { kind: "undo" }
-	| { kind: "redo" }
 	| { kind: "copy" }
 	| { kind: "cut" }
-	| { kind: "thinking" }
 	| { kind: "tab" };
 
 export interface ChordStep {
@@ -161,11 +159,8 @@ const SECOND_KEY: Record<string, ChordAction> = {
 	u: { kind: "unstash" },
 	U: { kind: "unstashAll" },
 	l: { kind: "list" },
-	y: { kind: "copy" },
-	d: { kind: "cut" },
-	t: { kind: "thinking" },
-	z: { kind: "undo" },
-	Z: { kind: "redo" },
+	c: { kind: "copy" },
+	x: { kind: "cut" },
 };
 
 /** The second keys the reader accepts, for the on-screen prompt to name. */
@@ -208,13 +203,7 @@ export class ChordReader {
 				// The prefix toggles: pressing it again on an open chord closes
 				// it. Same key in, same key out, and the menu names esc for the
 				// same job.
-				//
-				// It restarted the chord for one build, which was a fix for the
-				// wrong problem: a repeated prefix looked like something the
-				// reader had to tolerate because key releases were arriving as
-				// phantom presses. Releases are ignored now, so a second ctrl+s
-				// is a person pressing it.
-				if (matchesCtrl(data, "s")) {
+				if (matchesCtrl(data, "g")) {
 					this.state = "idle";
 					return CANCELLED;
 				}
@@ -224,11 +213,16 @@ export class ChordReader {
 				return action ? { consume: true, pending: false, action } : CANCELLED;
 			}
 			default:
-				if (matchesCtrl(data, "s")) {
+				if (matchesCtrl(data, "g")) {
 					this.state = "prefix";
 					this.since = now;
 					return WAITING_PREFIX;
 				}
+				// ctrl+s is not a prefix and never waits. It is the one gesture
+				// worth having on its own key: put the prompt away, or get the
+				// last one back. Which of the two it means is decided by whether
+				// there is a prompt to put away, so it never has to be aimed.
+				if (matchesCtrl(data, "s")) return { consume: true, pending: false, action: { kind: "quick" } };
 				if (matchesAlt(data, "i")) return { consume: true, pending: false, action: { kind: "tab" } };
 				return IDLE;
 		}
