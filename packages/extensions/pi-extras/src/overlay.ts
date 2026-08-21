@@ -158,8 +158,15 @@ const FILTER_HELP = "type to narrow · enter restore · esc leave the filter";
  * single binding too wide for the row is truncated rather than dropped, because
  * a stray row is better than a missing key.
  */
-export function wrapHelp(text: string, width: number): string[] {
-	if (width <= 0) return [];
+/**
+ * The most rows wrapHelp will ever return. Not a style choice: it is half of
+ * the widget's own row budget below, and that budget is a hard external limit
+ * (see VISIBLE_ROWS), so this has to be a promise wrapHelp keeps rather than
+ * something the caller merely hopes for.
+ */
+export const MAX_HELP_ROWS = 2;
+
+function wrapAll(text: string, width: number): string[] {
 	const parts = text.split(" · ");
 	const rows: string[] = [];
 	let row = "";
@@ -176,8 +183,37 @@ export function wrapHelp(text: string, width: number): string[] {
 	return rows;
 }
 
-/** How many entry rows the list draws before it starts scrolling. */
-export const VISIBLE_ROWS = 10;
+export function wrapHelp(text: string, width: number): string[] {
+	if (width <= 0) return [];
+	const rows = wrapAll(text, width);
+	if (rows.length <= MAX_HELP_ROWS) return rows;
+	// More rows than the budget allows. Rather than dropping the tail the way
+	// previewOf on the whole line used to -- the original bug -- fold every
+	// row past the cap onto the last one and let previewOf truncate that
+	// combined row instead. A narrow terminal loses characters at the very end
+	// of the line, visibly, rather than losing whole keys with no sign of it.
+	const head = rows.slice(0, MAX_HELP_ROWS - 1);
+	const tail = rows.slice(MAX_HELP_ROWS - 1).join(" ");
+	head.push(previewOf(tail, width));
+	return head;
+}
+
+/**
+ * How many entry rows the list draws before it starts scrolling.
+ *
+ * pi caps a string-array widget at ten lines total and truncates past it with
+ * no signal to the extension that set it (InteractiveMode.MAX_WIDGET_LINES,
+ * "... (widget truncated)") -- observed directly: a full ten-entry stash, the
+ * extension's own ceiling, silently lost its last entry, its help line, and
+ * every key the help line named.
+ *
+ * The budget below is fixed rather than measured per render, because the
+ * count line's own visibility depends on how many entries fit, which would
+ * make a budget computed from the actual render circular. Reserved: 1 title
+ * row, up to MAX_HELP_ROWS help rows, 1 count line. What is left is entries:
+ * 10 - 1 - 2 - 1 = 6.
+ */
+export const VISIBLE_ROWS = 10 - 1 - MAX_HELP_ROWS - 1;
 
 /**
  * Render the whole overlay. `persistent` is false once the stash has fallen
@@ -216,8 +252,15 @@ export function renderStash(
 			const text = `${marker} ${preview}`;
 			rows.push(isSelected ? theme.fg("accent", text) : theme.fg("text", text));
 		});
-		if (matches.length > VISIBLE_ROWS || matches.length !== entries.length) {
-			rows.push(theme.fg("dim", `  ${matches.length} of ${entries.length} shown`));
+		if (matches.length !== entries.length) {
+			// A filter is narrowing the list. This is about the filter, not the
+			// window: "10 of 10 shown" when six draw and a filter is not even
+			// open would say nothing is hidden while hiding four rows.
+			rows.push(theme.fg("dim", `  ${matches.length} of ${entries.length} match`));
+		} else if (matches.length > VISIBLE_ROWS) {
+			// No filter, but more than the window holds. What is missing here is
+			// scrolled, not filtered, so the wording says so.
+			rows.push(theme.fg("dim", `  ${entries.length} saved — ↑↓ to scroll`));
 		}
 	}
 

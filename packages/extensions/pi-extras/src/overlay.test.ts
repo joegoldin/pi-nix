@@ -7,6 +7,7 @@ import {
 	overlayCommand,
 	previewOf,
 	renderStash,
+	MAX_HELP_ROWS,
 	wrapHelp,
 } from "./overlay.ts";
 
@@ -153,7 +154,7 @@ describe("renderStash", () => {
 		expect(rows).toContain("alpha draft");
 		expect(rows).toContain("beta draft");
 		expect(rows).not.toContain("gamma");
-		expect(rows).toContain("2 of 3 shown");
+		expect(rows).toContain("2 of 3 match");
 	});
 
 	it("says when a filter matches nothing, rather than looking empty", () => {
@@ -172,7 +173,7 @@ describe("renderStash", () => {
 		const rows = renderStash(many, 0, 60, true, theme);
 		const shown = rows.filter((r) => r.includes("draft "));
 		expect(shown).toHaveLength(VISIBLE_ROWS);
-		expect(rows.join("\n")).toContain("25 of 25 shown");
+		expect(rows.join("\n")).toContain("25 saved");
 	});
 
 	it("keeps the selected row inside the window when it scrolls", () => {
@@ -310,14 +311,31 @@ describe("wrapHelp", () => {
 		expect(rows.join(" ")).toContain("esc close");
 	});
 
-	it("loses no binding, however narrow", () => {
+	it("loses no binding at a width real terminals actually use", () => {
 		const help = "enter restore · c copy · d delete · D clear all · / filter · esc close";
-		for (const width of [12, 20, 34, 50, 200]) {
+		for (const width of [34, 50, 200]) {
 			const joined = wrapHelp(help, width).join(" ");
 			for (const key of ["enter", "copy", "delete", "clear all", "filter", "close"]) {
 				expect(joined).toContain(key);
 			}
 		}
+	});
+
+	it("never returns more than MAX_HELP_ROWS, whatever the width", () => {
+		const help = "enter restore · c copy · d delete · D clear all · / filter · esc close";
+		for (const width of [4, 8, 12, 20, 34, 50, 200]) {
+			expect(wrapHelp(help, width).length).toBeLessThanOrEqual(MAX_HELP_ROWS);
+		}
+	});
+
+	it("folds the overflow onto the last row rather than dropping it silently", () => {
+		// Too narrow for two rows to hold everything: some bindings are cut,
+		// but visibly, with an ellipsis, not vanished the way the widget cap
+		// would vanish them with no mark at all.
+		const help = "enter restore · c copy · d delete · D clear all · / filter · esc close";
+		const rows = wrapHelp(help, 12);
+		expect(rows.length).toBeLessThanOrEqual(MAX_HELP_ROWS);
+		expect(rows[rows.length - 1]).toContain("…");
 	});
 
 	it("truncates a single binding too wide to fit, rather than dropping it", () => {
@@ -326,5 +344,25 @@ describe("wrapHelp", () => {
 
 	it("draws nothing when there is no room at all", () => {
 		expect(wrapHelp("a · b", 0)).toEqual([]);
+	});
+});
+
+describe("renderStash and pi's widget cap", () => {
+	it("never exceeds pi's ten-line widget cap, even at MAX_STASH", () => {
+		// InteractiveMode.MAX_WIDGET_LINES is 10, enforced outside this
+		// extension with no signal back to it when it is exceeded -- the ten
+		// lines. Reproduced directly: with a full ten-entry stash, the row
+		// count here used to be 12 (title + 10 entries + help), and pi silently
+		// dropped the last entry and the whole help line.
+		const full = Array.from({ length: 10 }, (_, i) => `draft ${i}`);
+		for (const width of [40, 80, 120]) {
+			expect(renderStash(full, 0, width, true, theme).length).toBeLessThanOrEqual(10);
+		}
+	});
+
+	it("still shows the count line when the list is longer than the window", () => {
+		const full = Array.from({ length: 10 }, (_, i) => `draft ${i}`);
+		const rows = renderStash(full, 0, 80, true, theme).join("\n");
+		expect(rows).toContain(`10 saved`);
 	});
 });
