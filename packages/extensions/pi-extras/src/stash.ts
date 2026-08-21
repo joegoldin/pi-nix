@@ -11,7 +11,6 @@
 // permission), and losing the stash between sessions is a smaller failure than
 // losing the extension.
 
-import type { RegisterName } from "./chord.ts";
 
 /** Ten entries, because there are ten numbered registers to read them with. */
 export const MAX_STASH = 10;
@@ -84,9 +83,12 @@ export class StashStore {
 		return entry;
 	}
 
-	/** Read a register without consuming it. */
-	register(name: RegisterName): string | undefined {
-		return this.entries[name === "s" ? 0 : Number.parseInt(name, 10)];
+	/** Take everything out at once, newest first. */
+	drain(): string[] {
+		const all = [...this.entries];
+		this.entries = [];
+		this.save();
+		return all;
 	}
 
 	remove(index: number): void {

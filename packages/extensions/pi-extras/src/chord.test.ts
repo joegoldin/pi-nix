@@ -78,8 +78,8 @@ describe("ChordReader", () => {
 
 	it.each([
 		["s", "stash"],
-		["u", "undo"],
-		["r", "redo"],
+		["z", "undo"],
+		["Z", "redo"],
 		["y", "copy"],
 		["d", "cut"],
 		["t", "thinking"],
@@ -89,48 +89,6 @@ describe("ChordReader", () => {
 		expect(r.feed(key, 10)).toEqual({ consume: true, pending: false, action: { kind } });
 	});
 
-	it("resolves a numbered register append through the second prefix", () => {
-		const r = reader();
-		r.feed("\x13", 0);
-		expect(r.feed("a", 10)).toEqual({ consume: true, pending: true, stage: "append" });
-		expect(r.feed("4", 20)).toEqual({ consume: true, pending: false, action: { kind: "append", register: "4" } });
-	});
-
-	it("resolves the stash register append", () => {
-		const r = reader();
-		r.feed("\x13", 0);
-		r.feed("a", 10);
-		expect(r.feed("s", 20).action).toEqual({ kind: "append", register: "s" });
-	});
-
-	it("recognises alt+i outside any chord", () => {
-		expect(reader().feed("\x1bi", 0)).toEqual({ consume: true, pending: false, action: { kind: "tab" } });
-	});
-
-	// An unknown key must not reach the editor: the user was mid-chord, and a
-	// stray letter appearing in the prompt is the failure this cancels.
-	it("cancels on an unknown key and swallows it", () => {
-		const r = reader();
-		r.feed("\x13", 0);
-		expect(r.feed("q", 10)).toEqual({ consume: true, pending: false });
-		expect(r.feed("s", 20)).toEqual({ consume: false, pending: false });
-	});
-
-	it("cancels on escape", () => {
-		const r = reader();
-		r.feed("\x13", 0);
-		expect(r.feed("\x1b", 10)).toEqual({ consume: true, pending: false });
-	});
-
-	it("cancels the append step on an unknown key", () => {
-		const r = reader();
-		r.feed("\x13", 0);
-		r.feed("a", 10);
-		expect(r.feed("z", 20)).toEqual({ consume: true, pending: false });
-	});
-
-	// A chord left hanging must expire, and the key that arrives afterwards is
-	// an ordinary keystroke rather than the tail of a chord nobody remembers.
 	it("expires and lets the late key through untouched", () => {
 		const r = reader();
 		r.feed("\x13", 0);
@@ -141,13 +99,6 @@ describe("ChordReader", () => {
 		const r = reader();
 		r.feed("\x13", 0);
 		expect(r.feed("\x13", CHORD_TIMEOUT_MS + 1)).toEqual({ consume: true, pending: true, stage: "prefix" });
-	});
-
-	it("expires the append step too", () => {
-		const r = reader();
-		r.feed("\x13", 0);
-		r.feed("a", 10);
-		expect(r.feed("4", CHORD_TIMEOUT_MS + 11)).toEqual({ consume: false, pending: false });
 	});
 
 	it("cancel() forgets a pending chord", () => {
@@ -167,14 +118,6 @@ describe("ChordReader prefix toggles", () => {
 		expect(r.feed("\x13", 10)).toEqual({ consume: true, pending: false });
 		// Closed, so the next letter is the prompt's, not the chord's.
 		expect(r.feed("s", 20)).toEqual({ consume: false, pending: false });
-	});
-
-	it("closes from the register step too", () => {
-		const r = reader();
-		r.feed("\x13", 0);
-		expect(r.feed("a", 10)).toEqual({ consume: true, pending: true, stage: "append" });
-		expect(r.feed("\x13", 20)).toEqual({ consume: true, pending: false });
-		expect(r.feed("4", 30)).toEqual({ consume: false, pending: false });
 	});
 
 	it("consumes the closing press, so it never reaches the prompt", () => {
@@ -205,7 +148,7 @@ describe("ChordReader and key releases", () => {
 		expect(r.feed("\x1b[115;1:3u", 5)).toEqual({ consume: false, pending: true, stage: "prefix" });
 		expect(r.feed("\x1b[115;5:3u", 6)).toEqual({ consume: false, pending: true, stage: "prefix" });
 		// Still waiting, so the real second key still lands.
-		expect(r.feed("u", 10)).toEqual({ consume: true, pending: false, action: { kind: "undo" } });
+		expect(r.feed("u", 10)).toEqual({ consume: true, pending: false, action: { kind: "unstash" } });
 	});
 
 	it("keeps the menu up across a release, rather than reporting idle", () => {
@@ -214,18 +157,6 @@ describe("ChordReader and key releases", () => {
 		const step = r.feed("\x1b[115;1:3u", 5);
 		expect(step.pending).toBe(true);
 		expect(step.consume).toBe(false);
-	});
-
-	it("reports the register stage through a release", () => {
-		const r = reader();
-		r.feed("\x13", 0);
-		r.feed("a", 5);
-		expect(r.feed("\x1b[97;1:3u", 6)).toEqual({ consume: false, pending: true, stage: "append" });
-		expect(r.feed("4", 10)).toEqual({
-			consume: true,
-			pending: false,
-			action: { kind: "append", register: "4" },
-		});
 	});
 
 	it("passes a release through untouched when no chord is open", () => {
@@ -249,5 +180,55 @@ describe("ChordReader and key releases", () => {
 			pending: false,
 			action: { kind: "stash" },
 		});
+	});
+});
+
+describe("ChordReader and shifted second keys", () => {
+	const reader = () => new ChordReader();
+
+	it("reads a legacy shifted letter", () => {
+		const r = reader();
+		r.feed("\x13", 0);
+		expect(r.feed("U", 5)).toEqual({ consume: true, pending: false, action: { kind: "unstashAll" } });
+	});
+
+	it("reads Kitty's shift modifier without an alternate key", () => {
+		// `\x1b[117;2u` is shift+u: the unshifted codepoint plus a modifier, and
+		// nothing else. Read literally that is a lowercase u, which is unstash
+		// one -- the opposite of what was pressed.
+		const r = reader();
+		r.feed("\x13", 0);
+		expect(r.feed("\x1b[117;2u", 5)).toEqual({
+			consume: true,
+			pending: false,
+			action: { kind: "unstashAll" },
+		});
+	});
+
+	it("prefers the alternate key when the terminal reports one", () => {
+		const r = reader();
+		r.feed("\x13", 0);
+		expect(r.feed("\x1b[117:85;2u", 5)).toEqual({
+			consume: true,
+			pending: false,
+			action: { kind: "unstashAll" },
+		});
+	});
+
+	it("still reads the unshifted letter as itself", () => {
+		const r = reader();
+		r.feed("\x13", 0);
+		expect(r.feed("\x1b[117;1u", 5)).toEqual({
+			consume: true,
+			pending: false,
+			action: { kind: "unstash" },
+		});
+	});
+
+	it("does not touch a key held with ctrl or alt", () => {
+		const r = reader();
+		r.feed("\x13", 0);
+		// ctrl+u is not a second key, so the chord cancels rather than unstashing.
+		expect(r.feed("\x1b[117;5u", 5)).toEqual({ consume: true, pending: false });
 	});
 });

@@ -5,6 +5,8 @@
 // likes, so measuring its output would make a row's width a property of the
 // colour encoding rather than of the text.
 
+import { filterEntries, windowFor } from "./filter.ts";
+
 const ELLIPSIS = "…";
 
 /** The subset of pi's Theme this overlay uses, declared structurally so the
@@ -19,6 +21,10 @@ export type OverlayCommand =
 	| { kind: "copy" }
 	| { kind: "delete" }
 	| { kind: "clearAll" }
+	| { kind: "startFilter" }
+	| { kind: "filterChar"; char: string }
+	| { kind: "filterBackspace" }
+	| { kind: "endFilter" }
 	| { kind: "close" };
 
 const KEYS: Record<string, OverlayCommand> = {
@@ -35,12 +41,44 @@ const KEYS: Record<string, OverlayCommand> = {
 	d: { kind: "delete" },
 	D: { kind: "clearAll" },
 	q: { kind: "close" },
+	"/": { kind: "startFilter" },
 	"\x1b": { kind: "close" },
 	"\x03": { kind: "close" },
 };
 
-export function overlayCommand(data: string): OverlayCommand | undefined {
-	return KEYS[data];
+/** The keys that mean the same thing whether or not a filter is being typed. */
+const FILTER_KEYS: Record<string, OverlayCommand> = {
+	"\x1b[A": { kind: "move", delta: -1 },
+	"\x1bOA": { kind: "move", delta: -1 },
+	"\x1b[B": { kind: "move", delta: 1 },
+	"\x1bOB": { kind: "move", delta: 1 },
+	"\r": { kind: "restore" },
+	"\n": { kind: "restore" },
+	"\x7f": { kind: "filterBackspace" },
+	"\x08": { kind: "filterBackspace" },
+	"\x1b": { kind: "endFilter" },
+	"\x03": { kind: "close" },
+};
+
+/**
+ * The key's meaning, which depends on whether a filter is open.
+ *
+ * Single letters cannot be both commands and query text, and this list binds
+ * seven of them. So filtering is a mode: `/` opens it, printable keys go to the
+ * query while it is open, escape leaves it, and the commands are themselves
+ * again afterwards. Movement and restore work in both, because they are the two
+ * things you want while narrowing a list.
+ */
+export function overlayCommand(data: string, filtering = false): OverlayCommand | undefined {
+	if (!filtering) return KEYS[data];
+	const shared = FILTER_KEYS[data];
+	if (shared) return shared;
+	// One printable character, which excludes control codes and escape runs.
+	if (data.length === 1) {
+		const code = data.charCodeAt(0);
+		if (code >= 0x20 && code !== 0x7f) return { kind: "filterChar", char: data };
+	}
+	return undefined;
 }
 
 /** Selection wraps, because a ten-row list is faster to reach from either end. */
@@ -59,7 +97,11 @@ export function previewOf(text: string, width: number): string {
 	return `${chars.slice(0, Math.max(0, width - 1)).join("")}${ELLIPSIS}`;
 }
 
-const HELP = "enter restore · y copy · d delete · D clear all · esc close";
+const HELP = "enter restore · y copy · d delete · D clear all · / filter · esc close";
+const FILTER_HELP = "type to narrow · enter restore · esc leave the filter";
+
+/** How many entry rows the list draws before it starts scrolling. */
+export const VISIBLE_ROWS = 10;
 
 /**
  * Render the whole overlay. `persistent` is false once the stash has fallen
@@ -72,24 +114,39 @@ export function renderStash(
 	width: number,
 	persistent: boolean,
 	theme: StashTheme,
+	filter = "",
+	filtering = false,
+	windowTop = 0,
 ): string[] {
 	const rows: string[] = [theme.fg("toolTitle", "Stash")];
 
+	if (filtering || filter !== "") {
+		// The caret separates "typing a query" from "a query is still narrowing
+		// this list", which is exactly what the key bindings turn on.
+		rows.push(theme.fg("accent", previewOf(`filter: ${filter}${filtering ? "\u2588" : ""}`, width)));
+	}
+
+	const matches = filterEntries(entries, filter);
 	if (entries.length === 0) {
 		rows.push(theme.fg("muted", "  the stash is empty"));
+	} else if (matches.length === 0) {
+		rows.push(theme.fg("warning", "  nothing matches that"));
 	} else {
-		entries.forEach((entry, index) => {
-			// The row number is the register that reads it back, so the overlay
-			// doubles as the reference for ctrl+s a <n>.
-			const marker = index === selected ? "▸" : " ";
-			const preview = previewOf(entry, Math.max(0, width - 5));
-			const text = `${marker} ${index} ${preview}`;
-			rows.push(index === selected ? theme.fg("accent", text) : theme.fg("text", text));
+		const top = windowFor(matches.length, selected, VISIBLE_ROWS, windowTop);
+		matches.slice(top, top + VISIBLE_ROWS).forEach((entry, offset) => {
+			const isSelected = top + offset === selected;
+			const marker = isSelected ? "\u25b8" : " ";
+			const preview = previewOf(entry.text, Math.max(0, width - 4));
+			const text = `${marker} ${preview}`;
+			rows.push(isSelected ? theme.fg("accent", text) : theme.fg("text", text));
 		});
+		if (matches.length > VISIBLE_ROWS || matches.length !== entries.length) {
+			rows.push(theme.fg("dim", `  ${matches.length} of ${entries.length} shown`));
+		}
 	}
 
 	if (!persistent) rows.push(theme.fg("warning", "  memory only: the stash file could not be written"));
-	rows.push(theme.fg("dim", previewOf(HELP, width)));
+	rows.push(theme.fg("dim", previewOf(filtering ? FILTER_HELP : HELP, width)));
 	return rows;
 }
 
@@ -119,27 +176,61 @@ export function createStashComponent(
 	done: () => void,
 ): { render(width: number): string[]; handleInput(data: string): void; invalidate(): void } {
 	let selected = 0;
+	let filter = "";
+	let filtering = false;
+	let windowTop = 0;
+
+	/** The entries the list is actually showing, which is what `selected`
+	 *  indexes. Restoring and deleting have to translate back to the stash's
+	 *  own index or a filtered list would act on the wrong draft. */
+	const visible = () => filterEntries(actions.entries(), filter);
 
 	const run = (command: OverlayCommand): void => {
-		const count = actions.entries().length;
+		const rows = visible();
+		const target = rows[selected]?.index;
 		switch (command.kind) {
 			case "move":
-				selected = clampIndex(selected + command.delta, count);
+				selected = clampIndex(selected + command.delta, rows.length);
+				windowTop = windowFor(rows.length, selected, VISIBLE_ROWS, windowTop);
 				break;
 			case "restore":
-				if (count > 0) actions.restore(selected);
+				if (target !== undefined) actions.restore(target);
 				done();
 				return;
 			case "copy":
-				if (count > 0) actions.copy(selected);
+				if (target !== undefined) actions.copy(target);
 				break;
 			case "delete":
-				if (count > 0) actions.remove(selected);
-				selected = clampIndex(selected, actions.entries().length);
+				if (target !== undefined) actions.remove(target);
+				// The list shrinks under the cursor, so re-clamp against what is
+				// left rather than against what was there.
+				selected = clampIndex(selected, visible().length);
+				windowTop = windowFor(visible().length, selected, VISIBLE_ROWS, windowTop);
 				break;
 			case "clearAll":
 				actions.clearAll();
 				selected = 0;
+				filter = "";
+				filtering = false;
+				windowTop = 0;
+				break;
+			case "startFilter":
+				filtering = true;
+				break;
+			case "filterChar":
+				filter += command.char;
+				selected = 0;
+				windowTop = 0;
+				break;
+			case "filterBackspace":
+				filter = filter.slice(0, -1);
+				selected = 0;
+				windowTop = 0;
+				break;
+			case "endFilter":
+				// Leaves the query in place: escape stops typing, and a second
+				// escape -- now that the commands are themselves again -- closes.
+				filtering = false;
 				break;
 			case "close":
 				done();
@@ -149,9 +240,10 @@ export function createStashComponent(
 	};
 
 	return {
-		render: (width: number) => renderStash(actions.entries(), selected, width, actions.persistent(), theme),
+		render: (width: number) =>
+			renderStash(actions.entries(), selected, width, actions.persistent(), theme, filter, filtering, windowTop),
 		handleInput: (data: string) => {
-			const command = overlayCommand(data);
+			const command = overlayCommand(data, filtering);
 			if (command) run(command);
 		},
 		invalidate: () => {

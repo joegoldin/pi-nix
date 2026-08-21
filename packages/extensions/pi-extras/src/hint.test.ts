@@ -10,9 +10,6 @@ describe("hintRows", () => {
 		}
 	});
 
-	it("says what the register step is waiting for", () => {
-		expect(hintRows("append")[0]!).toContain("register");
-	});
 
 	it("always offers a way out", () => {
 		for (const stage of ["prefix", "append"] as const) {

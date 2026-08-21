@@ -22,12 +22,9 @@
 // release, not the statusline's re-render; with that fixed, the widget holds
 // through four ticks of it.
 
-/** One row for the key the reader is waiting on. */
-export function hintRows(stage: "prefix" | "append"): string[] {
-	if (stage === "append") {
-		return ["pi-extras  append to register:   0-9  a numbered slot   ·   s  the stash   ·   esc  cancel"];
-	}
+/** One row naming every second key the reader accepts. */
+export function hintRows(_stage: "prefix"): string[] {
 	return [
-		"pi-extras  s stash   ·   u undo   ·   r redo   ·   y copy   ·   d cut   ·   t thinking   ·   a append…   ·   esc cancel",
+		"pi-extras  s stash · u unstash · U unstash all · l list · y copy · d cut · t thinking · z undo · Z redo · esc cancel",
 	];
 }

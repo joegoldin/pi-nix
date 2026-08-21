@@ -142,16 +142,66 @@ describe("stash chords", () => {
 		expect(s.stash.list()).toEqual(["a draft"]);
 	});
 
-	it("ctrl+s s on an empty editor restores the newest draft", async () => {
+	it("ctrl+s u brings the newest draft back", async () => {
 		const h = harness();
 		const s = session(h);
 		h.setText("a draft");
 		h.press("\x13", "s");
 		await s.settled();
-		h.press("\x13", "s");
+		expect(h.text()).toBe("");
+		h.press("\x13", "u");
 		await s.settled();
 		expect(h.text()).toBe("a draft");
 		expect(s.stash.list()).toEqual([]);
+	});
+
+	it("ctrl+s s twice stashes twice, rather than putting one back", async () => {
+		// The old binding toggled on whether the editor was empty, which made
+		// the same key mean two things depending on state.
+		const h = harness();
+		const s = session(h);
+		h.setText("first");
+		h.press("\x13", "s");
+		await s.settled();
+		h.setText("second");
+		h.press("\x13", "s");
+		await s.settled();
+		expect(s.stash.list()).toEqual(["second", "first"]);
+	});
+
+	it("ctrl+s U empties the stash into the prompt, newest first", async () => {
+		const h = harness();
+		const s = session(h);
+		for (const draft of ["first", "second"]) {
+			h.setText(draft);
+			h.press("\x13", "s");
+			await s.settled();
+		}
+		h.press("\x13", "U");
+		await s.settled();
+		expect(h.text()).toBe("second\n\nfirst");
+		expect(s.stash.list()).toEqual([]);
+	});
+
+	it("keeps what is already typed when unstashing onto it", async () => {
+		const h = harness();
+		const s = session(h);
+		h.setText("stashed");
+		h.press("\x13", "s");
+		await s.settled();
+		h.setText("in progress");
+		h.press("\x13", "u");
+		await s.settled();
+		expect(h.text()).toBe("in progress\n\nstashed");
+	});
+
+	it("says so when there is nothing to stash", async () => {
+		const h = harness();
+		const s = session(h);
+		h.setText("   ");
+		h.press("\x13", "s");
+		await s.settled();
+		expect(h.notified.join(" ")).toContain("nothing to stash");
 	});
 
 	it("says so when there is nothing to restore", async () => {
@@ -173,15 +223,15 @@ describe("stash chords", () => {
 		expect(h.text()).toBe("a draft");
 	});
 
-	it("ctrl+s r replays what the undo took back", async () => {
+	it("ctrl+s Z replays what the undo took back", async () => {
 		const h = harness();
 		const s = session(h);
 		h.setText("a draft");
 		h.press("\x13", "s");
 		await s.settled();
-		h.press("\x13", "u");
+		h.press("\x13", "z");
 		await s.settled();
-		h.press("\x13", "r");
+		h.press("\x13", "Z");
 		await s.settled();
 		expect(h.text()).toBe("");
 	});
@@ -238,28 +288,7 @@ describe("stash chords", () => {
 		expect(h.thinking()).toBe("medium");
 	});
 
-	it("ctrl+s a 0 appends a numbered register", async () => {
-		const h = harness();
-		const s = session(h);
-		h.setText("first");
-		h.press("\x13", "s");
-		await s.settled();
-		h.setText("second");
-		h.press("\x13", "a", "0");
-		await s.settled();
-		expect(h.text()).toBe("second\nfirst");
-	});
 
-	it("ctrl+s a s appends the stash register", async () => {
-		const h = harness();
-		const s = session(h);
-		h.setText("kept");
-		h.press("\x13", "s");
-		await s.settled();
-		h.press("\x13", "a", "s");
-		await s.settled();
-		expect(h.text()).toBe("kept");
-	});
 
 	// Append reads, never consumes: the same snippet is usually wanted twice.
 	it("appending leaves the register in place", async () => {
@@ -273,13 +302,6 @@ describe("stash chords", () => {
 		expect(s.stash.list()).toEqual(["kept"]);
 	});
 
-	it("says so when the register is empty", async () => {
-		const h = harness();
-		const s = session(h);
-		h.press("\x13", "a", "4");
-		await s.settled();
-		expect(h.notified.join(" ")).toContain("4");
-	});
 
 	it("alt+i inserts a literal tab at the cursor", async () => {
 		const h = harness();

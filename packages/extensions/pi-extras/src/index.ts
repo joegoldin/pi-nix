@@ -13,7 +13,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname } from "node:path";
 
-import { type ChordAction, ChordReader, type RegisterName } from "./chord.ts";
+import { type ChordAction, ChordReader } from "./chord.ts";
 import {
 	type ClipboardRunner,
 	type ClipboardTarget,
@@ -87,12 +87,6 @@ export interface ExtrasDeps {
 
 const NOTIFY_PREFIX = "pi-extras";
 
-/** A draft appended to a prompt that is already there starts its own line. */
-function appended(current: string, addition: string): string {
-	if (current === "") return addition;
-	return /\s$/.test(current) ? `${current}${addition}` : `${current}\n${addition}`;
-}
-
 export class ExtrasSession {
 	readonly stash: StashStore;
 	readonly undo = new UndoBuffer();
@@ -141,7 +135,7 @@ export class ExtrasSession {
 	 *  aboveEditor puts it against the prompt, where the keys it names are
 	 *  about to be typed. See hint.ts for why this is a widget and not the
 	 *  overlay it briefly was. */
-	private showHint(stage: "prefix" | "append" | undefined): void {
+	private showHint(stage: "prefix" | undefined): void {
 		if (typeof this.ctx.ui.setWidget !== "function") return;
 		try {
 			this.ctx.ui.setWidget(HINT_WIDGET_KEY, stage ? hintRows(stage) : undefined, {
@@ -183,7 +177,16 @@ export class ExtrasSession {
 	private async run(action: ChordAction): Promise<void> {
 		switch (action.kind) {
 			case "stash":
-				this.stashOrRestore();
+				this.stashText();
+				return;
+			case "unstash":
+				this.unstash();
+				return;
+			case "unstashAll":
+				this.unstashAll();
+				return;
+			case "list":
+				await this.openOverlay(this.ctx);
 				return;
 			case "undo":
 				this.step("undo");
@@ -199,9 +202,6 @@ export class ExtrasSession {
 				return;
 			case "thinking":
 				this.cycleThinking();
-				return;
-			case "append":
-				this.append(action.register);
 				return;
 			case "tab":
 				this.ctx.ui.pasteToEditor?.("\t");
@@ -233,21 +233,44 @@ export class ExtrasSession {
 		}
 	}
 
-	private stashOrRestore(): void {
+	/** Put the prompt away. */
+	private stashText(): void {
 		const current = this.text();
-		if (current.trim() !== "") {
-			this.undo.record(current);
-			this.stash.push(current);
-			this.setText("");
+		if (current.trim() === "") {
+			this.notify("nothing to stash");
 			return;
 		}
+		this.undo.record(current);
+		this.stash.push(current);
+		this.setText("");
+	}
+
+	/** Bring the newest one back. */
+	private unstash(): void {
 		const restored = this.stash.restore();
 		if (restored === undefined) {
 			this.notify("the stash is empty");
 			return;
 		}
+		const current = this.text();
 		this.undo.record(current);
-		this.setText(restored);
+		// Whatever was being typed is kept, above what came back, rather than
+		// overwritten. ctrl+s z puts it back the way it was either way.
+		this.setText(current.trim() === "" ? restored : `${current}\n\n${restored}`);
+	}
+
+	/** Bring all of them back, newest first, and leave the stash empty. */
+	private unstashAll(): void {
+		const all = this.stash.drain();
+		if (all.length === 0) {
+			this.notify("the stash is empty");
+			return;
+		}
+		const current = this.text();
+		this.undo.record(current);
+		const joined = all.join("\n\n");
+		this.setText(current.trim() === "" ? joined : `${current}\n\n${joined}`);
+		this.notify(`unstashed ${all.length}`);
 	}
 
 	private step(direction: "undo" | "redo"): void {
@@ -282,17 +305,6 @@ export class ExtrasSession {
 		} catch {
 			// A model with no reasoning support rejects the level. Nothing else changes.
 		}
-	}
-
-	private append(register: RegisterName): void {
-		const value = this.stash.register(register);
-		if (value === undefined) {
-			this.notify(`register ${register} is empty`);
-			return;
-		}
-		const current = this.text();
-		this.undo.record(current);
-		this.setText(appended(current, value));
 	}
 
 	/** The stash overlay. Restore and cut share the undo buffer with the

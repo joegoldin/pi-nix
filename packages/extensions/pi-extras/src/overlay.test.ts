@@ -1,5 +1,13 @@
 import { describe, expect, it } from "bun:test";
-import { type StashTheme, clampIndex, overlayCommand, previewOf, renderStash } from "./overlay.ts";
+import {
+	VISIBLE_ROWS,
+	type StashTheme,
+	clampIndex,
+	createStashComponent,
+	overlayCommand,
+	previewOf,
+	renderStash,
+} from "./overlay.ts";
 
 /** A theme that tags instead of colouring, so layout can be asserted on. */
 const theme: StashTheme = {
@@ -89,12 +97,50 @@ describe("previewOf", () => {
 describe("renderStash", () => {
 	const entries = ["first draft", "second draft"];
 
-	it("numbers each entry with the register that reads it", () => {
-		const rows = renderStash(entries, 0, 60, true, theme).join("\n");
-		expect(rows).toContain("0");
-		expect(rows).toContain("first draft");
-		expect(rows).toContain("1");
-		expect(rows).toContain("second draft");
+	it("shows a preview of each entry", () => {
+		// Entries used to be numbered, because the number was the register that
+		// read them back. The registers are gone; the list is the only way in.
+		const rows = renderStash(["first", "second"], 0, 60, true, theme);
+		expect(rows.join("\n")).toContain("first");
+		expect(rows.join("\n")).toContain("second");
+	});
+
+	it("narrows to what matches the filter and says how many", () => {
+		const rows = renderStash(["alpha draft", "beta draft", "gamma"], 0, 60, true, theme, "draft").join("\n");
+		expect(rows).toContain("alpha draft");
+		expect(rows).toContain("beta draft");
+		expect(rows).not.toContain("gamma");
+		expect(rows).toContain("2 of 3 shown");
+	});
+
+	it("says when a filter matches nothing, rather than looking empty", () => {
+		const rows = renderStash(["alpha"], 0, 60, true, theme, "zzz").join("\n");
+		expect(rows).toContain("nothing matches that");
+		expect(rows).not.toContain("the stash is empty");
+	});
+
+	it("draws a caret only while the filter is being typed", () => {
+		expect(renderStash(["a"], 0, 60, true, theme, "a", true).join("\n")).toContain("\u2588");
+		expect(renderStash(["a"], 0, 60, true, theme, "a", false).join("\n")).not.toContain("\u2588");
+	});
+
+	it("scrolls rather than drawing every entry", () => {
+		const many = Array.from({ length: 25 }, (_, i) => `draft ${i}`);
+		const rows = renderStash(many, 0, 60, true, theme);
+		const shown = rows.filter((r) => r.includes("draft "));
+		expect(shown).toHaveLength(VISIBLE_ROWS);
+		expect(rows.join("\n")).toContain("25 of 25 shown");
+	});
+
+	it("keeps the selected row inside the window when it scrolls", () => {
+		const many = Array.from({ length: 25 }, (_, i) => `draft ${i}`);
+		const rows = renderStash(many, 20, 60, true, theme).join("\n");
+		expect(rows).toContain("\u25b8 draft 20");
+	});
+
+	it("offers different keys while filtering", () => {
+		expect(renderStash(["a"], 0, 80, true, theme, "", false).join("\n")).toContain("d delete");
+		expect(renderStash(["a"], 0, 80, true, theme, "", true).join("\n")).toContain("type to narrow");
 	});
 
 	it("marks the selected row and only that row", () => {
@@ -124,5 +170,84 @@ describe("renderStash", () => {
 
 	it("renders at a narrow width without throwing", () => {
 		expect(() => renderStash(entries, 0, 4, true, theme)).not.toThrow();
+	});
+});
+
+describe("createStashComponent with a filter", () => {
+	const host = () => {
+		let renders = 0;
+		return { tui: { requestRender: () => renders++ }, count: () => renders };
+	};
+
+	const wire = (entries: string[]) => {
+		const state = { entries: [...entries], restored: [] as number[], removed: [] as number[], closed: false };
+		const h = host();
+		const c = createStashComponent(
+			h.tui,
+			theme,
+			{
+				entries: () => state.entries,
+				persistent: () => true,
+				restore: (i) => state.restored.push(i),
+				copy: () => {},
+				remove: (i) => {
+					state.removed.push(i);
+					state.entries.splice(i, 1);
+				},
+				clearAll: () => {
+					state.entries = [];
+				},
+			},
+			() => {
+				state.closed = true;
+			},
+		);
+		return { c, state };
+	};
+
+	it("acts on the stash's index, not the filtered row's", () => {
+		// The one visible row after filtering is entry 2. Restoring row 0 must
+		// restore entry 2, or a narrowed list quietly acts on the wrong draft.
+		const { c, state } = wire(["alpha", "beta", "gamma"]);
+		c.handleInput("/");
+		for (const ch of "gam") c.handleInput(ch);
+		c.handleInput("\r");
+		expect(state.restored).toEqual([2]);
+	});
+
+	it("deletes the filtered row and stays open", () => {
+		const { c, state } = wire(["alpha", "beta", "gamma"]);
+		c.handleInput("/");
+		for (const ch of "bet") c.handleInput(ch);
+		c.handleInput("\x1b"); // leave the filter so d is a command again
+		c.handleInput("d");
+		expect(state.removed).toEqual([1]);
+		expect(state.closed).toBe(false);
+	});
+
+	it("types letters into the query instead of running them as commands", () => {
+		const { c, state } = wire(["alpha", "delta"]);
+		c.handleInput("/");
+		c.handleInput("d"); // would be delete outside the filter
+		expect(state.removed).toEqual([]);
+		expect(c.render(60).join("\n")).toContain("filter: d");
+	});
+
+	it("escape leaves the filter, and only then closes", () => {
+		const { c, state } = wire(["alpha"]);
+		c.handleInput("/");
+		c.handleInput("\x1b");
+		expect(state.closed).toBe(false);
+		c.handleInput("\x1b");
+		expect(state.closed).toBe(true);
+	});
+
+	it("backspace edits the query", () => {
+		const { c } = wire(["alpha", "beta"]);
+		c.handleInput("/");
+		for (const ch of "alx") c.handleInput(ch);
+		expect(c.render(60).join("\n")).toContain("nothing matches that");
+		c.handleInput("\x7f");
+		expect(c.render(60).join("\n")).toContain("alpha");
 	});
 });

@@ -103,25 +103,8 @@ describe("StashStore", () => {
 
 	// Append reads a register without consuming it: the same snippet is usually
 	// wanted in more than one prompt.
-	it("register reads without removing", () => {
-		const { store } = memoryStore();
-		store.push("a");
-		store.push("b");
-		expect(store.register("0")).toBe("b");
-		expect(store.register("1")).toBe("a");
-		expect(store.list()).toEqual(["b", "a"]);
-	});
 
-	it("the stash register is the newest entry", () => {
-		const { store } = memoryStore();
-		store.push("a");
-		store.push("b");
-		expect(store.register("s")).toBe("b");
-	});
 
-	it("an unfilled register reads as undefined", () => {
-		expect(memoryStore().store.register("7")).toBeUndefined();
-	});
 
 	it("removes and clears", () => {
 		const { store } = memoryStore();
@@ -175,9 +158,10 @@ describe("StashStore degradation", () => {
 		store.push("a");
 		store.push("b");
 		expect(store.list()).toEqual(["b", "a"]);
-		expect(store.register("1")).toBe("a");
 		expect(store.restore()).toBe("b");
 		expect(store.persistent).toBe(false);
+		expect(store.drain()).toEqual(["a"]);
+		expect(store.list()).toEqual([]);
 	});
 
 	it("keeps working with no io at all", () => {

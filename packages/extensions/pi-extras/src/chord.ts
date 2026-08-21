@@ -13,16 +13,16 @@
 // ones pi-tui itself accepts for the handful of keys this extension binds.
 
 /** Registers the append step can name: the ten numbered slots, or the stash. */
-export type RegisterName = "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "s";
-
 export type ChordAction =
 	| { kind: "stash" }
+	| { kind: "unstash" }
+	| { kind: "unstashAll" }
+	| { kind: "list" }
 	| { kind: "undo" }
 	| { kind: "redo" }
 	| { kind: "copy" }
 	| { kind: "cut" }
 	| { kind: "thinking" }
-	| { kind: "append"; register: RegisterName }
 	| { kind: "tab" };
 
 export interface ChordStep {
@@ -31,7 +31,7 @@ export interface ChordStep {
 	/** True while the reader is waiting for a further key. */
 	pending: boolean;
 	/** Which key the reader is waiting for, for the caller to prompt with. */
-	stage?: "prefix" | "append";
+	stage?: "prefix";
 	action?: ChordAction;
 }
 
@@ -61,6 +61,8 @@ const CSI_U = /^\x1b\[(\d+)(?::(\d*))?(?::(\d+))?(?:;(\d+))?(?::(\d+))?u$/;
 
 interface ParsedKey {
 	codepoint: number;
+	/** The shifted codepoint the terminal reported, when it reported one. */
+	shifted: number | undefined;
 	modifier: number;
 }
 
@@ -68,7 +70,13 @@ function parseCsiU(data: string): ParsedKey | undefined {
 	const match = CSI_U.exec(data);
 	if (!match) return undefined;
 	const modifier = (match[4] ? Number.parseInt(match[4], 10) : 1) - 1;
-	return { codepoint: Number.parseInt(match[1], 10), modifier: modifier & ~LOCK_MASK };
+	return {
+		codepoint: Number.parseInt(match[1], 10),
+		// Kitty's second field is the shifted key: `\x1b[117:85;2u` is shift+u,
+		// reporting both `u` and `U`. Without it, shift+u reads as `u`.
+		shifted: match[2] ? Number.parseInt(match[2], 10) : undefined,
+		modifier: modifier & ~LOCK_MASK,
+	};
 }
 
 /**
@@ -113,8 +121,16 @@ export function matchesAlt(data: string, letter: string): boolean {
 }
 
 /**
- * The character an unmodified keypress carries, or undefined when the input is
- * anything else: a modified key, a control character, or a pasted run.
+ * The character a keypress carries, shift included, or undefined when the input
+ * is anything else: a key held with ctrl or alt, a control character, or a
+ * pasted run.
+ *
+ * Shift has to be resolved rather than merely tolerated, because the chord
+ * binds both cases of a letter: `u` unstashes one and `U` unstashes the lot.
+ * A legacy terminal sends the shifted character directly. Kitty sends the
+ * unshifted codepoint plus a modifier, with the shifted codepoint in its own
+ * field when the terminal reports one, so shift+u arrives as `117;2` or
+ * `117:85;2` and both have to come back as "U".
  */
 export function printableKey(data: string): string | undefined {
 	if (data.length === 1) {
@@ -124,29 +140,41 @@ export function printableKey(data: string): string | undefined {
 	const parsed = parseCsiU(data);
 	if (!parsed) return undefined;
 	if ((parsed.modifier & ~MOD_SHIFT) !== 0) return undefined;
-	return parsed.codepoint >= 0x20 && parsed.codepoint !== 0x7f ? String.fromCharCode(parsed.codepoint) : undefined;
+	const code = parsed.shifted ?? parsed.codepoint;
+	if (code < 0x20 || code === 0x7f) return undefined;
+	const char = String.fromCharCode(code);
+	// A terminal that reports shift without an alternate leaves the casing to
+	// us. toUpperCase only moves cased characters, so `;2` on a digit is safe.
+	return (parsed.modifier & MOD_SHIFT) !== 0 ? char.toUpperCase() : char;
 }
 
-/** ctrl+s, then one of these. */
+/**
+ * ctrl+s, then one of these.
+ *
+ * s and u are the pair the whole thing is for: stash puts the prompt away,
+ * unstash brings one back, and the capital takes the lot. Numbered registers
+ * and a two-step append used to live here and are gone -- ten slots addressed
+ * by digit is a filing system, and what this needed was a pocket.
+ */
 const SECOND_KEY: Record<string, ChordAction> = {
 	s: { kind: "stash" },
-	u: { kind: "undo" },
-	r: { kind: "redo" },
+	u: { kind: "unstash" },
+	U: { kind: "unstashAll" },
+	l: { kind: "list" },
 	y: { kind: "copy" },
 	d: { kind: "cut" },
 	t: { kind: "thinking" },
+	z: { kind: "undo" },
+	Z: { kind: "redo" },
 };
 
-const REGISTERS = new Set<string>(["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "s"]);
-
 /** The second keys the reader accepts, for the on-screen prompt to name. */
-export const SECOND_KEY_LETTERS: readonly string[] = Object.keys(SECOND_KEY).concat("a");
+export const SECOND_KEY_LETTERS: readonly string[] = Object.keys(SECOND_KEY);
 
-type State = "idle" | "prefix" | "append";
+type State = "idle" | "prefix";
 
 const IDLE: ChordStep = { consume: false, pending: false };
 const WAITING_PREFIX: ChordStep = { consume: true, pending: true, stage: "prefix" };
-const WAITING_APPEND: ChordStep = { consume: true, pending: true, stage: "append" };
 const CANCELLED: ChordStep = { consume: true, pending: false };
 
 export class ChordReader {
@@ -166,7 +194,7 @@ export class ChordReader {
 	 *  so the caller does not take the menu down over a key it ignored. */
 	private passthrough(): ChordStep {
 		if (this.state === "idle") return IDLE;
-		return { consume: false, pending: true, stage: this.state === "append" ? "append" : "prefix" };
+		return { consume: false, pending: true, stage: "prefix" };
 	}
 
 	feed(data: string, now: number): ChordStep {
@@ -190,27 +218,10 @@ export class ChordReader {
 					this.state = "idle";
 					return CANCELLED;
 				}
-				const key = printableKey(data);
-				if (key === "a") {
-					this.state = "append";
-					this.since = now;
-					return WAITING_APPEND;
-				}
 				this.state = "idle";
+				const key = printableKey(data);
 				const action = key === undefined ? undefined : SECOND_KEY[key];
 				return action ? { consume: true, pending: false, action } : CANCELLED;
-			}
-			case "append": {
-				// Closes from here too, rather than stepping back to the prefix:
-				// the key means "put this away" wherever the chord has got to.
-				if (matchesCtrl(data, "s")) {
-					this.state = "idle";
-					return CANCELLED;
-				}
-				this.state = "idle";
-				const key = printableKey(data);
-				if (key === undefined || !REGISTERS.has(key)) return CANCELLED;
-				return { consume: true, pending: false, action: { kind: "append", register: key as RegisterName } };
 			}
 			default:
 				if (matchesCtrl(data, "s")) {
