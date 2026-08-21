@@ -5,6 +5,7 @@
 // likes, so measuring its output would make a row's width a property of the
 // colour encoding rather than of the text.
 
+import { isKeyRelease } from "./chord.ts";
 import { filterEntries, windowFor } from "./filter.ts";
 
 const ELLIPSIS = "…";
@@ -25,14 +26,57 @@ export type OverlayCommand =
 	| { kind: "filterChar"; char: string }
 	| { kind: "filterBackspace" }
 	| { kind: "endFilter" }
+	| { kind: "noop" }
 	| { kind: "close" };
 
+/**
+ * Up and down, in every encoding a terminal might send them in.
+ *
+ * A table of literal bytes is not enough. pi asks for Kitty keyboard protocol
+ * flags 7, and flag 2 reports press and release for every key, which moves
+ * functional keys off their legacy form: Up stops being `\x1b[A` and becomes
+ * `\x1b[1;1:1A`, with the release as `\x1b[1;1:3A`. Letters are unaffected --
+ * a text-producing key still sends its text on press -- which is why `j` and
+ * `k` kept working in the list while the arrows silently did nothing.
+ *
+ * So the parameters are matched rather than enumerated: optional numbers,
+ * semicolons and colons between the CSI and the final letter, plus the SS3 form
+ * an application-cursor-keys terminal uses.
+ */
+const ARROW = /^\x1b(?:\[[\d;:]*|O)([ABCD])$/;
+
+function arrowCommand(data: string): OverlayCommand | undefined {
+	const match = ARROW.exec(data);
+	if (!match) return undefined;
+	switch (match[1]) {
+		case "A":
+			return { kind: "move", delta: -1 };
+		case "B":
+			return { kind: "move", delta: 1 };
+		default:
+			// Left and right are not bound, but they must still be swallowed:
+			// letting them through would type into the prompt behind the list.
+			return { kind: "noop" };
+	}
+}
+
+/**
+ * Enter, escape and backspace, normalised back to the byte the tables use.
+ *
+ * The same protocol that moves the arrows moves these: with event types on,
+ * escape arrives as `\x1b[27;1:1u` rather than `\x1b`. Mapping them back keeps
+ * one table instead of two encodings of every binding.
+ */
+const NAMED_CSI_U = /^\x1b\[(\d+)(?:[:;][\d:;]*)?u$/;
+const NAMED: Record<string, string> = { "13": "\r", "27": "\x1b", "127": "\x7f" };
+
+function namedKey(data: string): string | undefined {
+	const match = NAMED_CSI_U.exec(data);
+	return match ? NAMED[match[1] as string] : undefined;
+}
+
 const KEYS: Record<string, OverlayCommand> = {
-	"\x1b[A": { kind: "move", delta: -1 },
-	"\x1bOA": { kind: "move", delta: -1 },
 	k: { kind: "move", delta: -1 },
-	"\x1b[B": { kind: "move", delta: 1 },
-	"\x1bOB": { kind: "move", delta: 1 },
 	j: { kind: "move", delta: 1 },
 	"\r": { kind: "restore" },
 	"\n": { kind: "restore" },
@@ -48,10 +92,6 @@ const KEYS: Record<string, OverlayCommand> = {
 
 /** The keys that mean the same thing whether or not a filter is being typed. */
 const FILTER_KEYS: Record<string, OverlayCommand> = {
-	"\x1b[A": { kind: "move", delta: -1 },
-	"\x1bOA": { kind: "move", delta: -1 },
-	"\x1b[B": { kind: "move", delta: 1 },
-	"\x1bOB": { kind: "move", delta: 1 },
 	"\r": { kind: "restore" },
 	"\n": { kind: "restore" },
 	"\x7f": { kind: "filterBackspace" },
@@ -70,6 +110,12 @@ const FILTER_KEYS: Record<string, OverlayCommand> = {
  * things you want while narrowing a list.
  */
 export function overlayCommand(data: string, filtering = false): OverlayCommand | undefined {
+	// Releases would otherwise be read as a second press of the same key.
+	if (isKeyRelease(data)) return { kind: "noop" };
+	const arrow = arrowCommand(data);
+	if (arrow) return arrow;
+	const named = namedKey(data);
+	if (named) return filtering ? (FILTER_KEYS[named] ?? undefined) : KEYS[named];
 	if (!filtering) return KEYS[data];
 	const shared = FILTER_KEYS[data];
 	if (shared) return shared;
@@ -232,6 +278,10 @@ export function createStashComponent(
 				// escape -- now that the commands are themselves again -- closes.
 				filtering = false;
 				break;
+			case "noop":
+				// Swallowed on purpose: a release, or an arrow with nothing bound
+				// to it. Either would reach the prompt behind the list otherwise.
+				return;
 			case "close":
 				done();
 				return;

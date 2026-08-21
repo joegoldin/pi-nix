@@ -46,7 +46,37 @@ describe("overlayCommand", () => {
 
 	// Escape must close, and an arrow key starts with the same byte.
 	it("does not read an arrow key as escape", () => {
-		expect(overlayCommand("\x1b[C")).toBeUndefined();
+		// An escape sequence starts with the escape byte, so the close binding
+		// must not swallow the whole family. Right is not bound to anything, but
+		// it is claimed rather than passed on, or it would reach the prompt
+		// behind the list.
+		expect(overlayCommand("\x1b[C")).toEqual({ kind: "noop" });
+	});
+
+	it("reads the arrows in the encoding the Kitty protocol sends", () => {
+		// With event types reported, Up is `\x1b[1;1:1A`, not `\x1b[A`. The old
+		// table only knew the legacy form, so the arrows silently did nothing
+		// while j and k -- text keys, unaffected -- kept working.
+		expect(overlayCommand("\x1b[1;1:1A")).toEqual({ kind: "move", delta: -1 });
+		expect(overlayCommand("\x1b[1;1:1B")).toEqual({ kind: "move", delta: 1 });
+		expect(overlayCommand("\x1b[A")).toEqual({ kind: "move", delta: -1 });
+		expect(overlayCommand("\x1bOB")).toEqual({ kind: "move", delta: 1 });
+	});
+
+	it("moves the list while a filter is being typed", () => {
+		expect(overlayCommand("\x1b[1;1:1B", true)).toEqual({ kind: "move", delta: 1 });
+	});
+
+	it("reads enter and escape in that encoding too", () => {
+		expect(overlayCommand("\x1b[13;1:1u")).toEqual({ kind: "restore" });
+		expect(overlayCommand("\x1b[27;1:1u")).toEqual({ kind: "close" });
+		expect(overlayCommand("\x1b[27;1:1u", true)).toEqual({ kind: "endFilter" });
+		expect(overlayCommand("\x1b[127;1:1u", true)).toEqual({ kind: "filterBackspace" });
+	});
+
+	it("ignores a release, rather than acting on it twice", () => {
+		expect(overlayCommand("\x1b[1;1:3B")).toEqual({ kind: "noop" });
+		expect(overlayCommand("\x1b[115;1:3u", true)).toEqual({ kind: "noop" });
 	});
 });
 
