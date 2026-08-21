@@ -82,6 +82,8 @@ export interface ExtrasDeps {
 	runClipboard: ClipboardRunner;
 	applyEnv(values: Record<string, string>): void;
 	stashIO: StashIO | undefined;
+	/** Columns available to a widget, for the list to lay itself out in. */
+	width(): number;
 }
 
 const NOTIFY_PREFIX = "pi-extras";
@@ -95,6 +97,7 @@ export class ExtrasSession {
 	private readonly chord = new ChordReader();
 	private readonly spinner: TitleSpinner;
 	private unsubscribe: (() => void) | undefined;
+	private list: ReturnType<typeof createStashComponent> | undefined;
 	private inflight: Promise<void> = Promise.resolve();
 
 	constructor(pi: ExtrasHost, ctx: ExtrasContext, deps: ExtrasDeps) {
@@ -117,6 +120,13 @@ export class ExtrasSession {
 		if (this.unsubscribe || typeof this.ctx.ui.onTerminalInput !== "function") return;
 		try {
 			this.unsubscribe = this.ctx.ui.onTerminalInput((data) => {
+				// The list is modal while it is up: every key belongs to it, and
+				// the ones it does not bind are swallowed rather than typed into
+				// the prompt behind it.
+				if (this.list !== undefined) {
+					this.list.handleInput(data);
+					return { consume: true };
+				}
 				const step = this.chord.feed(data, this.deps.now());
 				this.showHint(step.pending ? step.stage : undefined);
 				if (step.action) this.dispatch(step.action);
@@ -153,6 +163,7 @@ export class ExtrasSession {
 	}
 
 	detach(): void {
+		this.closeList();
 		this.showHint(undefined);
 		this.chord.cancel();
 		this.spinner.stop();
@@ -195,7 +206,7 @@ export class ExtrasSession {
 				this.unstashAll();
 				return;
 			case "list":
-				await this.openOverlay(this.ctx);
+				this.openList();
 				return;
 			case "copy":
 				await this.copy(this.text());
@@ -300,52 +311,71 @@ export class ExtrasSession {
 
 	/** The stash list: every saved draft, searchable, with the four things you
 	 *  can do to one. Also on ctrl+g, which skips the menu. */
-	async openOverlay(ctx: ExtrasContext): Promise<void> {
-		if (ctx.mode !== "tui" || typeof ctx.ui.custom !== "function") {
+	/** The stash list.
+	 *
+	 *  A widget above the editor, driven by this extension's own input listener,
+	 *  which is the only arrangement that leaves the prompt on screen. pi offers
+	 *  two ways to mount a focused component and neither is one: an overlay is
+	 *  positioned against the terminal, and the non-overlay branch swaps the
+	 *  component into the editor's container -- that is why the prompt vanished
+	 *  under the list while the chord menu, a widget, sat politely above it.
+	 *
+	 *  Focus is not needed to read keys. pi-tui consults input listeners before
+	 *  the focused component, so this reads them first and consumes everything
+	 *  while the list is open; the editor keeps focus and keeps drawing.
+	 */
+	openList(): void {
+		if (this.list !== undefined) return;
+		if (this.ctx.mode !== "tui" || typeof this.ctx.ui.setWidget !== "function") {
 			this.notify(`stash: ${this.stash.list().length} saved`);
 			return;
 		}
-		const theme = ctx.ui.theme ?? { fg: (_slot: string, text: string) => text };
+		const theme = this.ctx.ui.theme ?? { fg: (_slot: string, text: string) => text };
+		this.list = createStashComponent(
+			{ requestRender: () => this.drawList() },
+			theme,
+			{
+				entries: () => this.stash.list(),
+				persistent: () => this.stash.persistent,
+				restore: (index) => {
+					const entry = this.stash.restore(index);
+					if (entry === undefined) return;
+					const current = this.text();
+					this.setText(current.trim() === "" ? entry : `${current}\n\n${entry}`);
+				},
+				copy: (index) => {
+					const entry = this.stash.list()[index];
+					if (entry !== undefined) this.dispatchCopy(entry);
+				},
+				remove: (index) => {
+					this.stash.remove(index);
+				},
+				clearAll: () => {
+					this.stash.clear();
+				},
+			},
+			() => this.closeList(),
+		);
+		this.drawList();
+	}
+
+	private drawList(): void {
+		if (this.list === undefined || typeof this.ctx.ui.setWidget !== "function") return;
 		try {
-			await ctx.ui.custom<void>(
-				(tui, activeTheme, _keybindings, done) =>
-					createStashComponent(
-						tui,
-						activeTheme ?? theme,
-						{
-							entries: () => this.stash.list(),
-							persistent: () => this.stash.persistent,
-							restore: (index) => {
-								const entry = this.stash.restore(index);
-								if (entry === undefined) return;
-								this.setText(entry);
-							},
-							copy: (index) => {
-								const entry = this.stash.list()[index];
-								if (entry !== undefined) this.dispatchCopy(entry);
-							},
-							remove: (index) => {
-								this.stash.remove(index);
-							},
-							clearAll: () => {
-								this.stash.clear();
-							},
-						},
-						() => {
-							done(undefined as void);
-						},
-					),
-				// Not an overlay. pi's non-overlay branch swaps the component into
-				// the editor's own container and hands it focus, restoring the
-				// editor when it closes -- so the list opens where the prompt is,
-				// at the end of the chat log, instead of floating in the middle of
-				// the terminal with the session stranded above it. Overlays in an
-				// inline session are positioned against the terminal, and there is
-				// no coordinate there that means "where the conversation ends".
-				{ overlay: false },
-			);
+			this.ctx.ui.setWidget(LIST_WIDGET_KEY, this.list.render(this.deps.width()), {
+				placement: "aboveEditor",
+			});
 		} catch {
-			// An overlay that will not mount is not worth ending a session over.
+			// A mode with no widgets.
+		}
+	}
+
+	private closeList(): void {
+		this.list = undefined;
+		try {
+			this.ctx.ui.setWidget?.(LIST_WIDGET_KEY, undefined, { placement: "aboveEditor" });
+		} catch {
+			// Already gone.
 		}
 	}
 
@@ -358,6 +388,9 @@ export class ExtrasSession {
 
 /** Widget slot for the half-typed-chord menu. */
 const HINT_WIDGET_KEY = "pi-extras:chord";
+
+/** Widget slot for the stash list. */
+const LIST_WIDGET_KEY = "pi-extras:stash";
 
 export function registerHandlers(pi: ExtrasHost, deps: ExtrasDeps): void {
 	let session: ExtrasSession | undefined;
@@ -452,7 +485,7 @@ export function registerHandlers(pi: ExtrasHost, deps: ExtrasDeps): void {
 		description: "Open the prompt stash: restore, copy, delete, or clear saved drafts.",
 		handler: async (_args: string, ctx: never) => {
 			const c = ctx as unknown as ExtrasContext;
-			await sessionFor(c).openOverlay(c);
+			sessionFor(c).openList();
 		},
 	});
 }
@@ -482,5 +515,8 @@ export default function (pi: ExtrasHost) {
 			Object.assign(process.env, values);
 		},
 		stashIO: fileIO(stashPath(env, homedir())),
+		// setWidget hands a widget the terminal's width without telling it what
+		// that is, so the list has to ask. 80 is the fallback a pipe reports.
+		width: () => process.stdout.columns || 80,
 	});
 }

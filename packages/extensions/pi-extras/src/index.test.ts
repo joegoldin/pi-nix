@@ -31,6 +31,7 @@ function harness(overrides: Partial<ExtrasDeps> = {}) {
 		},
 	};
 
+	const widgets = new Map<string, string[] | undefined>();
 	const ctx = {
 		cwd: "/repo",
 		mode: "tui",
@@ -54,8 +55,9 @@ function harness(overrides: Partial<ExtrasDeps> = {}) {
 			setTitle: (title: string) => {
 				titles.push(title);
 			},
-			custom: async () => {
-				calls.push("custom");
+			setWidget: (key: string, content: string[] | undefined) => {
+				calls.push(content === undefined ? `widget-clear:${key}` : `widget:${key}`);
+				widgets.set(key, content);
 			},
 			theme: { fg: (_slot: string, text: string) => text },
 		},
@@ -89,6 +91,7 @@ function harness(overrides: Partial<ExtrasDeps> = {}) {
 		applyEnv: (values) => {
 			Object.assign(envApplied, values);
 		},
+		width: () => 80,
 		stashIO: {
 			read: () => {
 				if (file === undefined) throw new Error("ENOENT");
@@ -108,6 +111,7 @@ function harness(overrides: Partial<ExtrasDeps> = {}) {
 		calls,
 		copied,
 		notified,
+		widgets,
 		pasted,
 		titles,
 		envApplied,
@@ -361,10 +365,14 @@ describe("registerHandlers", () => {
 		expect(h.calls).toContain("fork:leaf-1:at");
 	});
 
-	it("/stash opens the overlay", async () => {
+	it("/stash opens the list as a widget, leaving the prompt in place", async () => {
+		// It used to mount through ctx.ui.custom, whose non-overlay branch swaps
+		// the component into the editor's own container -- which is why the
+		// prompt disappeared under the list.
 		const h = started();
 		await h.commands.get("stash")?.("", h.ctx as never);
-		expect(h.calls).toContain("custom");
+		expect(h.calls).toContain("widget:pi-extras:stash");
+		expect(h.calls).not.toContain("custom");
 	});
 
 	it("spins the terminal title while the agent works and restores it after", async () => {
@@ -454,5 +462,53 @@ describe("ctrl+s, the quick toggle", () => {
 		expect(h.consumed("\x13")).toBe(true);
 		// The next letter is the prompt's, not a chord's.
 		expect(h.consumed("s")).toBe(false);
+	});
+});
+
+describe("the stash list as a widget", () => {
+	const openWith = async (drafts: string[]) => {
+		const h = harness();
+		const s = session(h);
+		for (const draft of drafts) {
+			h.setText(draft);
+			h.press("\x13");
+			await s.settled();
+		}
+		h.press("\x07", "l");
+		await s.settled();
+		return { h, s };
+	};
+
+	it("draws above the editor, so the prompt stays on screen", async () => {
+		const { h } = await openWith(["alpha"]);
+		expect(h.widgets.get("pi-extras:stash")?.join("\n")).toContain("alpha");
+	});
+
+	it("swallows every key while it is open", async () => {
+		const { h } = await openWith(["alpha"]);
+		// Not bound to anything in the list, and it must not reach the prompt.
+		expect(h.consumed("Q")).toBe(true);
+	});
+
+	it("clears the widget when it closes, rather than leaving it drawn", async () => {
+		const { h, s } = await openWith(["alpha"]);
+		h.press("\x1b");
+		await s.settled();
+		expect(h.widgets.get("pi-extras:stash")).toBeUndefined();
+	});
+
+	it("gives keys back to the chord once it has closed", async () => {
+		const { h, s } = await openWith(["alpha"]);
+		h.press("\x1b");
+		await s.settled();
+		expect(h.consumed("Q")).toBe(false);
+	});
+
+	it("appends a restored draft rather than replacing the prompt", async () => {
+		const { h, s } = await openWith(["stashed"]);
+		h.setText("in progress");
+		h.press("\r");
+		await s.settled();
+		expect(h.text()).toBe("in progress\n\nstashed");
 	});
 });
