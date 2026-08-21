@@ -207,6 +207,13 @@ export class ChordReader {
 					this.state = "idle";
 					return CANCELLED;
 				}
+				// ctrl+c dismisses like escape, and then goes on being ctrl+c.
+				// Swallowing it would mean a half-typed chord could eat an
+				// interrupt, which is the one keystroke that must never be lost.
+				if (matchesCtrl(data, "c")) {
+					this.state = "idle";
+					return IDLE;
+				}
 				this.state = "idle";
 				const key = printableKey(data);
 				const action = key === undefined ? undefined : SECOND_KEY[key];

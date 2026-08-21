@@ -89,7 +89,9 @@ const KEYS: Record<string, OverlayCommand> = {
 	q: { kind: "close" },
 	"/": { kind: "startFilter" },
 	"\x1b": { kind: "close" },
-	"\x03": { kind: "close" },
+	// ctrl+c is deliberately absent from both tables. The caller dismisses on
+	// it and then lets it through, so it stays an interrupt as well as a way
+	// out; a component that claimed it would swallow one.
 };
 
 /** The keys that mean the same thing whether or not a filter is being typed. */
@@ -99,7 +101,6 @@ const FILTER_KEYS: Record<string, OverlayCommand> = {
 	"\x7f": { kind: "filterBackspace" },
 	"\x08": { kind: "filterBackspace" },
 	"\x1b": { kind: "endFilter" },
-	"\x03": { kind: "close" },
 };
 
 /**

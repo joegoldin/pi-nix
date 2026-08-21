@@ -36,9 +36,15 @@ describe("overlayCommand", () => {
 		["D", "clearAll"],
 		["\x1b", "close"],
 		["q", "close"],
-		["\x03", "close"],
 	])("maps %j to %s", (data, kind) => {
 		expect(overlayCommand(data)).toEqual({ kind });
+	});
+
+	it("leaves ctrl+c to the caller, so it can dismiss and still interrupt", () => {
+		// A component that claimed ctrl+c would swallow an interrupt. The caller
+		// closes on it and passes it on.
+		expect(overlayCommand("\x03")).toBeUndefined();
+		expect(overlayCommand("\x03", true)).toBeUndefined();
 	});
 
 	it('leaves "y" unbound, so copy is not one action under two keys', () => {

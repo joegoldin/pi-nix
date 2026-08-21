@@ -13,7 +13,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname } from "node:path";
 
-import { type ChordAction, ChordReader } from "./chord.ts";
+import { type ChordAction, ChordReader, matchesCtrl } from "./chord.ts";
 import {
 	type ClipboardRunner,
 	type ClipboardTarget,
@@ -124,6 +124,14 @@ export class ExtrasSession {
 				// the ones it does not bind are swallowed rather than typed into
 				// the prompt behind it.
 				if (this.list !== undefined) {
+					// ctrl+c closes the list the way escape does, and is then
+					// passed on so it still interrupts. Everything else the list
+					// does not bind is swallowed rather than typed into the
+					// prompt behind it.
+					if (matchesCtrl(data, "c")) {
+						this.closeList();
+						return undefined;
+					}
 					this.list.handleInput(data);
 					return { consume: true };
 				}

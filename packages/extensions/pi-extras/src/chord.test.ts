@@ -261,3 +261,32 @@ describe("ctrl+s on its own", () => {
 		expect(r.feed("\x13", 5)).toEqual({ consume: true, pending: false });
 	});
 });
+
+describe("ctrl+c", () => {
+	const reader = () => new ChordReader();
+
+	it("dismisses a half-typed chord without swallowing the key", () => {
+		// Escape cancels and is consumed. ctrl+c cancels and is not: it has a
+		// second job, and a pending chord must not be able to eat an interrupt.
+		const r = reader();
+		r.feed("\x07", 0);
+		expect(r.feed("\x03", 5)).toEqual({ consume: false, pending: false });
+	});
+
+	it("leaves the reader idle, so the next letter is the prompt's", () => {
+		const r = reader();
+		r.feed("\x07", 0);
+		r.feed("\x03", 5);
+		expect(r.feed("s", 10)).toEqual({ consume: false, pending: false });
+	});
+
+	it("reads the CSI-u form too", () => {
+		const r = reader();
+		r.feed("\x07", 0);
+		expect(r.feed("\x1b[99;5u", 5)).toEqual({ consume: false, pending: false });
+	});
+
+	it("passes through untouched when no chord is open", () => {
+		expect(reader().feed("\x03", 0)).toEqual({ consume: false, pending: false });
+	});
+});

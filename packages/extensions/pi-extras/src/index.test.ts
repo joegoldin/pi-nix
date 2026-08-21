@@ -512,3 +512,19 @@ describe("the stash list as a widget", () => {
 		expect(h.text()).toBe("in progress\n\nstashed");
 	});
 });
+
+describe("ctrl+c and the stash list", () => {
+	it("closes the list and still lets the key through", async () => {
+		const h = harness();
+		const s = session(h);
+		h.setText("alpha");
+		h.press("\x13");
+		await s.settled();
+		h.press("\x07", "l");
+		await s.settled();
+		expect(h.widgets.get("pi-extras:stash")).toBeDefined();
+		// Not consumed: pi still gets its interrupt.
+		expect(h.consumed("\x03")).toBe(false);
+		expect(h.widgets.get("pi-extras:stash")).toBeUndefined();
+	});
+});
