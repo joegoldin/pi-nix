@@ -25,7 +25,7 @@ import { gitEditorOverrides } from "./gitenv.ts";
 import { expandPathRefs, nextThinkingLevel, unresolvedRefs } from "./input.ts";
 import { type StashTheme, createStashComponent } from "./overlay.ts";
 import { type StashIO, StashStore, stashPath } from "./stash.ts";
-import { type HintStage, createHintComponent } from "./hint.ts";
+import { type HintStage, renderHint } from "./hint.ts";
 import { TitleSpinner, baseTitle } from "./title.ts";
 
 /** The slice of pi's ExtensionContext this extension touches. Every member the
@@ -39,6 +39,7 @@ export interface ExtrasContext {
 		setEditorText?(text: string): void;
 		pasteToEditor?(text: string): void;
 		setTitle?(title: string): void;
+		setWidget?(key: string, content: string[] | undefined, options?: { placement?: string }): void;
 		onTerminalInput?(handler: (data: string) => { consume?: boolean; data?: string } | undefined): () => void;
 		custom?<T>(
 			factory: (
@@ -94,9 +95,6 @@ export class ExtrasSession {
 	private readonly chord = new ChordReader();
 	private readonly spinner: TitleSpinner;
 	private unsubscribe: (() => void) | undefined;
-	private hintOpen = false;
-	private hintStage: HintStage | undefined;
-	private hintDismiss: (() => void) | undefined;
 	private inflight: Promise<void> = Promise.resolve();
 
 	constructor(pi: ExtrasHost, ctx: ExtrasContext, deps: ExtrasDeps) {
@@ -129,69 +127,28 @@ export class ExtrasSession {
 		}
 	}
 
-	/** Open, follow, or dismiss the half-typed-chord menu.
+	/** Draw or clear the half-typed-chord menu.
 	 *
-	 *  Anchored to the top rather than centred, which is the whole difference
-	 *  between an overlay and twenty blank rows: pi's inline TUI grows its drawn
-	 *  region to `row + height`, and a centre anchor resolves `row` against the
-	 *  terminal. At the top there is nothing to grow to.
+	 *  aboveEditor, which is the end of the chat log and the top of the prompt:
+	 *  where the keys it names are about to be typed. Not an overlay, and not
+	 *  for want of trying -- pi's inline TUI grows its drawn region to
+	 *  `row + overlayHeight` and resolves `row` against the terminal, so a
+	 *  centred overlay padded twenty blank rows and a bottom-anchored one sat on
+	 *  the terminal floor with the session stranded above it. A widget has no
+	 *  coordinates to get wrong.
 	 *
-	 *  Called on every keystroke, so it is idempotent, and `hintOpen` is set
-	 *  before the await so two keys in one tick cannot mount two.
+	 *  Cheap enough to call on every keystroke: pi de-duplicates a widget set to
+	 *  the same content.
 	 */
 	private showHint(stage: HintStage | undefined): void {
-		if (stage === undefined) {
-			this.closeHint();
-			return;
-		}
-		this.hintStage = stage;
-		if (this.hintOpen) return;
-		if (this.ctx.mode !== "tui" || typeof this.ctx.ui.custom !== "function") return;
+		if (typeof this.ctx.ui.setWidget !== "function") return;
 		const theme = this.ctx.ui.theme ?? { fg: (_slot: string, text: string) => text };
-		this.hintOpen = true;
 		try {
-			void this.ctx.ui
-				.custom<void>(
-					(tui, activeTheme, _keybindings, done) => {
-						this.hintDismiss = () => done(undefined as void);
-						return createHintComponent(tui, activeTheme ?? theme, () => this.hintStage ?? "prefix");
-					},
-					{
-						// Bottom-left, next to the prompt the keys act on.
-						//
-						// The anchor is the whole story on padding: pi's inline TUI
-						// grows its drawn region to `row + height`, and `center`
-						// resolves `row` against the terminal, so a centred menu
-						// padded twenty blank rows to reach the middle. Anchored to
-						// the bottom, `row` lands where the session already ends.
-						// SizeValue is `number | "N%"`; 26 columns fits the widest
-						// row with room to spare.
-						overlay: true,
-						overlayOptions: { width: 26, anchor: "bottom-left", offsetX: 2, offsetY: -1 },
-					},
-				)
-				.catch(() => {
-					// An overlay that will not mount is not worth ending a session
-					// over. The chord still works, unprompted.
-				})
-				.finally(() => {
-					this.hintOpen = false;
-					this.hintDismiss = undefined;
-				});
+			this.ctx.ui.setWidget(HINT_WIDGET_KEY, stage ? renderHint(stage, theme) : undefined, {
+				placement: "aboveEditor",
+			});
 		} catch {
-			this.hintOpen = false;
-		}
-	}
-
-	/** Take the menu down. Safe to call when it is not up. */
-	private closeHint(): void {
-		this.hintStage = undefined;
-		const dismiss = this.hintDismiss;
-		this.hintDismiss = undefined;
-		try {
-			dismiss?.();
-		} catch {
-			// Already unmounted.
+			// A mode with no widgets. The chord still works, unprompted.
 		}
 	}
 
@@ -391,6 +348,9 @@ export class ExtrasSession {
 		});
 	}
 }
+
+/** Widget slot for the half-typed-chord menu. */
+const HINT_WIDGET_KEY = "pi-extras:chord";
 
 export function registerHandlers(pi: ExtrasHost, deps: ExtrasDeps): void {
 	let session: ExtrasSession | undefined;
