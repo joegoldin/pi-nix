@@ -158,34 +158,37 @@ describe("ChordReader", () => {
 	});
 });
 
-describe("ChordReader prefix repeats", () => {
+describe("ChordReader prefix toggles", () => {
 	const reader = () => new ChordReader();
 
-	it("restarts the chord when the prefix is pressed twice", () => {
+	it("closes an open chord when the prefix is pressed again", () => {
 		const r = reader();
 		expect(r.feed("\x13", 0)).toEqual({ consume: true, pending: true, stage: "prefix" });
-		// Was CANCELLED: ctrl+s is not printable, so it fell past SECOND_KEY.
-		expect(r.feed("\x13", 10)).toEqual({ consume: true, pending: true, stage: "prefix" });
-		expect(r.feed("s", 20)).toEqual({ consume: true, pending: false, action: { kind: "stash" } });
+		expect(r.feed("\x13", 10)).toEqual({ consume: true, pending: false });
+		// Closed, so the next letter is the prompt's, not the chord's.
+		expect(r.feed("s", 20)).toEqual({ consume: false, pending: false });
 	});
 
-	it("restarts from the register step too", () => {
+	it("closes from the register step too", () => {
 		const r = reader();
 		r.feed("\x13", 0);
 		expect(r.feed("a", 10)).toEqual({ consume: true, pending: true, stage: "append" });
-		expect(r.feed("\x13", 20)).toEqual({ consume: true, pending: true, stage: "prefix" });
-		expect(r.feed("u", 30)).toEqual({ consume: true, pending: false, action: { kind: "undo" } });
+		expect(r.feed("\x13", 20)).toEqual({ consume: true, pending: false });
+		expect(r.feed("4", 30)).toEqual({ consume: false, pending: false });
 	});
 
-	it("keeps the window open from the latest prefix, not the first", () => {
+	it("consumes the closing press, so it never reaches the prompt", () => {
 		const r = reader();
 		r.feed("\x13", 0);
-		r.feed("\x13", CHORD_TIMEOUT_MS - 1);
-		expect(r.feed("s", CHORD_TIMEOUT_MS + 100)).toEqual({
-			consume: true,
-			pending: false,
-			action: { kind: "stash" },
-		});
+		expect(r.feed("\x13", 10).consume).toBe(true);
+	});
+
+	it("opens again on the next press", () => {
+		const r = reader();
+		r.feed("\x13", 0);
+		r.feed("\x13", 10);
+		expect(r.feed("\x13", 20)).toEqual({ consume: true, pending: true, stage: "prefix" });
+		expect(r.feed("s", 30)).toEqual({ consume: true, pending: false, action: { kind: "stash" } });
 	});
 });
 
