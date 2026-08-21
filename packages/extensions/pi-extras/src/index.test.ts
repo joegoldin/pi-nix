@@ -528,3 +528,46 @@ describe("ctrl+c and the stash list", () => {
 		expect(h.widgets.get("pi-extras:stash")).toBeUndefined();
 	});
 });
+
+describe("ctrl+? and the shortcuts panel", () => {
+	it("draws pi-extras' own bindings above the editor", async () => {
+		const h = harness();
+		const s = session(h);
+		h.press("\x1f");
+		await s.settled();
+		const body = h.widgets.get("pi-extras:shortcuts")?.join("\n");
+		expect(body).toContain("ctrl+s");
+		expect(body).toContain("/hotkeys");
+	});
+
+	it("closes on any key, and does not treat that key as a command", async () => {
+		const h = harness();
+		const s = session(h);
+		h.press("\x1f");
+		await s.settled();
+		h.press("z");
+		await s.settled();
+		expect(h.widgets.get("pi-extras:shortcuts")).toBeUndefined();
+		expect(s.stash.list()).toEqual([]);
+	});
+
+	it("closes on ctrl+c and still lets the interrupt through", async () => {
+		const h = harness();
+		const s = session(h);
+		h.press("\x1f");
+		await s.settled();
+		expect(h.consumed("\x03")).toBe(false);
+		expect(h.widgets.get("pi-extras:shortcuts")).toBeUndefined();
+	});
+
+	it("is modal: keys do not reach the chord while it is open", async () => {
+		const h = harness();
+		const s = session(h);
+		h.press("\x1f");
+		await s.settled();
+		h.press("\x07"); // would open the chord menu if it reached the reader
+		await s.settled();
+		expect(h.widgets.get("pi-extras:chord")).toBeUndefined();
+		expect(h.widgets.get("pi-extras:shortcuts")).toBeUndefined();
+	});
+});

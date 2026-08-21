@@ -26,6 +26,7 @@ import { expandPathRefs, nextThinkingLevel, unresolvedRefs } from "./input.ts";
 import { type StashTheme, createStashComponent } from "./overlay.ts";
 import { type StashIO, StashStore, stashPath } from "./stash.ts";
 import { type HintStage, renderHint } from "./hint.ts";
+import { renderShortcuts } from "./shortcuts.ts";
 import { TitleSpinner, baseTitle } from "./title.ts";
 
 /** The slice of pi's ExtensionContext this extension touches. Every member the
@@ -98,6 +99,7 @@ export class ExtrasSession {
 	private readonly spinner: TitleSpinner;
 	private unsubscribe: (() => void) | undefined;
 	private list: ReturnType<typeof createStashComponent> | undefined;
+	private shortcutsOpen = false;
 	private inflight: Promise<void> = Promise.resolve();
 
 	constructor(pi: ExtrasHost, ctx: ExtrasContext, deps: ExtrasDeps) {
@@ -120,6 +122,13 @@ export class ExtrasSession {
 		if (this.unsubscribe || typeof this.ctx.ui.onTerminalInput !== "function") return;
 		try {
 			this.unsubscribe = this.ctx.ui.onTerminalInput((data) => {
+				// Read-only, so no key has anything to do: any key closes it, the
+				// way pressing a key dismisses a "press any key" prompt. ctrl+c
+				// still passes on after, same as everywhere else.
+				if (this.shortcutsOpen) {
+					this.closeShortcuts();
+					return matchesCtrl(data, "c") ? undefined : { consume: true };
+				}
 				// The list is modal while it is up: every key belongs to it, and
 				// the ones it does not bind are swallowed rather than typed into
 				// the prompt behind it.
@@ -171,6 +180,7 @@ export class ExtrasSession {
 	}
 
 	detach(): void {
+		this.closeShortcuts();
 		this.closeList();
 		this.showHint(undefined);
 		this.chord.cancel();
@@ -215,6 +225,9 @@ export class ExtrasSession {
 				return;
 			case "list":
 				this.openList();
+				return;
+			case "shortcuts":
+				this.openShortcuts();
 				return;
 			case "copy":
 				await this.copy(this.text());
@@ -367,6 +380,31 @@ export class ExtrasSession {
 		this.drawList();
 	}
 
+	/** ctrl+?. A widget, the same surface everything else here draws to and for
+	 *  the same reason: it is the only one that leaves the prompt on screen.
+	 *  See shortcuts.ts for why this does not also try to list pi's own
+	 *  keybindings or other extensions'. */
+	private openShortcuts(): void {
+		if (this.shortcutsOpen || typeof this.ctx.ui.setWidget !== "function") return;
+		const theme = this.ctx.ui.theme ?? { fg: (_slot: string, text: string) => text };
+		this.shortcutsOpen = true;
+		try {
+			this.ctx.ui.setWidget(SHORTCUTS_WIDGET_KEY, renderShortcuts(theme), { placement: "aboveEditor" });
+		} catch {
+			this.shortcutsOpen = false;
+		}
+	}
+
+	private closeShortcuts(): void {
+		if (!this.shortcutsOpen) return;
+		this.shortcutsOpen = false;
+		try {
+			this.ctx.ui.setWidget?.(SHORTCUTS_WIDGET_KEY, undefined, { placement: "aboveEditor" });
+		} catch {
+			// Already gone.
+		}
+	}
+
 	private drawList(): void {
 		if (this.list === undefined || typeof this.ctx.ui.setWidget !== "function") return;
 		try {
@@ -399,6 +437,9 @@ const HINT_WIDGET_KEY = "pi-extras:chord";
 
 /** Widget slot for the stash list. */
 const LIST_WIDGET_KEY = "pi-extras:stash";
+
+/** Widget slot for the ctrl+? shortcuts panel. */
+const SHORTCUTS_WIDGET_KEY = "pi-extras:shortcuts";
 
 export function registerHandlers(pi: ExtrasHost, deps: ExtrasDeps): void {
 	let session: ExtrasSession | undefined;

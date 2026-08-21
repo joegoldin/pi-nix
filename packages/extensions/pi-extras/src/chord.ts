@@ -21,7 +21,8 @@ export type ChordAction =
 	| { kind: "list" }
 	| { kind: "copy" }
 	| { kind: "cut" }
-	| { kind: "tab" };
+	| { kind: "tab" }
+	| { kind: "shortcuts" };
 
 export interface ChordStep {
 	/** True when the key belongs to the chord and must not reach the editor. */
@@ -109,6 +110,27 @@ export function matchesCtrl(data: string, letter: string): boolean {
 	if (data === String.fromCharCode(codepoint & 0x1f)) return true;
 	const parsed = parseCsiU(data);
 	return parsed !== undefined && parsed.codepoint === codepoint && parsed.modifier === MOD_CTRL;
+}
+
+/**
+ * ctrl+?, i.e. ctrl+shift+/ on the US layout that puts `?` on shift+/.
+ *
+ * '?' has no key of its own; producing it already means shift was held, and a
+ * terminal that supports Kitty's protocol reports the base key ('/') with the
+ * modifier, not '?' -- the same split `printableKey` resolves for ctrl+g's
+ * second keys. The shifted-key field is read the same way: `shifted ?? base`.
+ *
+ * Legacy terminals cannot report shift on a control character at all, so
+ * ctrl+/ and ctrl+shift+/ arrive as the same byte, 0x1F ("control
+ * underscore", the traditional encoding for both keys on that half of the
+ * row). Both are accepted as the same request here for that reason.
+ */
+export function matchesCtrlQuestion(data: string): boolean {
+	if (data === "\x1f") return true;
+	const parsed = parseCsiU(data);
+	if (!parsed) return false;
+	if ((parsed.modifier & ~MOD_SHIFT) !== MOD_CTRL) return false;
+	return (parsed.shifted ?? parsed.codepoint) === "?".charCodeAt(0);
 }
 
 /** alt+letter, either as ESC-prefixed or as a CSI-u sequence. */
@@ -231,6 +253,7 @@ export class ChordReader {
 				// there is a prompt to put away, so it never has to be aimed.
 				if (matchesCtrl(data, "s")) return { consume: true, pending: false, action: { kind: "quick" } };
 				if (matchesAlt(data, "i")) return { consume: true, pending: false, action: { kind: "tab" } };
+				if (matchesCtrlQuestion(data)) return { consume: true, pending: false, action: { kind: "shortcuts" } };
 				return IDLE;
 		}
 	}

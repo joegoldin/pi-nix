@@ -290,3 +290,51 @@ describe("ctrl+c", () => {
 		expect(reader().feed("\x03", 0)).toEqual({ consume: false, pending: false });
 	});
 });
+
+describe("ctrl+?", () => {
+	const reader = () => new ChordReader();
+
+	it("opens the shortcuts panel from the legacy control-underscore byte", () => {
+		// ctrl+/ and ctrl+shift+/ are the same byte on a terminal with no Kitty
+		// support: neither can report shift on a control character.
+		expect(reader().feed("\x1f", 0)).toEqual({
+			consume: true,
+			pending: false,
+			action: { kind: "shortcuts" },
+		});
+	});
+
+	it("reads the Kitty form with the shifted-key field", () => {
+		// '?' has no key of its own on a US layout; Kitty reports the base key
+		// ('/', codepoint 47) with the shifted codepoint (63) in its own field.
+		expect(reader().feed("\x1b[47:63;6u", 0)).toEqual({
+			consume: true,
+			pending: false,
+			action: { kind: "shortcuts" },
+		});
+	});
+
+	it("reads the Kitty form when the terminal reports '?' directly", () => {
+		expect(reader().feed("\x1b[63;6u", 0)).toEqual({
+			consume: true,
+			pending: false,
+			action: { kind: "shortcuts" },
+		});
+	});
+
+	it("does not require shift to be marked, since legacy terminals cannot mark it", () => {
+		expect(reader().feed("\x1b[63;5u", 0)).toEqual({
+			consume: true,
+			pending: false,
+			action: { kind: "shortcuts" },
+		});
+	});
+
+	it("is not fired by a release", () => {
+		expect(reader().feed("\x1b[63;5:3u", 0)).toEqual({ consume: false, pending: false });
+	});
+
+	it("does not fire on ctrl+alt+/", () => {
+		expect(reader().feed("\x1b[47;7u", 0)).toEqual({ consume: false, pending: false });
+	});
+});
