@@ -146,6 +146,33 @@ export function previewOf(text: string, width: number): string {
 const HELP = "enter restore · y copy · d delete · D clear all · / filter · esc close";
 const FILTER_HELP = "type to narrow · enter restore · esc leave the filter";
 
+/**
+ * The help, wrapped onto as many rows as it needs.
+ *
+ * It used to go through previewOf, which truncates, so a narrow list ended on
+ * `… · / f…` -- the one line whose whole job is to tell you which keys exist,
+ * cut off mid-key. Breaking on the separator keeps every binding readable; a
+ * single binding too wide for the row is truncated rather than dropped, because
+ * a stray row is better than a missing key.
+ */
+export function wrapHelp(text: string, width: number): string[] {
+	if (width <= 0) return [];
+	const parts = text.split(" · ");
+	const rows: string[] = [];
+	let row = "";
+	for (const part of parts) {
+		const candidate = row === "" ? part : `${row} · ${part}`;
+		if ([...candidate].length <= width) {
+			row = candidate;
+			continue;
+		}
+		if (row !== "") rows.push(row);
+		row = [...part].length <= width ? part : previewOf(part, width);
+	}
+	if (row !== "") rows.push(row);
+	return rows;
+}
+
 /** How many entry rows the list draws before it starts scrolling. */
 export const VISIBLE_ROWS = 10;
 
@@ -192,7 +219,9 @@ export function renderStash(
 	}
 
 	if (!persistent) rows.push(theme.fg("warning", "  memory only: the stash file could not be written"));
-	rows.push(theme.fg("dim", previewOf(filtering ? FILTER_HELP : HELP, width)));
+	for (const line of wrapHelp(filtering ? FILTER_HELP : HELP, width)) {
+		rows.push(theme.fg("dim", line));
+	}
 	return rows;
 }
 

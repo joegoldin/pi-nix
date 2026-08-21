@@ -7,6 +7,7 @@ import {
 	overlayCommand,
 	previewOf,
 	renderStash,
+	wrapHelp,
 } from "./overlay.ts";
 
 /** A theme that tags instead of colouring, so layout can be asserted on. */
@@ -279,5 +280,39 @@ describe("createStashComponent with a filter", () => {
 		expect(c.render(60).join("\n")).toContain("nothing matches that");
 		c.handleInput("\x7f");
 		expect(c.render(60).join("\n")).toContain("alpha");
+	});
+});
+
+describe("wrapHelp", () => {
+	it("keeps the whole line when it fits", () => {
+		expect(wrapHelp("a · b · c", 20)).toEqual(["a · b · c"]);
+	});
+
+	it("breaks on the separator rather than mid-key", () => {
+		// The bug this replaces ended a narrow list on "/ f…", cutting off the
+		// name of a key you were meant to be able to read.
+		const rows = wrapHelp("enter restore · y copy · d delete · D clear all · / filter · esc close", 34);
+		expect(rows.length).toBeGreaterThan(1);
+		for (const row of rows) expect([...row].length).toBeLessThanOrEqual(34);
+		expect(rows.join(" ")).toContain("/ filter");
+		expect(rows.join(" ")).toContain("esc close");
+	});
+
+	it("loses no binding, however narrow", () => {
+		const help = "enter restore · y copy · d delete · D clear all · / filter · esc close";
+		for (const width of [12, 20, 34, 50, 200]) {
+			const joined = wrapHelp(help, width).join(" ");
+			for (const key of ["enter", "copy", "delete", "clear all", "filter", "close"]) {
+				expect(joined).toContain(key);
+			}
+		}
+	});
+
+	it("truncates a single binding too wide to fit, rather than dropping it", () => {
+		expect(wrapHelp("an extremely long single binding", 10)).toEqual(["an extrem…"]);
+	});
+
+	it("draws nothing when there is no room at all", () => {
+		expect(wrapHelp("a · b", 0)).toEqual([]);
 	});
 });

@@ -335,7 +335,14 @@ export class ExtrasSession {
 							done(undefined as void);
 						},
 					),
-				{ overlay: true, overlayOptions: { width: "60%", minWidth: 40, maxHeight: "60%" } },
+				// Not an overlay. pi's non-overlay branch swaps the component into
+				// the editor's own container and hands it focus, restoring the
+				// editor when it closes -- so the list opens where the prompt is,
+				// at the end of the chat log, instead of floating in the middle of
+				// the terminal with the session stranded above it. Overlays in an
+				// inline session are positioned against the terminal, and there is
+				// no coordinate there that means "where the conversation ends".
+				{ overlay: false },
 			);
 		} catch {
 			// An overlay that will not mount is not worth ending a session over.
