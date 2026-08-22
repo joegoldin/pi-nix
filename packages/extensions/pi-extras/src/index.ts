@@ -42,15 +42,6 @@ export interface ExtrasContext {
 		setTitle?(title: string): void;
 		setWidget?(key: string, content: string[] | undefined, options?: { placement?: string }): void;
 		onTerminalInput?(handler: (data: string) => { consume?: boolean; data?: string } | undefined): () => void;
-		custom?<T>(
-			factory: (
-				tui: { requestRender(): void },
-				theme: StashTheme,
-				keybindings: unknown,
-				done: (result: T) => void,
-			) => unknown,
-			options?: { overlay?: boolean; overlayOptions?: unknown },
-		): Promise<T>;
 		readonly theme?: StashTheme;
 	};
 	sessionManager?: {
