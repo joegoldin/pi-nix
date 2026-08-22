@@ -279,6 +279,8 @@ two-entry default with the toolchain pi shells out to, a dbus talk permission on
 `modules/ai/claude.nix` allows Claude, private keys deliberately excluded. It
 arrives as `mkDefault`, so your own `jail.permissions` still wins and the
 option's `defaultText` still shows upstream's. `docs/jail.md` is the real list.
+On NixOS-WSL the module also detects WSL and exposes its generated
+`/mnt/wsl/resolv.conf`, retaining upstream's DNS fix inside the jail.
 
 Turning `statusline.enable` on exports two variables through `environment`, so
 `environment` has to be in its attribute-set form. The shell-environment-file

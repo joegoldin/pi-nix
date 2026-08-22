@@ -22,7 +22,7 @@ let
 
   actual = pkgs.lib.mapAttrs (_name: path: builtins.hashFile "sha256" path) protected;
 
-  # Recorded from upstream/master @ 273a552, plus the fork's own edits to four
+  # Recorded from upstream/master @ 07b2c28, plus the fork's own edits to four
   # of them. Each is a deliberate divergence with its reason written where it
   # lives:
   #
@@ -36,8 +36,8 @@ let
   #   agent-directory bind, and that bind is emitted here.
   expected = {
     "VERSION.json" = "267495f03e5b7812fe05260a1dd4bd3499b5fac84324aeaae12e6521c8524bd8";
-    "coding-agent/bun.nix" = "a73880ce08e0aceff1eb52f43b1235965c5b0ce8527d7d37cbea9b80ad104d2c";
-    "coding-agent/options.nix" = "77c4c54abf1ec656b266ae8337e5af5ce035a0835a2dc26e549d580890b27dd6";
+    "coding-agent/bun.nix" = "1f6da2d5b036f02f6e9ee0eb8b7725c7ee187bacb2f8873d5a836f408f4604e1";
+    "coding-agent/options.nix" = "7ba20b8f4c6899e79850e2a44280409ec4c46bc07c95145d4f89c64222329f9d";
     "coding-agent/package-bun.nix" = "a43765637bb0cf75b707e04cec48ea146952a0898aecd9a1df65a9c6cfe658c2";
     "coding-agent/package.nix" = "cf03c7b7cf2bbfe7c12a843106fbeb3a35e654b9198ce1130632f060f9315147";
     "regenerate-models.nix" = "07bfbabf29eff626a34056ac21301b726ac746771d921700b391887f4847f8ab";

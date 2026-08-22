@@ -26,16 +26,25 @@ in
       description = "The pi coding-agent package to install.";
     };
 
+    wsl = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      internal = true;
+    };
+
     jail = {
       enable = lib.mkEnableOption "bubblewrap isolation for pi using jail.nix";
 
       permissions = lib.mkOption {
         type = lib.types.functionTo (lib.types.listOf lib.types.raw);
         default =
-          combinators: with combinators; [
+          combinators:
+          with combinators;
+          [
             network
             mount-cwd
-          ];
+          ]
+          ++ lib.optional cfg.wsl (try-readonly "/mnt/wsl/resolv.conf");
         defaultText =
           lib.literalExpression
             # nix
@@ -43,12 +52,15 @@ in
               combinators: with combinators; [
                 network
                 mount-cwd
-              ]
+              ] ++ lib.optional cfg.wsl (
+                try-readonly "/mnt/wsl/resolv.conf"
+              )
             '';
         description = ''
           Additional permissions passed to jail.nix when wrapping pi. The
           default allows model API access and mounts the runtime working
-          directory read-write.
+          directory read-write. On NixOS-WSL, it also exposes WSL's generated
+          resolver configuration so DNS works inside the jail.
 
           Access to pi's agent configuration directory is always provided
           separately and does not need to be included here. The jail is

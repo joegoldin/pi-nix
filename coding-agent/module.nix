@@ -32,11 +32,12 @@ in
     enable = lib.mkEnableOption "pi agent";
   };
 
-  config = lib.mkIf cfg.enable (
-    lib.mkMerge [
-      {
-        environment.systemPackages = [ cfg.installedPackage ];
-      }
-    ]
-  );
+  config = lib.mkMerge [
+    {
+      programs.pi.coding-agent.wsl = config.wsl.enable or false;
+    }
+    (lib.mkIf cfg.enable {
+      environment.systemPackages = [ cfg.installedPackage ];
+    })
+  ];
 }
