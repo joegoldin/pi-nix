@@ -21,8 +21,8 @@
     url = "https://registry.npmjs.org/turndown/-/turndown-7.2.4.tgz";
     hash = "sha512-I8yFsfRzmzK0WV1pNNOA4A7y4RDfFxPRxb3t+e3ui14qSGOxGtiSP6GjeX+Y6CHb7HYaFj7ECUD7VE5kQMZWGQ==";
   };
-  "typebox@1.3.15" = fetchurl {
-    url = "https://registry.npmjs.org/typebox/-/typebox-1.3.15.tgz";
-    hash = "sha512-gOKAjLqUr+bFGbO5vxCEO5+nHh2wO+swzSIkiJJC0kJ4oLN6f65SrZn6tJYhsYO+qdnpf2NmlQwgsayYoi1NkQ==";
+  "typebox@1.3.16" = fetchurl {
+    url = "https://registry.npmjs.org/typebox/-/typebox-1.3.16.tgz";
+    hash = "sha512-Jac8dgnin+g2p1w1v9sk92Wvp49ZqsmSgNhrXDK+RqrovsjiORMZvYZ8t8id9b9XQp6LMfaAwnIRSHGsM+3FMw==";
   };
 }

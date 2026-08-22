@@ -11,7 +11,6 @@ let
 
   original = lines [
     "        if (previous) {"
-    "          this.clearAskEdgesForSession(id);"
     "          this.clearMessageReceiptRoutesForSession(id);"
     "          previous.socket.end();"
     "        }"

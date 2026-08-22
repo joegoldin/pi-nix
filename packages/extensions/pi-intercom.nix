@@ -1,4 +1,4 @@
-# pi-intercom 0.10.1: pi's missing ListAgents/SendMessage, over a local Unix
+# pi-intercom: pi's missing ListAgents/SendMessage, over a local Unix
 # domain socket at $PI_CODING_AGENT_DIR/intercom/broker.sock.
 #
 # Zero runtime dependencies. The package declares tsx, but tsx is only reached
