@@ -151,10 +151,12 @@ bubblewrap sandbox:
 programs.pi.coding-agent.jail.enable = true;
 ```
 
-By default, the jail has network access and a writable current directory. Pi's
-`PI_CODING_AGENT_DIR` (defaulting to `~/.pi/agent`) is always mounted
-read-write, even when custom permissions are used. The rest of the real home
-directory and host tools outside the package closure remain inaccessible.
+By default, the jail has network access and a writable current directory. On
+NixOS-WSL, WSL's generated `/mnt/wsl/resolv.conf` is also exposed so DNS works
+inside the jail. Pi's `PI_CODING_AGENT_DIR` (defaulting to `~/.pi/agent`) is
+always mounted read-write, even when custom permissions are used. The rest of
+the real home directory and host tools outside the package closure remain
+inaccessible.
 
 Additional permissions can be configured when more tools or files are needed.
 The agent configuration directory should not be included here:
@@ -181,7 +183,8 @@ programs.pi.coding-agent.jail.permissions = combinators: with combinators; [
 build tools, and other commands. Each package's `bin` directory is added to
 `PATH`, and the package's runtime closure is made available inside the jail.
 Because assigning `jail.permissions` replaces its default value, retain
-`network` and `mount-cwd` when those capabilities are wanted.
+`network` and `mount-cwd` when those capabilities are wanted. On NixOS-WSL,
+also retain `(try-readonly "/mnt/wsl/resolv.conf")` if DNS is needed.
 
 ### Selecting the Bun package
 

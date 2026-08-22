@@ -2,6 +2,7 @@
 {
   config,
   lib,
+  osConfig,
   ...
 }:
 
@@ -24,11 +25,12 @@ in
     enable = lib.mkEnableOption "pi agent";
   };
 
-  config = lib.mkIf cfg.enable (
-    lib.mkMerge [
-      {
-        home.packages = [ cfg.finalPackage ];
-      }
-    ]
-  );
+  config = lib.mkMerge [
+    {
+      programs.pi.coding-agent.wsl = osConfig.wsl.enable or false;
+    }
+    (lib.mkIf cfg.enable {
+      home.packages = [ cfg.finalPackage ];
+    })
+  ];
 }
