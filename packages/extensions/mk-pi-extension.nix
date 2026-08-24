@@ -143,12 +143,25 @@ let
 
         # Matches the flags the update app generated the lockfile with. A
         # divergence here makes --frozen-lockfile reject the vendored lock.
+        # --backend is not part of that contract (update-extensions.nix
+        # resolves with --lockfile-only, which never touches node_modules),
+        # so bun2nix.hook's own Darwin default is free to apply here too.
+        #
+        # Setting bunInstallFlags at all opts out of that default (hook.sh
+        # only falls back to bunDefaultInstallFlagsArray when neither
+        # bunInstallFlags nor bunInstallFlagsArray is set), which otherwise
+        # silently drops it back to bun's own platform default. That default
+        # cannot open a nested node_modules directory inside the build
+        # sandbox on Darwin — reproduced on pi-pretty, whose @shikijs/cli
+        # dependency vendors its own shiki, forcing bun to hoist one version
+        # and nest the other in node_modules/@shikijs/cli/node_modules/shiki.
         bunInstallFlags = [
           "--linker=hoisted"
           "--frozen-lockfile"
           "--omit=dev"
           "--omit=peer"
-        ];
+        ]
+        ++ lib.optionals stdenv.hostPlatform.isDarwin [ "--backend=symlink" ];
 
         # These packages' install scripts are build tooling (napi, node-gyp) we
         # never want to run; the prebuilt platform packages are already in the
