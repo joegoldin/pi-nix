@@ -70,6 +70,7 @@
           coding-agent-bun = bunPkgs.callPackage ./coding-agent/package-bun.nix {
             inherit src version;
           };
+          coding-agent-source = src;
 
           docs-md =
             let
@@ -127,7 +128,7 @@
           };
         in
         {
-          inherit (coding-agent) mkCodingAgent;
+          inherit (coding-agent) mkAgentContainerBundle mkCodingAgent;
 
           # Per-system because the builders need pkgs. agent-skills imports
           # `${pi-nix}/lib` directly rather than going through this, but

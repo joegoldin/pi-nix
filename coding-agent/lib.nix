@@ -5,6 +5,10 @@
 }:
 
 {
+  mkAgentContainerBundle = import ./agent-container-bundle.nix {
+    inherit lib self;
+  };
+
   mkCodingAgent =
     {
       pkgs,
@@ -12,17 +16,18 @@
       extraSpecialArgs ? { },
     }:
     let
+      specialArgs = {
+        inherit self pkgs;
+      }
+      // extraSpecialArgs;
+      evaluatedModules = [
+        (import ./options.nix { inherit self jail-nix; })
+        (import ./extra-options.nix { inherit self; })
+      ]
+      ++ modules;
       evaluated = lib.evalModules {
-        specialArgs = {
-          inherit self pkgs;
-        }
-        // extraSpecialArgs;
-
-        modules = [
-          (import ./options.nix { inherit self jail-nix; })
-          (import ./extra-options.nix { inherit self; })
-        ]
-        ++ modules;
+        inherit specialArgs;
+        modules = evaluatedModules;
       };
 
       inherit (evaluated.config.pi.coding-agent) finalPackage finalRules finalArgs;
@@ -33,5 +38,13 @@
       package = finalPackage;
       rules = finalRules;
       args = finalArgs;
+      moduleProvenance = {
+        modules = evaluatedModules;
+        inherit specialArgs;
+        config = evaluated.config // {
+          inherit (evaluated) _module;
+        };
+        inherit (evaluated) options;
+      };
     };
 }

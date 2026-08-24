@@ -16,10 +16,35 @@ sandbox wiring, and `lib.mkCodingAgent`. This fork adds, all additively:
 | `extensionPackages` | Enable a pinned extension by listing its derivation; entrypoints, skills, prompts, and settings follow from its `passthru`. |
 | `statusline` | Wires the [agent-statusline](https://github.com/joegoldin/agent-statusline) pi extension and its config JSON. |
 | `notifications` | Option surface for the first-party `pi-notify` extension. |
+| `lib.mkAgentContainerBundle` | Builds the immutable, secret-free Pi package/config/manifest contract consumed by agent-container. |
 | `lib/` | `mkPiSkill` / `mkPiPromptTemplate` / `mkPiPlugin`, the builders `agent-skills` imports as `piLib`. |
 | `nix run .#update` | Bumps `VERSION.json` *and* every extension pin in `extensions.json`. |
 
 See [docs/REBASING.md](docs/REBASING.md) before pulling upstream.
+
+## Agent-container bundle
+
+`lib.mkAgentContainerBundle { pkgs, extension, modules, extraSpecialArgs; }`
+returns the raw Bun Pi package, its exact argument list, immutable configuration
+tree, resource inventory, safe environment, provider policy, pinned Pi source,
+realized runtime bundle, and compatibility manifest. The runtime bundle includes
+canonical `args.json`, `environment.json`, `policy.json`, and the exact runtime
+input inventory so its NAR digest attests the invocation contract. The
+caller-owned extension must expose a canonical relative entrypoint as
+`passthru.agentContainer.entrypoint`; the manifest build verifies that
+`package.json` declares exactly that one Pi extension and that the file exists.
+
+The bundle always enables pi-intercom with `inboundTrigger = "replies"`. Its
+manifest hashes the realized, patched intercom protocol authorities rather than
+using evaluation-time or hard-coded hashes. Provider credentials, credential
+files or commands, secret-bearing model settings, arbitrary environment
+variables, and mutable resource paths are rejected during evaluation. The only
+bundle environment entry is the non-secret intercom request timeout.
+
+OpenAI Codex and OpenRouter remain Pi built-ins. The policy records the pinned
+Pi source files that are authoritative for Codex instead of copying routes from
+machine-local configuration. `models.json` adds only Standard Compute's public
+provider/model schema and contains no API key field.
 
 ## Quick start
 

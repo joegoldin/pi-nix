@@ -17,51 +17,71 @@
   pin,
   securityPatch,
 }:
-mkPiExtension {
-  pname = "pi-intercom";
-  inherit (pin)
-    version
-    url
-    hash
-    bundled
-    entrypoints
-    skills
-    prompts
-    ;
+let
+  package = mkPiExtension {
+    pname = "pi-intercom";
+    inherit (pin)
+      version
+      url
+      hash
+      bundled
+      entrypoints
+      skills
+      prompts
+      ;
 
-  patchPhaseExtra = securityPatch;
+    patchPhaseExtra = securityPatch;
 
-  # NOT settings.json. pi-intercom reads
-  # $PI_CODING_AGENT_DIR/intercom/config.json and never pi's settings. These are
-  # the package's own defaults with the security-relevant ones corrected; the
-  # `messaging` option overrides brokerCommand, inboundTrigger and confirmSend
-  # on top.
-  #
-  # stableId is deliberately absent. index.ts resolves the session ID as
-  # PI_INTERCOM_STABLE_ID ?? config.stableId ?? piSessionId, so one value in a
-  # shared config.json would give every session on this machine the same ID and
-  # each new session would evict the last.
-  configFiles."intercom/config.json" = {
-    brokerArgs = [ ];
-    enabled = true;
-    # Security default, addendum §17.9 Risk 1. Upstream ships "always", under
-    # which any process that can open the socket starts a model turn in any
-    # session with text that arrives as a *user* message. "replies" lets only a
-    # reply to an ask this session originated auto-start a turn; unsolicited
-    # sends are still delivered and rendered, they just do not drive the agent.
-    inboundTrigger = "replies";
-    confirmSend = false;
-    replyHint = true;
+    # NOT settings.json. pi-intercom reads
+    # $PI_CODING_AGENT_DIR/intercom/config.json and never pi's settings. These are
+    # the package's own defaults with the security-relevant ones corrected; the
+    # `messaging` option overrides brokerCommand, inboundTrigger and confirmSend
+    # on top.
+    #
+    # stableId is deliberately absent. index.ts resolves the session ID as
+    # PI_INTERCOM_STABLE_ID ?? config.stableId ?? piSessionId, so one value in a
+    # shared config.json would give every session on this machine the same ID and
+    # each new session would evict the last.
+    configFiles."intercom/config.json" = {
+      brokerArgs = [ ];
+      enabled = true;
+      # Security default, addendum §17.9 Risk 1. Upstream ships "always", under
+      # which any process that can open the socket starts a model turn in any
+      # session with text that arrives as a *user* message. "replies" lets only a
+      # reply to an ask this session originated auto-start a turn; unsolicited
+      # sends are still delivered and rendered, they just do not drive the agent.
+      inboundTrigger = "replies";
+      confirmSend = false;
+      replyHint = true;
+    };
+
+    # Trust policy for peer-authored text. registerTool's promptSnippet covers how
+    # to call the tool; it cannot express what authority the *received* text
+    # carries, which is why this uses design §8's escape hatch. Task 8 owns it.
+    promptFragment = builtins.readFile ../../prompt/untrusted-peer-input.md;
+
+    meta = {
+      description = "Direct 1:1 messaging between pi sessions on the same machine";
+      homepage = "https://github.com/nicobailon/pi-intercom";
+      license = lib.licenses.mit;
+    };
   };
-
-  # Trust policy for peer-authored text. registerTool's promptSnippet covers how
-  # to call the tool; it cannot express what authority the *received* text
-  # carries, which is why this uses design §8's escape hatch. Task 8 owns it.
-  promptFragment = builtins.readFile ../../prompt/untrusted-peer-input.md;
-
-  meta = {
-    description = "Direct 1:1 messaging between pi sessions on the same machine";
-    homepage = "https://github.com/nicobailon/pi-intercom";
-    license = lib.licenses.mit;
+in
+package
+// {
+  passthru = package.passthru // {
+    agentContainer = {
+      entrypoint = "index.ts";
+      brokerEntrypoint = "broker/broker.ts";
+      protocolSources = {
+        packageJson = "package.json";
+        types = "types.ts";
+        paths = "broker/paths.ts";
+        framing = "broker/framing.ts";
+        protocol = "broker/protocol.ts";
+        client = "broker/client.ts";
+        broker = "broker/broker.ts";
+      };
+    };
   };
 }
