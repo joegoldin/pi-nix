@@ -334,11 +334,9 @@ let
   # patches it to consult this variable first. Gated on chainActive for the
   # same reason the config file is -- with no link registered there is no
   # verdict to cap, so the variable would describe a checkpoint that never runs.
-  permissionSystemEnv =
-    lib.optionalAttrs (chainActive && chain.delegationExcludedSurfaces != null)
-      {
-        PI_PERMISSION_DELEGATION_EXCLUDED_SURFACES.value = lib.concatStringsSep "," chain.delegationExcludedSurfaces;
-      };
+  permissionSystemEnv = lib.optionalAttrs (chainActive && chain.delegationExcludedSurfaces != null) {
+    PI_PERMISSION_DELEGATION_EXCLUDED_SURFACES.value = lib.concatStringsSep "," chain.delegationExcludedSurfaces;
+  };
 
   # pi-subagents resolves the permission system by package name so it can hand
   # it to the child, and tries two locations in order: `npm/node_modules/<name>`
@@ -789,8 +787,18 @@ let
     '';
   };
 
+  # Outside the jail the channel program does not exist, so the extension is
+  # pointed straight at the command; it already writes the text to stdin,
+  # which is what wl-copy and pbcopy read. A null command keeps the shim, whose
+  # exec of a missing channel fails the copy the same way it does in the jail.
+  extrasClipboardOverride =
+    if cfg.jail.enable || extras.clipboardCommand == null then
+      lib.getExe extrasClipboardShim
+    else
+      extras.clipboardCommand;
+
   extrasEnv = lib.optionalAttrs extras.enable {
-    PI_EXTRAS_CLIPBOARD.value = "${lib.getExe extrasClipboardShim}";
+    PI_EXTRAS_CLIPBOARD.value = extrasClipboardOverride;
     PI_EXTRAS_GIT_EDITOR.value = extras.gitEditorCommand;
   };
 
@@ -1681,9 +1689,11 @@ in
             "${pkgs.wl-clipboard}/bin/wl-copy";
         defaultText = lib.literalExpression ''"''${pkgs.wl-clipboard}/bin/wl-copy", or pbcopy on darwin'';
         description = ''
-          The command that receives copied text, run OUTSIDE the jail.
+          The command that receives copied text. Without the jail the
+          extension pipes the text into it directly.
 
-          The text crosses the boundary through jail.nix's
+          Under {option}`jail.enable` it runs OUTSIDE the jail, and the
+          text crosses the boundary through jail.nix's
           `jail-to-host-channel`: one named program inside the jail whose
           argument is piped to this command outside it. No compositor socket is
           bound and no `WAYLAND_DISPLAY` is forwarded.

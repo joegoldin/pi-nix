@@ -526,6 +526,29 @@ assert
     perms = (evalPi { pi.coding-agent.extras.enable = true; }).jail.permissions fakeCombinators;
   in
   !(lib.any (p: lib.hasInfix "wayland" p) perms);
+# Without the jail there is no channel to reach, so the extension is handed
+# the clipboard command itself. With it, the shim that exec's the channel.
+assert
+  let
+    unjailed = evalPi {
+      pi.coding-agent.extras = {
+        enable = true;
+        clipboardCommand = "/fake/wl-copy";
+      };
+    };
+  in
+  (envValue unjailed "PI_EXTRAS_CLIPBOARD").value == "/fake/wl-copy";
+assert
+  let
+    jailed = evalPi {
+      pi.coding-agent.jail.enable = true;
+      pi.coding-agent.extras = {
+        enable = true;
+        clipboardCommand = "/fake/wl-copy";
+      };
+    };
+  in
+  lib.hasInfix "pi-extras-copy" (envValue jailed "PI_EXTRAS_CLIPBOARD").value;
 
 # The foreign-skills extension is off by default and contributes its entrypoint
 # when enabled. `.claude/skills` is not one of pi's skill roots and settings.json
@@ -688,13 +711,11 @@ assert voiceUnpackaged.success == false;
 # upstream reads the set from a module-level literal and the build in this repo
 # patches it to consult one. Comma-separated, in the order given.
 assert
-  envValue autoChainNarrowedEnvelope "PI_PERMISSION_DELEGATION_EXCLUDED_SURFACES"
-  == {
+  envValue autoChainNarrowedEnvelope "PI_PERMISSION_DELEGATION_EXCLUDED_SURFACES" == {
     value = "path";
   };
 # Unset by default: the package keeps its own set.
-assert
-  envValue autoWithPermissionSystem "PI_PERMISSION_DELEGATION_EXCLUDED_SURFACES" == null;
+assert envValue autoWithPermissionSystem "PI_PERMISSION_DELEGATION_EXCLUDED_SURFACES" == null;
 # And unset when no link is registered, however the option is written.
 assert envValue autoChainNarrowedNoLink "PI_PERMISSION_DELEGATION_EXCLUDED_SURFACES" == null;
 pkgs.runCommand "pi-nix-options-tests" { } ''
