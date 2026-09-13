@@ -27,6 +27,7 @@ pkgs.writeShellApplication {
       cp package-lock.json "$tmpdir/package-lock.json"
 
       pushd "$tmpdir" >/dev/null
+      bash ${./patches/vitest-ghsa-82fw-gwwq-j7x9.sh}
       npm ci --ignore-scripts
       npm run generate-models --workspace=packages/ai
       popd >/dev/null
