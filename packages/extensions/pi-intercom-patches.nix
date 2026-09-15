@@ -11,7 +11,7 @@ let
 
   original = lines [
     "        if (previous) {"
-    "          this.clearMessageReceiptRoutesForSession(id);"
+    "          this.clearMessageReceiptRoutesForSession(key);"
     "          previous.socket.end();"
     "        }"
   ];
@@ -37,8 +37,8 @@ in
   #
   # Refusing a LIVE collision is the minimal fix. Reconnect-after-disconnect is
   # untouched: a closed session moves to `disconnectedSessions` and is no longer
-  # matched by `this.sessions.get(id)`, so restart-stable addressing via
-  # stableId keeps working.
+  # matched by `this.sessions.get(key)`, so restart-stable addressing via
+  # stableId keeps working within each scope.
   securityPatch = ''
     substituteInPlace broker/broker.ts --replace-fail ${lib.escapeShellArg original} ${lib.escapeShellArg refuse}
   '';

@@ -1,8 +1,8 @@
 {
   "pi-mcp-adapter": {
-    "version": "2.27.0",
-    "url": "https://registry.npmjs.org/pi-mcp-adapter/-/pi-mcp-adapter-2.27.0.tgz",
-    "hash": "sha512-IM9dfGhou5Q5AJqwkm1kW1+WXyMsvL53GEO4JVYukzvTxNPHn2b+Zi49+JAnOhlaOpEq5vEodUSJXmpghik+lw==",
+    "version": "2.34.0",
+    "url": "https://registry.npmjs.org/pi-mcp-adapter/-/pi-mcp-adapter-2.34.0.tgz",
+    "hash": "sha512-3YzoYQlxwKQjk4co0MMnRrhTNWzw5XsoCKCuhfZkIa9XSRBbrOLbi32yu7KOn6Unyk/K0rTof1lX/7cSLobudg==",
     "bundled": false,
     "entrypoints": [],
     "skills": [
@@ -11,9 +11,9 @@
     "prompts": []
   },
   "pi-subagents": {
-    "version": "0.54.0",
-    "url": "https://registry.npmjs.org/pi-subagents/-/pi-subagents-0.54.0.tgz",
-    "hash": "sha512-U0RYNQQjtjOKtsMuZXXX+tOxbz+FNdMim0c4HHgGzXgplQqQhTiXzd1EVYdPY98cWfowHGHvf2kQxMLwKcCtww==",
+    "version": "0.68.0",
+    "url": "https://registry.npmjs.org/pi-subagents/-/pi-subagents-0.68.0.tgz",
+    "hash": "sha512-sfUKoSIegyCwnD0Y9dDE2sPm/kDmx3P85CQqRpuShv77iSWJXeEc3mDQUK1rZNbhHPnIdQSeFcK+G66hczQSgg==",
     "bundled": false,
     "entrypoints": [],
     "skills": [
@@ -24,81 +24,81 @@
     ]
   },
   "pi-background-tasks": {
-    "version": "2.4.2",
-    "url": "https://registry.npmjs.org/pi-background-tasks/-/pi-background-tasks-2.4.2.tgz",
-    "hash": "sha512-KDH2yv5yKnc2slUNMSsysVZleriuv8tbhe5L+AeplVAfijQsECN5YAWOz5TDbStCXLdJC15GaUQ1P87BXGk5Hg==",
+    "version": "2.5.0",
+    "url": "https://registry.npmjs.org/pi-background-tasks/-/pi-background-tasks-2.5.0.tgz",
+    "hash": "sha512-YrOedXIYZYgLctffizuu2V5bI8u87Ex4ChFipXpVazsY75J9X98/9K7pO5Y7egB+6fgkE9KQPDxdDkdkLenhng==",
     "bundled": false,
     "entrypoints": [],
     "skills": [],
     "prompts": []
   },
   "@juicesharp/rpiv-ask-user-question": {
-    "version": "2.7.0",
-    "url": "https://registry.npmjs.org/@juicesharp/rpiv-ask-user-question/-/rpiv-ask-user-question-2.7.0.tgz",
-    "hash": "sha512-5amOEZ8RfSZJUTahYSajsulHGGKHaYwEQAd+J/f7gNPq7MkzgxOUCZzvwM9V8hTmFISHWNQFq1pv0ZIky8aTNw==",
+    "version": "2.10.1",
+    "url": "https://registry.npmjs.org/@juicesharp/rpiv-ask-user-question/-/rpiv-ask-user-question-2.10.1.tgz",
+    "hash": "sha512-7DBrnso9jv99OaK9cLfBIPv+qK0n4OrQ8I8gfi1tnYZcDLG8Kj/acuC7MLFlzcvc4F1PtAak342emSR9W/O5GQ==",
     "bundled": false,
     "entrypoints": [],
     "skills": [],
     "prompts": []
   },
   "@narumitw/pi-goal": {
-    "version": "0.52.3",
-    "url": "https://registry.npmjs.org/@narumitw/pi-goal/-/pi-goal-0.52.3.tgz",
-    "hash": "sha512-rXI1qUJf7YQmWfpVupSmFId2mNZ23c7mowBxzmp1FDaRVCeTnM8jUez09jVXHw/PH3B4ss4t1ufTLracX/cS4A==",
+    "version": "0.54.5",
+    "url": "https://registry.npmjs.org/@narumitw/pi-goal/-/pi-goal-0.54.5.tgz",
+    "hash": "sha512-9ydwEB4EMnXvZNPg1MWoGGNSu1USAGH5W+2VtsGT5gC7WcHPsZuPPp0+CQjxSu8AUQU3Kwaca3/RZ5JI+IjdEg==",
     "bundled": false,
     "entrypoints": [],
     "skills": [],
     "prompts": []
   },
   "@juicesharp/rpiv-todo": {
-    "version": "2.7.0",
-    "url": "https://registry.npmjs.org/@juicesharp/rpiv-todo/-/rpiv-todo-2.7.0.tgz",
-    "hash": "sha512-3jy8WIUY2q2TYLMPUwuSTugBHwlkDLccAqRymU700vZKXeJZNxg99B+pcT2ochIF31QsReNY8zpDKG+kxh5yNQ==",
+    "version": "2.10.1",
+    "url": "https://registry.npmjs.org/@juicesharp/rpiv-todo/-/rpiv-todo-2.10.1.tgz",
+    "hash": "sha512-3VvPztpStw9bp99Iq2z6IsbHL7fGpOY0ugTTE7fzSRipgQY3LkdazuBK6TnKr4jaqungHNbAoUF7e/6gsTz8eg==",
     "bundled": false,
     "entrypoints": [],
     "skills": [],
     "prompts": []
   },
   "@gotgenes/pi-permission-system": {
-    "version": "27.0.0",
-    "url": "https://registry.npmjs.org/@gotgenes/pi-permission-system/-/pi-permission-system-27.0.0.tgz",
-    "hash": "sha512-5WpP2z0Ohxipi2Myfg4ArchXgtMX15HbJl7b2YMK3iB2sRIm57hDXt86e0zsVX+sGOVrDLCkKtLoqMkrPS1rwQ==",
+    "version": "32.0.2",
+    "url": "https://registry.npmjs.org/@gotgenes/pi-permission-system/-/pi-permission-system-32.0.2.tgz",
+    "hash": "sha512-SwLFoDdsqgYC6Whs+Xkb67BspSGpxR+Z8vhR68i+jj6x+MQe6fbHlxZtYLCBaQQuVpJ2aPoiQd16zNeLzkzjWg==",
     "bundled": false,
     "entrypoints": [],
     "skills": [],
     "prompts": []
   },
   "@narumitw/pi-btw": {
-    "version": "0.55.1",
-    "url": "https://registry.npmjs.org/@narumitw/pi-btw/-/pi-btw-0.55.1.tgz",
-    "hash": "sha512-7xIr1f+q2uhvxTbEVzLKzbwt7x6NOPCWM8OQWo8GceqCOruGwjMLfNmznEbobXWAXQBn1IlTVVhewSDFYmiOYw==",
+    "version": "0.58.1",
+    "url": "https://registry.npmjs.org/@narumitw/pi-btw/-/pi-btw-0.58.1.tgz",
+    "hash": "sha512-hz8z759/VSLbzghJL4hFu5lKeoeWdvmMwixWhPWXBWvIg4C6ndU9mqYCkuuogKGUlKg5tQKe/GxTqdsSbrKtmw==",
     "bundled": false,
     "entrypoints": [],
     "skills": [],
     "prompts": []
   },
   "pi-cache-optimizer": {
-    "version": "2.8.5",
-    "url": "https://registry.npmjs.org/pi-cache-optimizer/-/pi-cache-optimizer-2.8.5.tgz",
-    "hash": "sha512-QUuao6haJDuC78ZjZAj66AsPdHppmLV6enDuUv1S4pJaFV0HCvBl8Wd+A/ov1K5wmRaGEKzDoMrpp2+3gEnM+A==",
+    "version": "2.8.10",
+    "url": "https://registry.npmjs.org/pi-cache-optimizer/-/pi-cache-optimizer-2.8.10.tgz",
+    "hash": "sha512-u+Da+NDQROJuP0T1KTGLkrFRaPF0pcUCuI6KA5G2gGO/a3Z+IfoNxDF9+EmVAQ1vcu/kuQCBzvqb5QekhwAAzg==",
     "bundled": true,
     "entrypoints": [],
     "skills": [],
     "prompts": []
   },
   "@heyhuynhgiabuu/pi-pretty": {
-    "version": "0.6.23",
-    "url": "https://registry.npmjs.org/@heyhuynhgiabuu/pi-pretty/-/pi-pretty-0.6.23.tgz",
-    "hash": "sha512-h6H/f6O/+mPQRLIZaTGPO2ZXhNFj/5XIcveE4qC8/y2FhAsbePgCUWt5Qdp+g5lH0rlUIzn/4xvmVI2hgNT2eg==",
+    "version": "0.6.29",
+    "url": "https://registry.npmjs.org/@heyhuynhgiabuu/pi-pretty/-/pi-pretty-0.6.29.tgz",
+    "hash": "sha512-69m1WobLe46srVnUjAlOnVupyOsc6Z6QIEpL+8nZDSl1w2xbY9JK1+WtlKz69DTz3UEVs0TSd0nvu97nRG1MEA==",
     "bundled": false,
     "entrypoints": [],
     "skills": [],
     "prompts": []
   },
   "pi-intercom": {
-    "version": "0.11.0",
-    "url": "https://registry.npmjs.org/pi-intercom/-/pi-intercom-0.11.0.tgz",
-    "hash": "sha512-XejYBRsTQoULQC8CrPUp8uA2EE88CzujDiWrcpWotk05GJ0YQ4Q9+rOUpPv1J64x0UMdRH+8/htAYiVy/T+CEA==",
+    "version": "0.13.0",
+    "url": "https://registry.npmjs.org/pi-intercom/-/pi-intercom-0.13.0.tgz",
+    "hash": "sha512-+QjKJRAEhrgQZj4+M9OW/8unRLvCzeCp0K66lZmbS5/me0fsClXRtANBgM6mY+EoX+Fcd+qBE8dTThp8+ND//g==",
     "bundled": true,
     "entrypoints": [],
     "skills": [

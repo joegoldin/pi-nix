@@ -13,12 +13,12 @@
   ...
 }:
 {
-  "@juicesharp/rpiv-config@2.7.0" = fetchurl {
-    url = "https://registry.npmjs.org/@juicesharp/rpiv-config/-/rpiv-config-2.7.0.tgz";
-    hash = "sha512-S6+O9nub/n6WoTrs2egEai2MpymbeD9+Ut+aCgnaDu3OYA6nbAz4ZiFHLz9HVj7dALj8RuUaj5xtnX50J8MPRQ==";
+  "@juicesharp/rpiv-config@2.10.1" = fetchurl {
+    url = "https://registry.npmjs.org/@juicesharp/rpiv-config/-/rpiv-config-2.10.1.tgz";
+    hash = "sha512-iqW1Vy/2alnzGDVldyOgDfqOE+yy7Ppb61AG9LKWBGdf1RmHsmLBF4GCESL/PmxrtsinskgEoX6nmN5EmVOnbA==";
   };
-  "typebox@1.3.16" = fetchurl {
-    url = "https://registry.npmjs.org/typebox/-/typebox-1.3.16.tgz";
-    hash = "sha512-Jac8dgnin+g2p1w1v9sk92Wvp49ZqsmSgNhrXDK+RqrovsjiORMZvYZ8t8id9b9XQp6LMfaAwnIRSHGsM+3FMw==";
+  "typebox@1.3.31" = fetchurl {
+    url = "https://registry.npmjs.org/typebox/-/typebox-1.3.31.tgz";
+    hash = "sha512-7++UxOb7lAJbJ8pbhN2Yl/ljadShbHZ6GQwst/YEUAlVh1nP8LqYpC2t+R1VysunFpmDffDzhZRsvGchx0PqUA==";
   };
 }
