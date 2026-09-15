@@ -104,6 +104,12 @@ export function isKeyRelease(data: string): boolean {
 	return /:3[u~ABCDHF]/.test(data);
 }
 
+/** Kitty auto-repeat is not a new key press for dismissing a modal panel. */
+export function isKeyRepeat(data: string): boolean {
+	if (data.includes("\x1b[200~")) return false;
+	return /:2[u~ABCDHF]/.test(data);
+}
+
 /** ctrl+letter, either as the C0 control character or as a CSI-u sequence. */
 export function matchesCtrl(data: string, letter: string): boolean {
 	const codepoint = letter.charCodeAt(0);

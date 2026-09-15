@@ -17,6 +17,7 @@ in
   options = import ./options-test.nix args;
   additive = import ./additive-test.nix args;
   extension-contract = import ./extension-contract-test.nix args;
+  pi-automode-permission-chain = import ./pi-automode-permission-chain-test.nix args;
   pi-intercom-hardening = import ./pi-intercom-hardening-test.nix args;
   pi-intercom-broker-tests = import ./pi-intercom-broker-tests.nix args;
   pi-intercom-smoke = import ./pi-intercom-smoke-test.nix args;

@@ -1,0 +1,94 @@
+--- a/extensions/auto-mode/permission-chain.ts
++++ b/extensions/auto-mode/permission-chain.ts
+@@ -10,2 +10,2 @@
+- * The permission system publishes a way out. It puts a typed service on
+- * `Symbol.for("@gotgenes/pi-permission-system:service")` with
++ * The permission system publishes a way out. It puts a typed service in a
++ * session-keyed process-global map with
+@@ -61 +61 @@
+-/** The slot `@gotgenes/pi-permission-system` publishes its service on. */
++/** Legacy service slot, before the session-keyed registry. */
+@@ -66 +66,5 @@
+-/** Emitted at that package's `session_start`, after the service is published. */
++export const SESSION_SERVICES_KEY = Symbol.for(
++  "@gotgenes/pi-permission-system:session-services",
++);
++
++/** Emitted after publication with the owning session's id. */
+@@ -109,0 +114 @@
++  sessionId?: string,
+@@ -111,3 +116,6 @@
+-  const slot = (global as unknown as Record<symbol, unknown>)[
+-    PERMISSION_SERVICE_KEY
+-  ];
++  const store = global as unknown as Record<symbol, unknown>;
++  // A keyed registry must never fall back to another session's legacy service.
++  const services = store[SESSION_SERVICES_KEY];
++  const slot = services instanceof Map
++    ? sessionId === undefined ? undefined : services.get(sessionId)
++    : store[PERMISSION_SERVICE_KEY];
+@@ -325,0 +334,3 @@
++    let registeredService: PermissionsServiceLike | undefined;
++    let unregister: (() => void) | undefined;
++    let sessionId: string | undefined;
+@@ -479 +490,6 @@
+-      const service = getPermissionsService(globalObject);
++      const service = getPermissionsService(globalObject, sessionId);
++      if (service === registeredService) return registered;
++      unregister?.();
++      unregister = undefined;
++      registeredService = undefined;
++      registered = false;
+@@ -482 +498,2 @@
+-        service.registerAuthorizer(AUTHORIZER_NAME, authorize);
++        unregister = service.registerAuthorizer(AUTHORIZER_NAME, authorize);
++        registeredService = service;
+@@ -485,4 +502 @@
+-        // Duplicate registration throws by contract. Leave the latch alone: a
+-        // second `permissions:ready` after a successful registration is the
+-        // common cause, and dropping back to the standalone gate there would
+-        // classify every action twice.
++        // A failed registration leaves the standalone gate active.
+@@ -496 +510,4 @@
+-    pi.events?.on(PERMISSIONS_READY_CHANNEL, () => {
++    pi.events?.on(PERMISSIONS_READY_CHANNEL, (payload: unknown) => {
++      const announced = (payload as { sessionId?: unknown } | undefined)?.sessionId;
++      // session_start identifies our node; ready events may belong to a child.
++      if (typeof announced === "string" && announced !== sessionId) return;
+@@ -502,0 +520 @@
++      sessionId = ctx.sessionManager.getSessionId() ?? undefined;
+@@ -505 +523,2 @@
+-      if (getPermissionsService(globalObject) === undefined) return;
++      register();
++      if (getPermissionsService(globalObject, sessionId) === undefined) return;
+@@ -512 +531,6 @@
+-      if (activation.active || !ctx.hasUI) return;
++      if (!ctx.hasUI) return;
++      if (!registered) {
++        ctx.ui.notify("pi-automode could not register with the permission system; its asks will require manual approval.", "warning");
++        return;
++      }
++      if (activation.active) return;
+@@ -523,0 +548,7 @@
++      const currentSessionId = ctx.sessionManager.getSessionId() ?? undefined;
++      if (sessionId !== currentSessionId) {
++        sessionId = currentSessionId;
++        seen.clear();
++        config = undefined;
++      }
++      register();
+@@ -528 +559 @@
+-      if (!registered || getPermissionsService(globalObject) === undefined) {
++      if (!registered) {
+@@ -538,0 +570,11 @@
++    });
++
++    pi.on("session_shutdown", () => {
++      unregister?.();
++      unregister = undefined;
++      registeredService = undefined;
++      registered = false;
++      sessionId = undefined;
++      lastCtx = undefined;
++      seen.clear();
++      config = undefined;

@@ -530,6 +530,19 @@ describe("ctrl+c and the stash list", () => {
 });
 
 describe("ctrl+? and the shortcuts panel", () => {
+	for (const event of ["\x1b[63;5:3u", "\x1b[63;1:3u", "\x1b[57442;1:3u", "\x1b[63;5:2u", "\x1b[1;1:2A"]) {
+		it(`stays open on release or repeat ${JSON.stringify(event)}`, async () => {
+			const h = harness();
+			const s = session(h);
+			h.press("\x1b[63;5:1u");
+			await s.settled();
+			expect(h.widgets.get("pi-extras:shortcuts")).toBeDefined();
+			expect(h.consumed(event)).toBe(true);
+			expect(h.widgets.get("pi-extras:shortcuts")).toBeDefined();
+			h.press("z");
+			expect(h.widgets.get("pi-extras:shortcuts")).toBeUndefined();
+		});
+	}
 	it("draws pi-extras' own bindings above the editor", async () => {
 		const h = harness();
 		const s = session(h);

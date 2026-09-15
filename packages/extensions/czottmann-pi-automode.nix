@@ -7,8 +7,7 @@
 # `emitToolCall` returns on the first extension that blocks, so two gates on one
 # event means the first one loaded answers every ask and the second is dead
 # code. The permission system publishes a seam for exactly this — a typed
-# service on `Symbol.for("@gotgenes/pi-permission-system:service")` with
-# `registerAuthorizer` — and upstream does not use it.
+# session-keyed service with `registerAuthorizer` — and upstream does not use it.
 #
 # Second: `PI_AUTOMODE_NO_STATUS_SLOT` makes auto mode stop drawing its own
 # status slot and republish the same tally on a `pi-automode:status` channel,
@@ -33,6 +32,7 @@
 {
   lib,
   fetchFromGitHub,
+  patch,
   mkPiExtension,
   pin,
 }:
@@ -64,6 +64,12 @@ mkPiExtension {
   };
 
   inherit (pin) entrypoints skills prompts;
+
+  # The fork predates the permission system's session-keyed service registry.
+  # Keep the compatibility patch here alongside the dependency pin it tracks.
+  patchPhaseExtra = ''
+    ${patch}/bin/patch -p1 < ${./pi-automode-session-service.patch}
+  '';
 
   meta = {
     description = "Claude Code-style auto mode guardrail for pi, with a pi-permission-system chain link";

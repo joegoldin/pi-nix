@@ -13,7 +13,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname } from "node:path";
 
-import { type ChordAction, ChordReader, matchesCtrl } from "./chord.ts";
+import { type ChordAction, ChordReader, isKeyRelease, isKeyRepeat, matchesCtrl } from "./chord.ts";
 import {
 	type ClipboardRunner,
 	type ClipboardTarget,
@@ -117,6 +117,8 @@ export class ExtrasSession {
 				// way pressing a key dismisses a "press any key" prompt. ctrl+c
 				// still passes on after, same as everywhere else.
 				if (this.shortcutsOpen) {
+					// Releasing or holding the opener must not dismiss its own panel.
+					if (isKeyRelease(data) || isKeyRepeat(data)) return { consume: true };
 					this.closeShortcuts();
 					return matchesCtrl(data, "c") ? undefined : { consume: true };
 				}
