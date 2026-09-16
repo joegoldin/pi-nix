@@ -5,7 +5,6 @@
   makeWrapper,
   nodejs,
   typescript,
-  typescript-go,
   pkg-config,
   pixman,
   cairo,
@@ -39,7 +38,6 @@ buildNpmPackage {
     makeWrapper
     pkg-config
     typescript
-    typescript-go
   ];
 
   buildInputs = [

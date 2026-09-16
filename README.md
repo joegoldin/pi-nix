@@ -22,6 +22,28 @@ It provides:
 > [!IMPORTANT]
 > This is not the official Nix flake for pi (there isn't one). See [earendil-works/pi#2310](https://github.com/earendil-works/pi/issues/2310) for context.
 
+## Platforms
+
+The flake supports Linux and macOS on the following architectures:
+
+| System | Nixpkgs source | Support |
+| --- | --- | --- |
+| `aarch64-darwin` | `nixos-unstable` | Current |
+| `aarch64-linux` | `nixos-unstable` | Current |
+| `x86_64-linux` | `nixos-unstable` | Current |
+| `x86_64-darwin` | `nixpkgs-26.05-darwin` | Legacy, through the end of 2026 |
+
+Nixpkgs 26.11 dropped Intel macOS support, while Apple Silicon macOS remains
+supported normally. Intel Macs use Nixpkgs's final supported Darwin branch,
+which receives security fixes through the end of 2026. 
+
+Consumers may make the primary `nixpkgs` input follow their own current
+Nixpkgs. The dedicated Intel-Darwin input should remain pinned:
+
+```nix
+inputs.pi.inputs.nixpkgs.follows = "nixpkgs";
+```
+
 ## Quick start
 
 ```bash
