@@ -54,6 +54,7 @@ buildNpmPackage {
   ];
 
   postPatch = ''
+    bash ${../patches/vitest-ghsa-82fw-gwwq-j7x9.sh}
     cp ${../package-lock.json} package-lock.json
   '';
 
@@ -86,7 +87,7 @@ buildNpmPackage {
 
   buildPhase = ''
     runHook preBuild
-    npm run build --workspace=packages/tui --workspace=packages/telemetry --workspace=packages/ai --workspace=packages/agent --workspace=packages/protocol --workspace=packages/client --workspace=packages/coding-agent
+    npm run build:offline
     runHook postBuild
   '';
 

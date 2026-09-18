@@ -92,13 +92,15 @@ describeAgainstPi("the surfaces pi-extras calls", () => {
 
 describeAgainstPi("the prefix key", () => {
 	// ctrl+s is free in the editor. pi binds it only inside the session picker
-	// and the model selector, neither of which is on screen while the prompt
+	// and the model and thinking selectors, none of which is on screen while the prompt
 	// has focus. A pi that binds it in the editor would take the chord away
 	// silently, so this is the test that notices.
 	it("is bound by pi only in overlay scopes", () => {
 		const source = read("core/keybindings.ts");
 		const owners = [...source.matchAll(/"(app\.[\w.]+)":\s*\{\s*\n\s*defaultKeys: "ctrl\+s"/g)].map((m) => m[1]);
-		expect(owners.sort()).toEqual(["app.models.save", "app.session.toggleSort"]);
+		expect(owners.sort()).toEqual(["app.models.save", "app.session.toggleSort", "app.thinking.save"]);
+		expect(read("modes/interactive/components/thinking-selector.ts")).toContain('kb.matches(keyData, "app.thinking.save")');
+		expect(read("modes/interactive/interactive-mode.ts")).not.toContain('"app.thinking.save"');
 	});
 
 	it("is not a default in the tui layer either", () => {

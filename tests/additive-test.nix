@@ -22,7 +22,7 @@ let
 
   actual = pkgs.lib.mapAttrs (_name: path: builtins.hashFile "sha256" path) protected;
 
-  # Recorded from upstream/master @ 07b2c28, plus the fork's own edits to four
+  # Recorded from upstream/master @ b4773a5, plus the fork's own edits to four
   # of them. Each is a deliberate divergence with its reason written where it
   # lives:
   #
@@ -35,14 +35,14 @@ let
   #   options.nix -- jail.privateAgentSubdirs has to append its tmpfs after the
   #   agent-directory bind, and that bind is emitted here.
   expected = {
-    "VERSION.json" = "267495f03e5b7812fe05260a1dd4bd3499b5fac84324aeaae12e6521c8524bd8";
-    "coding-agent/bun.nix" = "1f6da2d5b036f02f6e9ee0eb8b7725c7ee187bacb2f8873d5a836f408f4604e1";
+    "VERSION.json" = "2d7ef0104774c1e031082a3d81500985516c0d249ae7863eaca0b98620b0148a";
+    "coding-agent/bun.nix" = "0289c33689303c601bbc668ae56bdd84bfc3cd48ba0c1cfff94a563fc2f36f8a";
     "coding-agent/options.nix" = "7ba20b8f4c6899e79850e2a44280409ec4c46bc07c95145d4f89c64222329f9d";
-    "coding-agent/package-bun.nix" = "a43765637bb0cf75b707e04cec48ea146952a0898aecd9a1df65a9c6cfe658c2";
-    "coding-agent/package.nix" = "cf03c7b7cf2bbfe7c12a843106fbeb3a35e654b9198ce1130632f060f9315147";
-    "regenerate-models.nix" = "07bfbabf29eff626a34056ac21301b726ac746771d921700b391887f4847f8ab";
+    "coding-agent/package-bun.nix" = "ebbbb6c72766e0074fc8e36373e7922abffd5ec7b73d01ce600bbd64772ceee2";
+    "coding-agent/package.nix" = "3d5b171a6046e3963566a59b5009ccb7da3aefd436e41f1b526f45fa856ebcdb";
+    "regenerate-models.nix" = "e6d383f7b7d71510493a11743ef4e4fd3e20886b3ebbf6d6a2bb0e123bba0a2a";
     "scan.nix" = "7c445159b27fbaf0ea5d0ee48217944336f38167be317775129c24c7c3493794";
-    "sync-upstream.nix" = "0ace4193ca8cee224212724519dbf8c3562a19e99c6959623ff88a762ccf9e56";
+    "sync-upstream.nix" = "115e7dfa5fd7459d5f4393f3ddd177cb1f2bac4d535c802d76461aeac2b48b66";
   };
 
   drifted = pkgs.lib.attrNames (

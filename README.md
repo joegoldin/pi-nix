@@ -315,7 +315,7 @@ TypeScript erases.
 Their tests run under `nix flake check` as `pi-notify` and `pi-voice`. Each
 check runs the suite twice over one tree: `bun test`, with
 `PI_CODING_AGENT_SRC` pointed at the pi source `packages.coding-agent` builds
-from, and then `tsc --strict` against pi 0.84.2's published `.d.ts`. A pi bump
+from, and then `tsc --strict` against pi 0.85.1's published `.d.ts`. A pi bump
 that moves the extension API fails there rather than at load.
 
 Auto mode used to be a third. It is now the pinned `@czottmann/pi-automode`,

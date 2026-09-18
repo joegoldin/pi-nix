@@ -116,6 +116,7 @@ stdenv.mkDerivation {
   '';
 
   postPatch = ''
+    bash ${../patches/vitest-ghsa-82fw-gwwq-j7x9.sh}
     cp ${../bun.lock} bun.lock
   '';
 
@@ -147,10 +148,14 @@ stdenv.mkDerivation {
 
         cat > patch-package-json.js <<'BUN'
     const fs = require('fs');
-    for (const file of ['packages/ai/package.json', 'packages/coding-agent/package.json']) {
+    for (const file of ['package.json', 'packages/ai/package.json', 'packages/coding-agent/package.json']) {
       const pkg = JSON.parse(fs.readFileSync(file, 'utf8'));
       for (const [name, script] of Object.entries(pkg.scripts ?? {})) {
         pkg.scripts[name] = script.replaceAll('npm run ', 'bun run ');
+      }
+      // Follow the root build order without producing its Node-only bundle.
+      if (file === 'packages/coding-agent/package.json' && pkg.scripts['build:unbundled']) {
+        pkg.scripts.build = pkg.scripts['build:unbundled'];
       }
       fs.writeFileSync(file, JSON.stringify(pkg, null, 2) + '\n');
     }
@@ -161,9 +166,7 @@ stdenv.mkDerivation {
 
   buildPhase = ''
     runHook preBuild
-    for pkg in tui telemetry ai agent protocol client coding-agent; do
-      (cd "packages/$pkg" && bun run build)
-    done
+    bun run build:offline
     runHook postBuild
   '';
 
