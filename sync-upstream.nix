@@ -42,9 +42,13 @@ pkgs.writeShellApplication {
       chmod -R u+w "$tmpdir"
       npm-lockfile-fix "$tmpdir/package-lock.json"
 
+      # bun2nix supports lockfile version 1; Bun preserves it when updating.
+      cp bun.lock "$tmpdir/bun.lock"
+
       # workaround for vulnerable upstream lockfiles
       pushd "$tmpdir" >/dev/null
       bash ${./patches/vitest-ghsa-82fw-gwwq-j7x9.sh}
+      npm dedupe --package-lock-only --ignore-scripts
       npm audit fix --package-lock-only --ignore-scripts
       bun install --ignore-scripts
       bun2nix -o bun.nix
