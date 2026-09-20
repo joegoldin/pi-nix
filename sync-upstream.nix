@@ -48,8 +48,10 @@ pkgs.writeShellApplication {
       # workaround for vulnerable upstream lockfiles
       pushd "$tmpdir" >/dev/null
       bash ${./patches/vitest-ghsa-82fw-gwwq-j7x9.sh}
+
       npm dedupe --package-lock-only --ignore-scripts
       npm audit fix --package-lock-only --ignore-scripts
+
       bun install --ignore-scripts
       bun2nix -o bun.nix
       popd >/dev/null

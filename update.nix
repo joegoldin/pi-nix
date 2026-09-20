@@ -15,6 +15,7 @@ pkgs.writeShellApplication {
       set -euo pipefail
 
       pi-sync-upstream
+
       pi-regenerate-models
     '';
 }
