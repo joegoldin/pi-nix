@@ -45,6 +45,16 @@ pkgs.writeShellApplication {
       # bun2nix supports lockfile version 1; Bun preserves it when updating.
       cp bun.lock "$tmpdir/bun.lock"
 
+      # Bun updates workspace versions but leaves their dependency ranges at the
+      # previous release in the seeded lockfile. For example, when updating to
+      # v0.87.0, "@earendil-works/pi-ai": "^0.86.1" must become "^0.87.0".
+      # Otherwise the mismatch triggers dependency re-resolution in the
+      # network-isolated Nix build.
+      previous_version=$(jq -r '.rev | ltrimstr("v")' VERSION.json)
+      if [[ "$previous_version" != "''${rev#v}" ]]; then
+        sed -Ei "s#(\"@earendil-works/[^\"]+\": \"\^)''${previous_version//./\\.}(\")#\1''${rev#v}\2#g" "$tmpdir/bun.lock"
+      fi
+
       # workaround for vulnerable upstream lockfiles
       pushd "$tmpdir" >/dev/null
       bash ${./patches/vitest-ghsa-82fw-gwwq-j7x9.sh}
