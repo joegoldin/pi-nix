@@ -5,7 +5,6 @@
   makeWrapper,
   nodejs,
   typescript,
-  typescript-go,
   pkg-config,
   pixman,
   cairo,
@@ -39,7 +38,6 @@ buildNpmPackage {
     makeWrapper
     pkg-config
     typescript
-    typescript-go
   ];
 
   buildInputs = [
@@ -55,6 +53,7 @@ buildNpmPackage {
 
   postPatch = ''
     bash ${../patches/vitest-ghsa-82fw-gwwq-j7x9.sh}
+
     cp ${../package-lock.json} package-lock.json
   '';
 

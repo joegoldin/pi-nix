@@ -30,8 +30,8 @@ let
   # `nix run .#update` does not touch them, so a pi bump that moves the API
   # surface shows up as a typecheck failure rather than as silent drift.
   piTypes = pkgs.fetchurl {
-    url = "https://registry.npmjs.org/@earendil-works/pi-coding-agent/-/pi-coding-agent-0.85.1.tgz";
-    hash = "sha512-FGRN+OHbWaefBPGaTggAdLjrIHW+s2PzLyglz/5dfLzb9of7uuXMXYC0fJIeZTw+shS32o2cuQ9jF7YSDuL/oQ==";
+    url = "https://registry.npmjs.org/@earendil-works/pi-coding-agent/-/pi-coding-agent-0.87.1.tgz";
+    hash = "sha512-m8ArJUtVcQMSe1lLE/Ei7vX/JV7O39sWmWBsXV2NOU70F0qCp8GubA24pT3LnwTmM6LL2xV80/h6sQg85n69ew==";
   };
 
   # Every one of them reaches node:fs or node:child_process, so tsc needs
@@ -59,7 +59,6 @@ let
         skipLibCheck = true;
         typeRoots = [ "./types" ];
         types = [ "node" ];
-        baseUrl = ".";
         paths = {
           "@earendil-works/pi-coding-agent" = [ "./pi-types/dist/index.d.ts" ];
         };
