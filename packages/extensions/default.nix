@@ -15,28 +15,6 @@ let
 
   slugOf = name: lib.replaceStrings [ "@" "/" ] [ "" "-" ] name;
 
-  # Nix-side configuration per extension, merged into settings.json when the
-  # extension is enabled. Every entry is `{ }` today: verified on 2026-08-19,
-  # none of the twelve pins reads pi's settings.json. pi-mcp-adapter reads
-  # ~/.config/mcp/mcp.json and ~/.agents/mcp.json; the @juicesharp packages
-  # read their own rpiv-* config; pi-pretty and pi-cache-optimizer both write
-  # under getAgentDir(); @czottmann/pi-automode reads
-  # ~/.pi/agent/automode.json, which the autoMode option writes through
-  # configFiles. The mechanism is here for pins that do, and is exercised by
-  # the synthetic case in tests/extensions-test.nix.
-  settingsFor = {
-    pi-mcp-adapter = { };
-    pi-subagents = { };
-    pi-background-tasks = { };
-    juicesharp-rpiv-ask-user-question = { };
-    narumitw-pi-goal = { };
-    juicesharp-rpiv-todo = { };
-    gotgenes-pi-permission-system = { };
-    narumitw-pi-btw = { };
-    pi-cache-optimizer = { };
-    heyhuynhgiabuu-pi-pretty = { };
-  };
-
   # Libraries autoPatchelfHook must be able to find beyond stdenv.cc.cc.lib.
   # pi-mcp-adapter reaches `recheck`, a GraalVM native-image binary published
   # by recheck-linux-x64, and that binary links libz. Every other native file
@@ -63,7 +41,6 @@ let
         ;
       bunLock = if pin.bundled then null else ./. + "/${slug}/bun.lock";
       bunNix = if pin.bundled then null else ./. + "/${slug}/bun.nix";
-      settings = settingsFor.${slug} or { };
       extraBuildInputs = extraBuildInputsFor.${slug} or [ ];
       promptFragment = null;
     };
@@ -78,11 +55,7 @@ let
     ext-pi-extras = bunPkgs.callPackage ./pi-extras { inherit mkPiExtension; };
   };
 
-  # Four pins are still listed in extensions.json but built by their own file:
-  # pi-intercom, @gotgenes/pi-permission-system and pi-cache-optimizer each
-  # carry a patch, and @czottmann/pi-automode is taken from our fork rather than
-  # from npm. Defined after the generic loop so these definitions are the ones
-  # that win.
+  # These npm packages need integration patches in addition to the generic build.
   patched = {
     ext-pi-intercom = bunPkgs.callPackage ./pi-intercom.nix {
       inherit mkPiExtension;

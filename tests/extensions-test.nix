@@ -73,7 +73,7 @@ let
     # An empty entrypoints list means "hand pi the package root and let it read
     # the pi manifest", which is the normal path for every real pin.
     assert exts.ext-pi-mcp-adapter.passthru.piEntrypoint == [ "${exts.ext-pi-mcp-adapter}" ];
-    assert exts.ext-pi-mcp-adapter.passthru.piSkills == [ "${exts.ext-pi-mcp-adapter}/skills" ];
+    assert exts.ext-pi-mcp-adapter.passthru.piSkills == [ ];
     assert exts.ext-pi-subagents.passthru.piPrompts == [ "${exts.ext-pi-subagents}/prompts" ];
     assert exts.ext-pi-background-tasks.passthru.piSkills == [ ];
     assert exts.ext-pi-mcp-adapter.passthru.settings == { };
@@ -88,24 +88,17 @@ let
     # grown one.
     assert !(pins ? pi-notify);
     assert !(pins ? pi-voice);
-    # Three pins take the bundled branch, and none needs node_modules:
-    # pi-cache-optimizer and @czottmann/pi-automode declare no runtime
-    # dependency at all (pi-automode's only declared deps are peers on
-    # @earendil-works/*, which the host process already provides), and
-    # pi-intercom declares only tsx, which is never reached because the module
-    # launches the broker with bun. If a future bump gives one of them a
-    # dependency that is actually loaded, this fires before anything ships a
-    # broken node_modules.
+    # Only cache optimizer and intercom need no installed runtime dependencies.
+    # Auto mode uses unbash for command-aware deny rules.
     assert pins."pi-cache-optimizer".bundled;
     assert pins."pi-intercom".bundled;
-    assert pins."@czottmann/pi-automode".bundled;
+    assert !pins."@czottmann/pi-automode".bundled;
     assert lib.all (n: !pins.${n}.bundled) (
       lib.filter (
         n:
         !(lib.elem n [
           "pi-cache-optimizer"
           "pi-intercom"
-          "@czottmann/pi-automode"
         ])
       ) (builtins.attrNames pins)
     );
@@ -145,9 +138,10 @@ pkgs.runCommand "pi-nix-extensions-tests" { nativeBuildInputs = [ pkgs.jq ]; } '
   check ${exts.ext-narumitw-pi-btw} deps
   check ${exts.ext-heyhuynhgiabuu-pi-pretty} deps
   check ${exts.ext-pi-cache-optimizer} nodeps
-  check ${exts.ext-czottmann-pi-automode} nodeps
+  check ${exts.ext-czottmann-pi-automode} deps
 
   # Skills and prompts advertised through the passthru must be real directories.
+  # MCP adapter still ships these files but no longer advertises auto-loading them.
   test -d ${exts.ext-pi-mcp-adapter}/skills
   test -d ${exts.ext-pi-subagents}/skills
   test -d ${exts.ext-pi-subagents}/prompts
@@ -161,7 +155,7 @@ pkgs.runCommand "pi-nix-extensions-tests" { nativeBuildInputs = [ pkgs.jq ]; } '
   # pi-cache-optimizer has no dependencies at all; a node_modules here would
   # mean the bundled branch quietly grew a bun install.
   ! test -e ${exts.ext-pi-cache-optimizer}/node_modules
-  ! test -e ${exts.ext-czottmann-pi-automode}/node_modules
+  test -d ${exts.ext-czottmann-pi-automode}/node_modules/unbash
 
   touch $out
 ''

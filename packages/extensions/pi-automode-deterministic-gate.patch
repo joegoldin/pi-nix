@@ -1,0 +1,287 @@
+diff --git a/extensions/auto-mode/extension.ts b/extensions/auto-mode/extension.ts
+index 3a9e63c..9254db2 100644
+--- a/extensions/auto-mode/extension.ts
++++ b/extensions/auto-mode/extension.ts
+@@ -31,6 +31,7 @@ import {
+   prepareGlobalConfig,
+   writeGlobalClassifierModel,
+ } from "./config.ts";
++import { DETERMINISTIC_ONLY } from "./permission-chain.ts";
+ import { deterministicHardDeny } from "./hard-deny.ts";
+ import {
+   createLogger,
+@@ -133,6 +134,7 @@ export type PiAutomodeOptions = {
+ };
+ 
+ type LogCtx = {
++  deterministicOnly?: boolean;
+   logger: Logger;
+   decisionId: string;
+   classifierModel?: string;
+@@ -340,6 +342,7 @@ export function createPiAutomode(options: PiAutomodeOptions = {}) {
+       denial: DenialRecord,
+       logCtx: LogCtx,
+     ): { block: true; reason: string } {
++      if (logCtx.deterministicOnly) state.checkedActions += 1;
+       state.blockedActions += 1;
+       state.lastDecision = "block";
+       state.lastReason = denial.reason;
+@@ -447,10 +450,14 @@ export function createPiAutomode(options: PiAutomodeOptions = {}) {
+       // 7. classifier for every remaining action, fail-closed on setup/parse errors.
+       const cfg = effectiveConfig();
+       if (!cfg.enabled) return undefined;
++      const deterministicOnly = Boolean(
++        (event as unknown as Record<symbol, unknown>)[DETERMINISTIC_ONLY],
++      );
+ 
+       const input = event.input as Record<string, unknown>;
+       const summary = actionSummary(event.toolName, input);
+       const logCtx: LogCtx = {
++        deterministicOnly,
+         logger: createLogger({
+           enabled: cfg.log.enabled,
+           classifierIo: cfg.log.classifierIo,
+@@ -467,7 +474,7 @@ export function createPiAutomode(options: PiAutomodeOptions = {}) {
+       };
+ 
+       if (ctx.signal?.aborted) {
+-        state.checkedActions += 1;
++        if (!deterministicOnly) state.checkedActions += 1;
+         return block(ctx, {
+           timestamp: Date.now(),
+           toolName: event.toolName,
+@@ -500,7 +507,7 @@ export function createPiAutomode(options: PiAutomodeOptions = {}) {
+           };
+         }
+       }
+-      if (!isOwnedInspection) state.checkedActions += 1;
++      if (!isOwnedInspection && !deterministicOnly) state.checkedActions += 1;
+ 
+       for (const pattern of cfg.permissionDeny) {
+         if (
+@@ -516,7 +523,7 @@ export function createPiAutomode(options: PiAutomodeOptions = {}) {
+           const matchedCommand = matchedCommandSummary(
+             matchingBashCommandText(pattern, bashAnalysis),
+           );
+-          if (isOwnedInspection) state.checkedActions += 1;
++          if (isOwnedInspection && !deterministicOnly) state.checkedActions += 1;
+           return block(ctx, {
+             timestamp: Date.now(),
+             toolName: event.toolName,
+@@ -530,7 +537,7 @@ export function createPiAutomode(options: PiAutomodeOptions = {}) {
+       }
+ 
+       let askRequiresClassifier = false;
+-      for (const pattern of cfg.permissionAsk) {
++      for (const pattern of deterministicOnly ? [] : cfg.permissionAsk) {
+         if (
+           !matchesToolPattern(
+             pattern,
+@@ -547,7 +554,7 @@ export function createPiAutomode(options: PiAutomodeOptions = {}) {
+           const matchedCommand = matchedCommandSummary(
+             matchingBashCommandText(pattern, bashAnalysis),
+           );
+-          if (isOwnedInspection) state.checkedActions += 1;
++          if (isOwnedInspection && !deterministicOnly) state.checkedActions += 1;
+           return block(ctx, {
+             timestamp: Date.now(),
+             toolName: event.toolName,
+@@ -568,7 +575,7 @@ export function createPiAutomode(options: PiAutomodeOptions = {}) {
+           const matchedCommand = matchedCommandSummary(
+             matchingBashCommandText(pattern, bashAnalysis),
+           );
+-          if (isOwnedInspection) state.checkedActions += 1;
++          if (isOwnedInspection && !deterministicOnly) state.checkedActions += 1;
+           return block(ctx, {
+             timestamp: Date.now(),
+             toolName: event.toolName,
+@@ -589,7 +596,7 @@ export function createPiAutomode(options: PiAutomodeOptions = {}) {
+         bashAnalysis,
+       );
+       if (deterministicReason) {
+-        if (isOwnedInspection) state.checkedActions += 1;
++        if (isOwnedInspection && !deterministicOnly) state.checkedActions += 1;
+         return block(ctx, {
+           timestamp: Date.now(),
+           toolName: event.toolName,
+@@ -600,7 +607,7 @@ export function createPiAutomode(options: PiAutomodeOptions = {}) {
+       }
+ 
+       if (isOwnedInspection && !askRequiresClassifier) return undefined;
+-      if (isOwnedInspection) state.checkedActions += 1;
++      if (isOwnedInspection && !deterministicOnly) state.checkedActions += 1;
+ 
+       // Deterministic path gate for file tools.
+       //
+@@ -668,6 +675,7 @@ export function createPiAutomode(options: PiAutomodeOptions = {}) {
+               kind: "deterministic-path-deny",
+             }, logCtx);
+           }
++          if (deterministicOnly) return undefined;
+           if (cfg.allowInsideWorkingDirectory) {
+             const policyCwd = resolvePathForPolicy(ctx.cwd) ?? ctx.cwd;
+             if (isInside(policyPath, policyCwd)) {
+@@ -694,6 +702,8 @@ export function createPiAutomode(options: PiAutomodeOptions = {}) {
+         }
+       }
+ 
++      if (deterministicOnly) return undefined;
++
+       // Deterministic allow tier. It runs after every deterministic denial.
+       // Accepted ask rules skip this tier and always reach the classifier.
+       if (!askRequiresClassifier) {
+diff --git a/extensions/auto-mode/permission-chain.ts b/extensions/auto-mode/permission-chain.ts
+index aaac9b6..f016664 100644
+--- a/extensions/auto-mode/permission-chain.ts
++++ b/extensions/auto-mode/permission-chain.ts
+@@ -46,17 +46,10 @@ import type {
+   ToolCallEvent,
+   ToolCallEventResult,
+ } from "@earendil-works/pi-coding-agent";
+-import { loadEffectiveConfig } from "./config.ts";
+ import { HOME, PATH_BEARING_TOOLS } from "./constants.ts";
+-import { deterministicHardDeny } from "./hard-deny.ts";
+-import {
+-  expandHomePattern,
+-  extractInputPath,
+-  resolveInputPath,
+-  resolvePathForPolicy,
+-} from "./paths.ts";
+-import { matchesDeniedPath, matchesToolPattern } from "./permissions.ts";
+-import type { EffectiveConfig } from "./types.ts";
++
++/** Internal pre-pass marker; never part of model-supplied tool input. */
++export const DETERMINISTIC_ONLY = Symbol("pi-automode:deterministic-only");
+ 
+ /** Legacy service slot, before the session-keyed registry. */
+ export const PERMISSION_SERVICE_KEY = Symbol.for(
+@@ -227,52 +220,6 @@ export function eventFromDetails(
+   } as unknown as ToolCallEvent;
+ }
+ 
+-/**
+- * The deterministic tiers, and only those, for the delegated pre-pass.
+- *
+- * When the permission system owns layer 2 the classifier runs as this package's
+- * chain link, so running the whole gate on `tool_call` as well would classify
+- * every action twice and would defeat the deterministic allow rules the
+- * permission system resolves without a model call. What stays on `tool_call` is
+- * the half that costs nothing and that a permission-system `allow` would
+- * otherwise sail past: the operator's own deny list, the deterministic
+- * hard-deny checks, and the path deny list. Same three checks, same order, same
+- * predicates as the full gate.
+- */
+-export function deterministicDenial(
+-  config: EffectiveConfig,
+-  event: ToolCallEvent,
+-  cwd: string,
+-): string | undefined {
+-  const input = event.input as Record<string, unknown>;
+-
+-  for (const pattern of config.permissionDeny) {
+-    if (matchesToolPattern(pattern, event.toolName, input, cwd)) {
+-      return `Blocked by permissions.deny: ${pattern.raw}`;
+-    }
+-  }
+-
+-  const hardDeny = deterministicHardDeny(event.toolName, input, cwd);
+-  if (hardDeny) return hardDeny;
+-
+-  if (config.deniedPaths.length > 0 && PATH_BEARING_TOOLS.has(event.toolName)) {
+-    const inputPath = extractInputPath(event.toolName, input);
+-    if (inputPath !== undefined) {
+-      const expanded = expandHomePattern(inputPath);
+-      const resolved = resolveInputPath(cwd, expanded) ?? expanded;
+-      const policyPath = resolvePathForPolicy(resolved) ?? resolved;
+-      if (
+-        matchesDeniedPath(resolved, config.deniedPaths) ||
+-        matchesDeniedPath(policyPath, config.deniedPaths)
+-      ) {
+-        return `Path denied by policy: ${policyPath}`;
+-      }
+-    }
+-  }
+-
+-  return undefined;
+-}
+-
+ type ToolCallHandler = (
+   event: ToolCallEvent,
+   ctx: ExtensionContext,
+@@ -286,8 +233,6 @@ export type PermissionChainOptions = {
+   global?: typeof globalThis;
+   /** Injected in tests. Production reads the permission system's own file. */
+   readActivation?: (cwd: string) => ChainActivation;
+-  /** Injected in tests. Production loads auto mode's effective config. */
+-  loadConfig?: (cwd: string) => EffectiveConfig;
+   /**
+    * Read the environment. Injected in tests; production reads `process.env`.
+    */
+@@ -324,7 +269,6 @@ export function withPermissionChain(
+ ): (pi: ExtensionAPI) => void {
+   const globalObject = options.global ?? globalThis;
+   const readActivation = options.readActivation ?? readChainActivation;
+-  const loadConfig = options.loadConfig ?? loadEffectiveConfig;
+   const env = options.env ?? process.env;
+   const suppressStatus = env[SUPPRESS_STATUS_ENV] === "1";
+ 
+@@ -335,7 +279,6 @@ export function withPermissionChain(
+     let unregister: (() => void) | undefined;
+     let sessionId: string | undefined;
+     let lastCtx: ExtensionContext | undefined;
+-    let config: EffectiveConfig | undefined;
+     const seen = new Map<string, { event: ToolCallEvent; ctx: ExtensionContext }>();
+ 
+     /**
+@@ -440,11 +383,6 @@ export function withPermissionChain(
+       }
+     }
+ 
+-    function effectiveConfig(cwd: string): EffectiveConfig {
+-      config ??= loadConfig(cwd);
+-      return config;
+-    }
+-
+     const authorize: AuthorizeFn = async (details, _query, log) => {
+       try {
+         const cached = seen.get(str(details.toolCallId) ?? "");
+@@ -519,7 +457,6 @@ export function withPermissionChain(
+       lastCtx = ctx;
+       sessionId = ctx.sessionManager.getSessionId() ?? undefined;
+       seen.clear();
+-      config = undefined;
+       register();
+       if (getPermissionsService(globalObject, sessionId) === undefined) return;
+       const activation = readActivation(ctx.cwd);
+@@ -549,7 +486,6 @@ export function withPermissionChain(
+       if (sessionId !== currentSessionId) {
+         sessionId = currentSessionId;
+         seen.clear();
+-        config = undefined;
+       }
+       register();
+       if (toolCall === undefined) return undefined;
+@@ -561,12 +497,9 @@ export function withPermissionChain(
+       }
+ 
+       remember(event, ctx);
+-      const cfg = effectiveConfig(ctx.cwd);
+-      if (!cfg.enabled) return undefined;
+-      const denial = deterministicDenial(cfg, event, ctx.cwd);
+-      return denial === undefined
+-        ? undefined
+-        : { block: true, reason: `[pi-automode] ${denial}` };
++      // Use upstream's gate and live configuration, stopping before asks and
++      // classification. Duplicating its deny logic here drifts across releases.
++      return toolCall({ ...event, [DETERMINISTIC_ONLY]: true } as ToolCallEvent, wrapCtx(ctx));
+     });
+ 
+     pi.on("session_shutdown", () => {
+@@ -577,7 +510,6 @@ export function withPermissionChain(
+       sessionId = undefined;
+       lastCtx = undefined;
+       seen.clear();
+-      config = undefined;
+     });
+   };
+ }

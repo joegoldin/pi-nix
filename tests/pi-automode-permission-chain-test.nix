@@ -6,9 +6,13 @@ in
 pkgs.runCommand "pi-automode-permission-chain-test"
   {
     nativeBuildInputs = [ pkgs.bun ];
-    AUTOMODE_PACKAGE = packages.ext-czottmann-pi-automode;
   }
   ''
+    cp -R ${packages.ext-czottmann-pi-automode} automode
+    chmod -R u+w automode
+    # Pi's loader supplies these peers; plain Bun needs explicit resolution.
+    ln -s ${packages.coding-agent}/lib/node_modules/@earendil-works automode/node_modules/@earendil-works
+    export AUTOMODE_PACKAGE="$PWD/automode"
     cp -R ${packages.ext-gotgenes-pi-permission-system} permissions
     chmod -R u+w permissions
     # Bun needs the suffix that Pi's TypeScript loader resolves implicitly.

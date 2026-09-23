@@ -297,9 +297,9 @@
     url = "https://registry.npmjs.org/@mariozechner/clipboard/-/clipboard-0.3.9.tgz";
     hash = "sha512-ABnA53mdfkGZwOFUdZNv2S0CWGO/EIuPj8Vv9xmBFmSYg/qFc7ihO6q5FcQjvoE67kZpWkEc4AhD6B/os04yuA==";
   };
-  "@narumitw/pi-tui-kit@0.59.0" = fetchurl {
-    url = "https://registry.npmjs.org/@narumitw/pi-tui-kit/-/pi-tui-kit-0.59.0.tgz";
-    hash = "sha512-KBbOcciJD+HVbeduUwBUiSy2AehMGYeOwiRPXvac5tcjuh3SDoQ+7qsNPt2s/ku6exJKZp0GYtAVsiu5ySddmA==";
+  "@narumitw/pi-tui-kit@0.64.0" = fetchurl {
+    url = "https://registry.npmjs.org/@narumitw/pi-tui-kit/-/pi-tui-kit-0.64.0.tgz";
+    hash = "sha512-VdFK3DyNzanfabeNP9DFX8Jj2LMKi6RV0q3Mf+xVwosG0bMWIIUwe6S9KDBYq5KfzEMzr4iFMSBweT95McwedQ==";
   };
   "@protobufjs/aspromise@1.1.2" = fetchurl {
     url = "https://registry.npmjs.org/@protobufjs/aspromise/-/aspromise-1.1.2.tgz";
@@ -440,6 +440,10 @@
   "diff@8.0.4" = fetchurl {
     url = "https://registry.npmjs.org/diff/-/diff-8.0.4.tgz";
     hash = "sha512-DPi0FmjiSU5EvQV0++GFDOJ9ASQUVFh5kD+OzOnYdi7n3Wpm9hWWGfB/O2blfHcMVTL5WkQXSnRiK9makhrcnw==";
+  };
+  "diff@9.0.0" = fetchurl {
+    url = "https://registry.npmjs.org/diff/-/diff-9.0.0.tgz";
+    hash = "sha512-svtcdpS8CgJyqAjEQIXdb3OjhFVVYjzGAPO8WGCmRbrml64SPw/jJD4GoE98aR7r25A0XcgrK3F02yw9R/vhQw==";
   };
   "ecdsa-sig-formatter@1.0.11" = fetchurl {
     url = "https://registry.npmjs.org/ecdsa-sig-formatter/-/ecdsa-sig-formatter-1.0.11.tgz";

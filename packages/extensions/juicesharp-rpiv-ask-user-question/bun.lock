@@ -5,13 +5,13 @@
     "": {
       "name": "@juicesharp/rpiv-ask-user-question",
       "dependencies": {
-        "@juicesharp/rpiv-config": "^2.10.1",
+        "@juicesharp/rpiv-config": "^2.11.0",
         "typebox": "^1.1.24",
       },
     },
   },
   "packages": {
-    "@juicesharp/rpiv-config": ["@juicesharp/rpiv-config@2.10.1", "", { "dependencies": { "typebox": "^1.1.24" } }, "sha512-iqW1Vy/2alnzGDVldyOgDfqOE+yy7Ppb61AG9LKWBGdf1RmHsmLBF4GCESL/PmxrtsinskgEoX6nmN5EmVOnbA=="],
+    "@juicesharp/rpiv-config": ["@juicesharp/rpiv-config@2.11.0", "", { "dependencies": { "typebox": "^1.1.24" } }, "sha512-fjySBPar14qTPNMNPRYmH24YCaQ0r8xzW4P4jz8/Ph7JLFzIa+TM3ySzg9jRq0hh8wVqIAD4j4pcU66fdCkIag=="],
 
     "typebox": ["typebox@1.3.31", "", {}, "sha512-7++UxOb7lAJbJ8pbhN2Yl/ljadShbHZ6GQwst/YEUAlVh1nP8LqYpC2t+R1VysunFpmDffDzhZRsvGchx0PqUA=="],
   }

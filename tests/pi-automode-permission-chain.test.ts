@@ -1,9 +1,12 @@
 import { test, expect } from "bun:test";
-const { withPermissionChain, getPermissionsService } = await import(
+const { withPermissionChain, getPermissionsService, DETERMINISTIC_ONLY } = await import(
   `${process.env.AUTOMODE_PACKAGE}/extensions/auto-mode/permission-chain.ts`
 );
 const { publishPermissionsService, unpublishPermissionsService } = await import(
   `${process.env.PERMISSION_PACKAGE}/src/service.ts`
+);
+const { deterministicHardDeny } = await import(
+  `${process.env.AUTOMODE_PACKAGE}/extensions/auto-mode/hard-deny.ts`
 );
 
 function service() {
@@ -33,13 +36,16 @@ function host(id = "parent", globals = globalThis) {
     appendEntry() {},
   };
   withPermissionChain((api) => api.on("tool_call", (event) => {
+    if (event[DETERMINISTIC_ONLY]) {
+      const reason = deterministicHardDeny(event.toolName, event.input, ctx.cwd);
+      return reason ? { block: true, reason } : undefined;
+    }
     calls.push(event);
     if (answer instanceof Error) throw answer;
     return answer;
   }), {
     global: globals,
     readActivation: () => ({ active: true }),
-    loadConfig: () => ({ enabled: true, deniedPaths: [], permissionDeny: [] }),
   })(pi);
   return {
     calls,
@@ -71,6 +77,13 @@ test("actual package publisher connects the Git approval to the chain", async ()
     const authorize = s.links.get("pi-automode");
     expect(await authorize(details, {}, log)).toEqual({ kind: "allow" });
     expect(h.calls).toEqual([event]);
+    for (const toolName of ["read", "write"]) {
+      expect(await authorize({
+        toolName, toolCallId: "projected-" + toolName,
+        surface: toolName, path: "/tmp/project/file.txt",
+      }, {}, log)).toEqual({ kind: "allow" });
+      expect(h.calls.at(-1).input).toEqual({ path: "/tmp/project/file.txt" });
+    }
     h.answer({ block: true, reason: "denied" });
     expect(await authorize(details, {}, log)).toEqual({ kind: "deny", reason: "denied" });
     h.answer(new Error("classifier failed"));
@@ -180,4 +193,101 @@ test("failed registration retains the standalone gate and retries", async () => 
     await h.emit("session_shutdown");
     unpublishPermissionsService("parent", s);
   }
+});
+
+const { createPiAutomode } = await import(
+  `${process.env.AUTOMODE_PACKAGE}/extensions/auto-mode/extension.ts`
+);
+const { parseToolPattern } = await import(
+  `${process.env.AUTOMODE_PACKAGE}/extensions/auto-mode/permissions.ts`
+);
+
+async function realHost(configForTrust) {
+  const handlers = new Map();
+  const commands = new Map();
+  let state;
+  const s = service();
+  const globals = { [Symbol.for("@gotgenes/pi-permission-system:service")]: s };
+  let classifierCalls = 0;
+  const config = {
+    enabled: true, classifyReadOnlyTools: false, allowInsideWorkingDirectory: true,
+    deniedPaths: [], protectedPaths: [], permissionDeny: [], permissionAsk: [],
+    permissionAllow: [], environment: [], allow: [], softDeny: [], hardDeny: [],
+    log: { enabled: false, classifierIo: false },
+  };
+  const ctx = {
+    cwd: "/tmp/project", hasUI: false, isProjectTrusted: () => true,
+    ui: { notify() {} },
+    sessionManager: { getSessionId: () => "real", getEntries: () => [] },
+  };
+  const pi = {
+    on(name, fn) { handlers.set(name, [...(handlers.get(name) ?? []), fn]); },
+    events: { on() {} },
+    appendEntry(name, data) {
+      if (name === "pi-automode-state") state = structuredClone(data);
+    },
+    registerTool() {},
+    registerCommand(name, command) { commands.set(name, command); },
+    getAllTools: () => [],
+  };
+  withPermissionChain(createPiAutomode({
+    loadConfig: (_cwd, trusted) => ({ ...config, ...configForTrust(trusted) }),
+    classifyAction: async () => {
+      classifierCalls++;
+      throw new Error("deterministic pre-pass must not call the classifier");
+    },
+  }), { global: globals, readActivation: () => ({ active: true }) })(pi);
+  const emit = async (name, event = {}) => {
+    let result;
+    for (const handler of handlers.get(name) ?? []) {
+      result = await handler(event, ctx);
+      if (result?.block) return result;
+    }
+    return result;
+  };
+  await emit("session_start");
+  return { emit, commands, ctx, classifierCalls: () => classifierCalls, state: () => state };
+}
+
+test("real upstream gate denies compound Bash before a permission-system allow", async () => {
+  const h = await realHost(() => ({ permissionDeny: [parseToolPattern("bash(curl *)")] }));
+  const result = await h.emit("tool_call", {
+    ...event, input: { command: "echo ready; curl https://example.com" },
+  });
+  expect(result?.block).toBe(true);
+  expect(result.reason).toContain("permissions.deny");
+  expect(h.classifierCalls()).toBe(0);
+  expect(h.state().checkedActions).toBe(1);
+  expect(h.state().blockedActions).toBe(1);
+});
+
+test("real upstream gate protects denied subtrees from recursive grep and find", async () => {
+  const h = await realHost(() => ({ deniedPaths: ["/tmp/project/private/*"] }));
+  for (const toolName of ["grep", "find"]) {
+    const result = await h.emit("tool_call", {
+      toolName, toolCallId: toolName, input: { path: ".", pattern: "*" },
+    });
+    expect(result?.block).toBe(true);
+    expect(result.reason).toContain("Search scope");
+  }
+  expect(h.classifierCalls()).toBe(0);
+});
+
+test("real pre-pass uses trusted project configuration and live session overrides", async () => {
+  const h = await realHost((trusted) => ({
+    permissionDeny: trusted ? [parseToolPattern("bash(curl *)")] : [],
+  }));
+  const denied = { ...event, input: { command: "curl https://example.com" } };
+  expect((await h.emit("tool_call", denied))?.block).toBe(true);
+  await h.commands.get("automode").handler("off", h.ctx);
+  expect(await h.emit("tool_call", denied)).toBeUndefined();
+  await h.commands.get("automode").handler("on", h.ctx);
+  expect((await h.emit("tool_call", denied))?.block).toBe(true);
+  expect(h.classifierCalls()).toBe(0);
+});
+
+test("real pre-pass leaves an allowed action for the permission system without classification", async () => {
+  const h = await realHost(() => ({}));
+  expect(await h.emit("tool_call", event)).toBeUndefined();
+  expect(h.classifierCalls()).toBe(0);
 });

@@ -59,6 +59,10 @@ pkgs.writeShellApplication {
           mkdir -p "$work"
           curl -fsSL "$url" | tar -xzf - -C "$work" --strip-components=1
 
+          # Preserve lockfile v1, which bun2nix 2.1 understands. New Bun
+          # installs otherwise create v2 even when the package is unchanged.
+          cp "packages/extensions/$slug/bun.lock" "$work/bun.lock"
+
           (
             cd "$work"
             ${normalisePackageJson}

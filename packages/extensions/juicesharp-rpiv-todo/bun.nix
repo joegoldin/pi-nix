@@ -13,9 +13,9 @@
   ...
 }:
 {
-  "@juicesharp/rpiv-config@2.10.1" = fetchurl {
-    url = "https://registry.npmjs.org/@juicesharp/rpiv-config/-/rpiv-config-2.10.1.tgz";
-    hash = "sha512-iqW1Vy/2alnzGDVldyOgDfqOE+yy7Ppb61AG9LKWBGdf1RmHsmLBF4GCESL/PmxrtsinskgEoX6nmN5EmVOnbA==";
+  "@juicesharp/rpiv-config@2.11.0" = fetchurl {
+    url = "https://registry.npmjs.org/@juicesharp/rpiv-config/-/rpiv-config-2.11.0.tgz";
+    hash = "sha512-fjySBPar14qTPNMNPRYmH24YCaQ0r8xzW4P4jz8/Ph7JLFzIa+TM3ySzg9jRq0hh8wVqIAD4j4pcU66fdCkIag==";
   };
   "typebox@1.3.31" = fetchurl {
     url = "https://registry.npmjs.org/typebox/-/typebox-1.3.31.tgz";
