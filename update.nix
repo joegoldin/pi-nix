@@ -1,7 +1,7 @@
 {
   pkgs,
   regenerateModels,
-  syncUpstream,
+  sync,
   updateExtensions,
 }:
 
@@ -9,14 +9,14 @@ pkgs.writeShellApplication {
   name = "pi-update";
   runtimeInputs = [
     regenerateModels
-    syncUpstream
+    sync
     updateExtensions
   ];
   text = # bash
     ''
       set -euo pipefail
 
-      pi-sync-upstream
+      pi-sync
 
       pi-regenerate-models
       pi-update-extensions

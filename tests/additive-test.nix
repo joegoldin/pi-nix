@@ -14,7 +14,7 @@ let
     "coding-agent/package.nix" = ../coding-agent/package.nix;
     "coding-agent/package-bun.nix" = ../coding-agent/package-bun.nix;
     "coding-agent/bun.nix" = ../coding-agent/bun.nix;
-    "sync-upstream.nix" = ../sync-upstream.nix;
+    "sync.nix" = ../sync.nix;
     "regenerate-models.nix" = ../regenerate-models.nix;
     "scan.nix" = ../scan.nix;
     "VERSION.json" = ../VERSION.json;
@@ -26,23 +26,23 @@ let
   # of them. Each is a deliberate divergence with its reason written where it
   # lives:
   #
-  #   bun.nix, package-bun.nix, sync-upstream.nix -- copyPathToStore on a
+  #   bun.nix, package-bun.nix, sync.nix -- copyPathToStore on a
   #   workspace member reads the path at evaluation time, which is
   #   import-from-derivation and serialised every build behind a single-threaded
-  #   eval. Replaced by a runCommand factory. sync-upstream's rewrite seds keep
+  #   eval. Replaced by a runCommand factory. sync.nix's rewrite seds keep
   #   `just update-pi` from reintroducing it.
   #
   #   options.nix -- jail.privateAgentSubdirs has to append its tmpfs after the
   #   agent-directory bind, and that bind is emitted here.
   expected = {
-    "VERSION.json" = "33a02c3e7b7de7e275abc467a39680377e4f3769215d6cc7b49ae49cc423953f";
-    "coding-agent/bun.nix" = "6bbf114580069e9225fa8f28a6ba6e8492eb77d0e4700577970c20f3d60ba9f1";
+    "VERSION.json" = "1c008982bb475b33495a8031123bd687b2b9b81ddadcfb811a3c5fd084145fed";
+    "coding-agent/bun.nix" = "2056b33640ee9a6cdaf3c112200f45c02046040ee95a891be36adaafecd37b90";
     "coding-agent/options.nix" = "7ba20b8f4c6899e79850e2a44280409ec4c46bc07c95145d4f89c64222329f9d";
-    "coding-agent/package-bun.nix" = "c264e410142b6aa0e9895606c582756ab1e449e6eaa5d862a3c602284175f147";
-    "coding-agent/package.nix" = "ffc7bbef83095232209945d75d7a9421b08879cea5fc40c6bf81bab09e205773";
-    "regenerate-models.nix" = "96b0eb5aa82e9d9a463574db3180aeed1328d709f0247620e30221f7499a4eff";
+    "coding-agent/package-bun.nix" = "5ea57719bb85881001f97465aa161efdeba4c77dc63a50bc123c19aa72612dde";
+    "coding-agent/package.nix" = "f572b98fcfcadf627f92700fa5a3989ae7f3935668ac8b68b7928b1b49c622a9";
+    "regenerate-models.nix" = "d9ade9a165e7de1a1cefc1ae859a1f30cff317e2076e3d9fbae07d4bd8cfbea5";
     "scan.nix" = "5fab541f642cdd7ef2887c58acfe826017bc035899f25540e1c01483e79d4080";
-    "sync-upstream.nix" = "eabd44f588af4b8250f6017d80716a8950eb30351d1f0df5ab10b0e60c3e21fe";
+    "sync.nix" = "aba26550a83ddf84a21936cc88f6fee1dc0ab794e90677df8ec73e053199d2d0";
   };
 
   drifted = pkgs.lib.attrNames (

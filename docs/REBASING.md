@@ -58,7 +58,7 @@ nix fmt
 nix flake check -L
 git diff upstream/master --stat -- \
   coding-agent/options.nix coding-agent/package.nix coding-agent/package-bun.nix \
-  coding-agent/bun.nix sync-upstream.nix regenerate-models.nix scan.nix \
+  coding-agent/bun.nix sync.nix regenerate-models.nix scan.nix \
   VERSION.json package-lock.json bun.lock ai
 ```
 

@@ -1,10 +1,11 @@
 {
   pkgs,
   bun2nix,
+  patch,
 }:
 
 pkgs.writeShellApplication {
-  name = "pi-sync-upstream";
+  name = "pi-sync";
   runtimeInputs = with pkgs; [
     bun
     coreutils
@@ -18,6 +19,7 @@ pkgs.writeShellApplication {
     npm-lockfile-fix
     prefetch-npm-deps
     bun2nix
+    patch
   ];
   text = # bash
     ''
@@ -55,9 +57,8 @@ pkgs.writeShellApplication {
         sed -Ei "s#(\"@earendil-works/[^\"]+\": \"\^)''${previous_version//./\\.}(\")#\1''${rev#v}\2#g" "$tmpdir/bun.lock"
       fi
 
-      # workaround for vulnerable upstream lockfiles
       pushd "$tmpdir" >/dev/null
-      bash ${./patches/vitest-ghsa-82fw-gwwq-j7x9.sh}
+      pi-patch
 
       npm dedupe --package-lock-only --ignore-scripts
       npm audit fix --package-lock-only --ignore-scripts

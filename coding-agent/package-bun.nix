@@ -116,8 +116,6 @@ stdenv.mkDerivation {
   '';
 
   postPatch = ''
-    bash ${../patches/vitest-ghsa-82fw-gwwq-j7x9.sh}
-
     cp ${../bun.lock} bun.lock
   '';
 
