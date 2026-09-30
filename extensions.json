@@ -9,9 +9,9 @@
     "prompts": []
   },
   "pi-subagents": {
-    "version": "0.73.1",
-    "url": "https://registry.npmjs.org/pi-subagents/-/pi-subagents-0.73.1.tgz",
-    "hash": "sha512-IklOqw67DtvIWQFKxFJpDFXsOGcq8RGYZEbokykD5Kvfs9aa/du1cW2NEJ5xx4GUgN2LVt3vAq5IdzEMo7YwJw==",
+    "version": "0.71.0",
+    "url": "https://registry.npmjs.org/pi-subagents/-/pi-subagents-0.71.0.tgz",
+    "hash": "sha512-4Ng1bM0oigvrdE5DfSoDgdiUOZOXig2M4DTZvlAWSx3Ineyvl7N0Le2FetfPo1N7oU0wO91aCJqcAInU6wsl5A==",
     "bundled": false,
     "entrypoints": [],
     "skills": [
