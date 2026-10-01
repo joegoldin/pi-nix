@@ -417,7 +417,7 @@ in
               ${modelsPrelude}
               ${settingsPrelude}
 
-              case "''${1-}" in install|remove|uninstall|update|list|config)
+              case "''${1-}" in install|remove|uninstall|update|list|config|auth|mcp)
                   exec ${lib.escapeShellArg (lib.getExe package)} "$@"
                   ;;
                 *)
