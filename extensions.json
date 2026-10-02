@@ -1,13 +1,4 @@
 {
-  "pi-mcp-adapter": {
-    "version": "3.3.0",
-    "url": "https://registry.npmjs.org/pi-mcp-adapter/-/pi-mcp-adapter-3.3.0.tgz",
-    "hash": "sha512-CNwp4/uTsfRM+y6tzCGDaZfzExPRbE9c+Vc2iTHgNGGp0Ey7EzdY745pQJx4utGjTmgCFCXY95fu8iwfX1Lnrg==",
-    "bundled": false,
-    "entrypoints": [],
-    "skills": [],
-    "prompts": []
-  },
   "pi-subagents": {
     "version": "0.71.0",
     "url": "https://registry.npmjs.org/pi-subagents/-/pi-subagents-0.71.0.tgz",

@@ -82,7 +82,6 @@ nix.settings = {
     enable = true;
     systemPrompt = ./SYSTEM.md;
     extensionPackages = with inputs.pi-nix.packages.${pkgs.system}; [
-      ext-pi-mcp-adapter
       ext-pi-subagents
       ext-juicesharp-rpiv-todo
       ext-juicesharp-rpiv-ask-user-question
@@ -312,7 +311,6 @@ Pinned extensions are exposed as `packages.<system>.ext-<slug>`:
 
 | Attribute | npm package | What it adds |
 | --- | --- | --- |
-| `ext-pi-mcp-adapter` | `pi-mcp-adapter` | MCP, which pi omits |
 | `ext-pi-subagents` | `pi-subagents` | subagents |
 | `ext-pi-background-tasks` | `pi-background-tasks` | background bash |
 | `ext-juicesharp-rpiv-ask-user-question` | `@juicesharp/rpiv-ask-user-question` | AskUserQuestion |

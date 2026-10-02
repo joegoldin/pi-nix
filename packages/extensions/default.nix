@@ -15,14 +15,6 @@ let
 
   slugOf = name: lib.replaceStrings [ "@" "/" ] [ "" "-" ] name;
 
-  # Libraries autoPatchelfHook must be able to find beyond stdenv.cc.cc.lib.
-  # pi-mcp-adapter reaches `recheck`, a GraalVM native-image binary published
-  # by recheck-linux-x64, and that binary links libz. Every other native file
-  # across the pin set resolves against libc/libgcc_s/libstdc++ alone.
-  extraBuildInputsFor = {
-    pi-mcp-adapter = [ bunPkgs.zlib ];
-  };
-
   mkOne =
     name: pin:
     let
@@ -41,7 +33,6 @@ let
         ;
       bunLock = if pin.bundled then null else ./. + "/${slug}/bun.lock";
       bunNix = if pin.bundled then null else ./. + "/${slug}/bun.nix";
-      extraBuildInputs = extraBuildInputsFor.${slug} or [ ];
       promptFragment = null;
     };
   # First-party extensions. No pin, no lockfile: the source is in this repo and

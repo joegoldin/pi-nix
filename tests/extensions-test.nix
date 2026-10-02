@@ -42,7 +42,6 @@ let
     "ext-pi-extras"
     "ext-pi-foreign-skills"
     "ext-pi-intercom"
-    "ext-pi-mcp-adapter"
     "ext-pi-notify"
     "ext-pi-subagents"
     "ext-pi-voice"
@@ -72,12 +71,12 @@ let
     assert synthetic.passthru.promptFragment == "Use the acme tool for acme things.";
     # An empty entrypoints list means "hand pi the package root and let it read
     # the pi manifest", which is the normal path for every real pin.
-    assert exts.ext-pi-mcp-adapter.passthru.piEntrypoint == [ "${exts.ext-pi-mcp-adapter}" ];
-    assert exts.ext-pi-mcp-adapter.passthru.piSkills == [ ];
+    assert exts.ext-pi-subagents.passthru.piEntrypoint == [ "${exts.ext-pi-subagents}" ];
+    assert exts.ext-pi-background-tasks.passthru.piPrompts == [ ];
     assert exts.ext-pi-subagents.passthru.piPrompts == [ "${exts.ext-pi-subagents}/prompts" ];
     assert exts.ext-pi-background-tasks.passthru.piSkills == [ ];
-    assert exts.ext-pi-mcp-adapter.passthru.settings == { };
-    assert exts.ext-pi-mcp-adapter.passthru.promptFragment == null;
+    assert exts.ext-pi-subagents.passthru.settings == { };
+    assert exts.ext-pi-subagents.passthru.promptFragment == null;
     # A first-party extension names its entrypoint explicitly instead, because
     # nothing about it is resolved from an npm manifest.
     assert exts.ext-pi-notify.passthru.piEntrypoint == [ "${exts.ext-pi-notify}/src/index.ts" ];
@@ -128,7 +127,6 @@ pkgs.runCommand "pi-nix-extensions-tests" { nativeBuildInputs = [ pkgs.jq ]; } '
     done
   }
 
-  check ${exts.ext-pi-mcp-adapter} deps
   check ${exts.ext-pi-subagents} deps
   check ${exts.ext-pi-background-tasks} deps
   check ${exts.ext-juicesharp-rpiv-ask-user-question} deps
@@ -141,8 +139,6 @@ pkgs.runCommand "pi-nix-extensions-tests" { nativeBuildInputs = [ pkgs.jq ]; } '
   check ${exts.ext-czottmann-pi-automode} deps
 
   # Skills and prompts advertised through the passthru must be real directories.
-  # MCP adapter still ships these files but no longer advertises auto-loading them.
-  test -d ${exts.ext-pi-mcp-adapter}/skills
   test -d ${exts.ext-pi-subagents}/skills
   test -d ${exts.ext-pi-subagents}/prompts
 

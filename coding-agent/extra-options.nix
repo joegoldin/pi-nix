@@ -915,8 +915,8 @@ in
       '';
       example = lib.literalExpression ''
         with inputs.pi-nix.packages.''${pkgs.system}; [
-          ext-pi-mcp-adapter
           ext-pi-subagents
+          ext-juicesharp-rpiv-todo
         ]
       '';
     };
