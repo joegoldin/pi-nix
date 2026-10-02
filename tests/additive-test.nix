@@ -35,9 +35,9 @@ let
   #   options.nix -- jail.privateAgentSubdirs has to append its tmpfs after the
   #   agent-directory bind, and that bind is emitted here.
   expected = {
-    "VERSION.json" = "1c008982bb475b33495a8031123bd687b2b9b81ddadcfb811a3c5fd084145fed";
-    "coding-agent/bun.nix" = "2056b33640ee9a6cdaf3c112200f45c02046040ee95a891be36adaafecd37b90";
-    "coding-agent/options.nix" = "7ba20b8f4c6899e79850e2a44280409ec4c46bc07c95145d4f89c64222329f9d";
+    "VERSION.json" = "76a53cc37800ccfee29a4827f38b2e04638f3493a57e174de403cce23b569e72";
+    "coding-agent/bun.nix" = "7f463e3c8be2b6b4b3090527d1d75250c9d2baa611b7b0d9f40d6da45ed45a72";
+    "coding-agent/options.nix" = "9aa0f06210faddd4e4724f286c591bbffb0935f11a0d3bad4634d5b91d753b03";
     "coding-agent/package-bun.nix" = "5ea57719bb85881001f97465aa161efdeba4c77dc63a50bc123c19aa72612dde";
     "coding-agent/package.nix" = "f572b98fcfcadf627f92700fa5a3989ae7f3935668ac8b68b7928b1b49c622a9";
     "regenerate-models.nix" = "d9ade9a165e7de1a1cefc1ae859a1f30cff317e2076e3d9fbae07d4bd8cfbea5";
