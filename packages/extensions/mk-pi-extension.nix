@@ -71,9 +71,8 @@
   # promptGuidelines of its own. Normally null.
   promptFragment ? null,
   # Extra libraries autoPatchelfHook must be able to find. Empty for every pin
-  # in the initial set: the two with native code (@napi-rs/keyring under
-  # pi-mcp-adapter, ffi-rs under pi-pretty) need only libc, libgcc_s, and
-  # libstdc++, which stdenv.cc.cc.lib already supplies.
+  # in the set: the native code (ffi-rs under pi-pretty) needs only libc,
+  # libgcc_s, and libstdc++, which stdenv.cc.cc.lib already supplies.
   extraBuildInputs ? [ ],
   meta ? { },
 }:
@@ -81,6 +80,7 @@ let
   slug = lib.replaceStrings [ "@" "/" ] [ "" "-" ] pname;
 
   normalisePackageJson = callPackage ./normalise-package-json.nix { };
+  hostPeerDependencies = callPackage ./host-peer-dependencies.nix { };
 
   tarball = fetchurl {
     inherit url hash;
@@ -106,6 +106,7 @@ let
         mkdir -p $out
         tar -xzf $src -C $out --strip-components=1
         chmod -R u+w $out
+        (cd $out && ${hostPeerDependencies})
         ${lib.optionalString (patchPhaseExtra != "") "cd $out"}
         ${patchPhaseExtra}
       ''
@@ -185,6 +186,7 @@ let
           runHook preInstall
           mkdir -p $out
           cp -R . $out/
+          (cd $out && ${hostPeerDependencies})
           runHook postInstall
         '';
 
