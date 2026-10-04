@@ -10,8 +10,6 @@ const modules = process.argv[2];
 const agent = join(modules, "@earendil-works/pi-coding-agent");
 const require = createRequire(join(agent, "package.json"));
 const manifest = JSON.parse(readFileSync(join(agent, "package.json")));
-const shrinkwrap = JSON.parse(readFileSync(join(agent, "npm-shrinkwrap.json")));
-assert.deepEqual(shrinkwrap.packages[""].bin, manifest.bin);
 assert(existsSync(join(agent, manifest.bin.pi)), "Missing package CLI entry");
 execFileSync("npm", ["--version"], { stdio: "pipe" });
 

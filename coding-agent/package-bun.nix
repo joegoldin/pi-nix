@@ -86,10 +86,6 @@ let
           pkg.scripts.build = pkg.scripts['build:unbundled'];
           pkg.bin.pi = 'dist/cli.js';
           pkg.exports['./rpc-entry'].import = './dist/rpc-entry.js';
-          const shrinkwrapPath = 'packages/coding-agent/npm-shrinkwrap.json';
-          const shrinkwrap = JSON.parse(fs.readFileSync(shrinkwrapPath, 'utf8'));
-          shrinkwrap.packages[""].bin = pkg.bin;
-          fs.writeFileSync(shrinkwrapPath, JSON.stringify(shrinkwrap, null, 2) + '\n');
         }
         fs.writeFileSync(file, JSON.stringify(pkg, null, 2) + '\n');
       }
