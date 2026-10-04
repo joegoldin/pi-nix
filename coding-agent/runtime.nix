@@ -34,6 +34,7 @@ let
   ) (builtins.attrNames installLock.packages);
   runtimeBins = lib.makeBinPath [
     runtime
+    nodejs # Pi uses npm to manage extension packages, also under Bun.
     gitMinimal
     openssh
     ripgrep
@@ -93,7 +94,7 @@ stdenv.mkDerivation {
   installCheckPhase = ''
     runHook preInstallCheck
     test "$("$out/bin/pi" --version)" = "${version}"
-    ${runtime}/bin/${runtime.meta.mainProgram} ${./runtime-check.mjs} "$out/lib/node_modules"
+    PATH="${runtimeBins}" ${runtime}/bin/${runtime.meta.mainProgram} ${./runtime-check.mjs} "$out/lib/node_modules"
     runHook postInstallCheck
   '';
 
