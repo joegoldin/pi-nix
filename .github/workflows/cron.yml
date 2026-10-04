@@ -64,7 +64,7 @@ jobs:
 
       - name: Build packages
         run: |
-          if git diff --quiet -- VERSION.json ai package-lock.json bun.lock coding-agent/bun.nix; then
+          if git diff --quiet -- VERSION.json ai package-lock.json bun.lock coding-agent/bun.nix coding-agent/install-lock; then
             exit 0
           fi
 
@@ -83,7 +83,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          if git diff --quiet --exit-code VERSION.json ai package-lock.json bun.lock coding-agent/bun.nix; then
+          if git diff --quiet --exit-code VERSION.json ai package-lock.json bun.lock coding-agent/bun.nix coding-agent/install-lock; then
             echo "No changes to commit"
             exit 0
           fi
@@ -91,7 +91,7 @@ jobs:
           version="$VERSION"
 
           push_tag=false
-          git add VERSION.json ai package-lock.json bun.lock coding-agent/bun.nix
+          git add VERSION.json ai package-lock.json bun.lock coding-agent/bun.nix coding-agent/install-lock
           if [[ "$VERSION_CHANGED" == "true" ]]; then
             git commit -m "Update pi to ${version}"
 
