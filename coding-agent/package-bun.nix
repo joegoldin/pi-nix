@@ -145,6 +145,15 @@ stdenv.mkDerivation {
         substituteInPlace packages/ai/package.json \
           --replace-fail 'npm run generate-models && ' '''
 
+        # Under `bun cli.js` the loader takes its Node path and hands jiti an
+        # alias map, but jiti on Bun tries a native import first, which ignores
+        # the aliases. Bun's NODE_PATH lookup misses subpath exports such as
+        # `typebox/compile`, so an extension importing one fails natively, and
+        # jiti's retry gets back the half-evaluated module: pi-subagents then
+        # dies with "Cannot access 'registerExtension' before initialization".
+        substituteInPlace packages/coding-agent/src/core/extensions/loader.ts \
+          --replace-fail ': { alias: getAliases() };' ': { alias: getAliases(), tryNative: false };'
+
         cat > patch-package-json.js <<'BUN'
     const fs = require('fs');
     for (const file of ['package.json', 'packages/ai/package.json', 'packages/coding-agent/package.json']) {
