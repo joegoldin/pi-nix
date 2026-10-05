@@ -38,7 +38,7 @@ let
     "VERSION.json" = "9edc0cc1c23cf92df06b75a7a80da22b5c92f42892829b824e5b53d770ee5841";
     "coding-agent/bun.nix" = "283e48b1c3106d6351bc4f75a5030cb536510af7b77a5ab2079891ff5027283c";
     "coding-agent/options.nix" = "9aa0f06210faddd4e4724f286c591bbffb0935f11a0d3bad4634d5b91d753b03";
-    "coding-agent/package-bun.nix" = "2b3c3671c40e3e9b2ed0f8f233bf84c18e3002c3986ff9454bb4feaafb9f46e8";
+    "coding-agent/package-bun.nix" = "12d41d833bd73a6d10591beb8c1f3673544a4c90550063f91a9539a61ec630b4";
     "coding-agent/package.nix" = "faf1fab660452e42cb2d9a528ccc273e88c4b6dd00996e7161493c080d433faa";
     "regenerate-models.nix" = "d9ade9a165e7de1a1cefc1ae859a1f30cff317e2076e3d9fbae07d4bd8cfbea5";
     "scan.nix" = "916d7beef7edc2b9c586b5e2050f826d311af9e95a3d31b315be1648b8a2da14";
