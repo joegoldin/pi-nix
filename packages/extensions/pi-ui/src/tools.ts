@@ -24,6 +24,9 @@ export interface CardInput {
 	isPartial: boolean;
 	isError: boolean;
 	cwd: string;
+	/** For write: the file's content before the call, null when it did not exist,
+	 *  undefined when unknown (a session resumed from disk). */
+	prior?: string | null;
 }
 
 export interface CardDeps {
@@ -33,6 +36,8 @@ export interface CardDeps {
 	highlight(code: string, lang: string | undefined): string[];
 	/** pi's getLanguageFromPath. */
 	languageOf(path: string): string | undefined;
+	/** pi's generateDiffString, as the display diff its edit tool returns. */
+	diff?(oldContent: string, newContent: string): string;
 }
 
 export const BUILT_IN_TOOLS = new Set(["read", "bash", "edit", "write", "ls", "find", "grep"]);
@@ -209,12 +214,26 @@ function editCard(input: CardInput, deps: CardDeps): CardModel {
 }
 
 function writeCard(input: CardInput, deps: CardDeps): CardModel {
-	const { theme } = deps;
+	const { theme, config } = deps;
 	const path = str(input.args.path) ?? "";
 	const content = str(input.args.content) ?? "";
 	const model: CardModel = { title: "Write", target: displayPath(path, input.cwd), state: stateOf(input) };
 	if (model.state === "pending") return model;
 	if (model.state === "error") return { ...model, ...errorBody(input, deps) };
+	// Overwriting a file is an edit with every line in play; show it as one.
+	if (typeof input.prior === "string" && deps.diff) {
+		if (input.prior === content) return { ...model, summary: theme.fg("muted", "Unchanged") };
+		const rows = parseDiff(deps.diff(input.prior, content));
+		const { added, removed } = countChanges(rows);
+		return {
+			...model,
+			summary: `Overwrote ${theme.bold(model.target ?? path)} with ${theme.fg("toolDiffAdded", plural(added, "addition"))} and ${theme.fg(
+				"toolDiffRemoved",
+				plural(removed, "removal"),
+			)}`,
+			body: (width) => renderDiffRows(rows, config.diffLayout, config.diffSplitMinWidth, width, theme),
+		};
+	}
 	const lines = linesOf(content);
 	return {
 		...model,

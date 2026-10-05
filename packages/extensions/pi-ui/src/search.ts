@@ -91,6 +91,39 @@ export function withinSearch(match: GrepMatchLike, searchRel: string, searchIsFi
 	return searchRel === "" || match.relativePath.startsWith(`${searchRel}/`);
 }
 
+/**
+ * The auto-mode policy's denied paths as a predicate over absolute paths, so
+ * FFF never hands back what pi's own tools are kept from showing. FFF indexes
+ * files ripgrep would skip (it does not read the global gitignore), so without
+ * this a search could surface a secret that `grep` through ripgrep would not.
+ *
+ * Same semantics as auto mode's matcher: `~` is the home directory, `*`
+ * crosses directory separators, `?` is one character, the match is anchored
+ * and case-insensitive.
+ */
+export function deniedPathMatcher(patterns: string[], home: string): (path: string) => boolean {
+	const regexes = patterns.map((pattern) => {
+		const expanded = pattern.startsWith("~/") ? `${home}${pattern.slice(1)}` : pattern;
+		const source = expanded
+			.split("")
+			.map((ch) => (ch === "*" ? ".*" : ch === "?" ? "." : ch.replace(/[.+^${}()|[\]\\]/g, "\\$&")))
+			.join("");
+		return new RegExp(`^${source}$`, "i");
+	});
+	return (path) => regexes.some((re) => re.test(path));
+}
+
+/** The denied paths from the auto-mode settings pi was launched with, if any. */
+export function deniedPathsFromEnv(env: NodeJS.ProcessEnv = process.env): string[] {
+	try {
+		const parsed = JSON.parse(env.PI_AUTOMODE_SETTINGS_JSON ?? "{}");
+		const list = parsed?.autoMode?.deniedPaths;
+		return Array.isArray(list) ? list.filter((p: unknown): p is string => typeof p === "string") : [];
+	} catch {
+		return [];
+	}
+}
+
 /** Where the frecency and query-history databases live, next to pi's own state. */
 export function fffDbDir(agentDir: string): string {
 	return join(agentDir, "pi-ui", "fff");

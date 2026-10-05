@@ -2,6 +2,7 @@
 // grep tools that consult it, and @ file completion ranked by it.
 
 import { existsSync, mkdirSync, statSync } from "node:fs";
+import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import {
 	createFindToolDefinition,
@@ -13,7 +14,17 @@ import {
 	truncateLine,
 } from "@earendil-works/pi-coding-agent";
 import { FileFinder, type FileFinderApi, type GrepCursor } from "@ff-labs/fff-bun";
-import { fffDbDir, fffGlob, fffQuery, formatGrep, type GrepMatchLike, insideRoot, withinSearch } from "./search.ts";
+import {
+	deniedPathMatcher,
+	deniedPathsFromEnv,
+	fffDbDir,
+	fffGlob,
+	fffQuery,
+	formatGrep,
+	type GrepMatchLike,
+	insideRoot,
+	withinSearch,
+} from "./search.ts";
 
 // pi's grep quotes this in its line-truncation notice; it does not export it.
 const GREP_MAX_LINE_LENGTH = 500;
@@ -57,6 +68,7 @@ function textOf(result: { content?: Array<{ type: string; text?: string }> }): s
 }
 
 export function registerSearchTools(pi: ExtensionAPI, index: SearchIndex, enabled: () => boolean): void {
+	const denied = deniedPathMatcher(deniedPathsFromEnv(), homedir());
 	const baseFind = createFindToolDefinition(process.cwd());
 	pi.registerTool({
 		...baseFind,
@@ -71,7 +83,9 @@ export function registerSearchTools(pi: ExtensionAPI, index: SearchIndex, enable
 						glob: (pattern: string, _searchPath: string, options: { limit: number }) => {
 							const found = finder.glob(fffGlob(pattern, searchRel), { pageSize: options.limit });
 							if (!found.ok) throw new Error(found.error);
-							return found.value.items.map((item) => join(index.root, item.relativePath));
+							return found.value.items
+								.map((item) => join(index.root, item.relativePath))
+								.filter((path) => !denied(path));
 						},
 					},
 				});
@@ -118,7 +132,7 @@ export function registerSearchTools(pi: ExtensionAPI, index: SearchIndex, enable
 				// A pattern FFF's engine read differently from ripgrep's is ripgrep's to answer.
 				if (!found.ok || found.value.regexFallbackError) return runPi();
 				for (const m of found.value.items) {
-					if (withinSearch(m, searchRel, searchIsFile)) matches.push(m);
+					if (withinSearch(m, searchRel, searchIsFile) && !denied(join(index.root, m.relativePath))) matches.push(m);
 				}
 				cursor = found.value.nextCursor;
 				if (!cursor) break;

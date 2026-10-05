@@ -25,6 +25,7 @@ interface RowRecord {
 /** The fields of pi's ToolRenderContext this module reads. */
 export interface RenderContextLike {
 	args: unknown;
+	toolCallId: string;
 	state: { piUi?: RowRecord };
 	cwd: string;
 	expanded: boolean;
@@ -37,6 +38,9 @@ export interface RendererDeps {
 	highlight: CardDeps["highlight"];
 	languageOf: CardDeps["languageOf"];
 	expandHint(): string;
+	diff?: CardDeps["diff"];
+	/** What a write call's target held before it ran; see index.ts. */
+	priorContent?(toolCallId: string): string | null | undefined;
 }
 
 /** Nothing to paint; the result's content is drawn by the call slot. */
@@ -61,8 +65,9 @@ class LiveCard {
 				isPartial: record?.isPartial ?? true,
 				isError: record?.isError ?? false,
 				cwd: this.context.cwd,
+				prior: this.deps.priorContent?.(this.context.toolCallId),
 			},
-			{ theme: this.theme, config, highlight: this.deps.highlight, languageOf: this.deps.languageOf },
+			{ theme: this.theme, config, highlight: this.deps.highlight, languageOf: this.deps.languageOf, diff: this.deps.diff },
 		);
 		const layout: CardLayout = {
 			mode: config.toolMode === "compact" ? "compact" : "on",

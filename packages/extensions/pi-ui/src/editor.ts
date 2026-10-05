@@ -108,12 +108,37 @@ export function createPromptEditor(Base: EditorBase, promptColour: () => Colour)
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const BAND = 3;
 
+// Theme slots that read as distinct accents. Taking them from the theme rather
+// than fixing RGB values keeps the accents in the terminal's own palette.
+const ACCENTS = [
+	"accent",
+	"syntaxKeyword",
+	"syntaxFunction",
+	"syntaxString",
+	"syntaxNumber",
+	"syntaxType",
+	"success",
+	"warning",
+	"mdHeading",
+];
+
+/**
+ * The accent slot for a session: stable for its whole life, and usually
+ * different between two sessions side by side, so a glance at the working
+ * shimmer says which window is which.
+ */
+export function sessionAccent(sessionId: string): string {
+	let h = 5381;
+	for (let i = 0; i < sessionId.length; i++) h = ((h << 5) + h + sessionId.charCodeAt(i)) >>> 0;
+	return ACCENTS[h % ACCENTS.length];
+}
+
 /**
  * One frame per band position, the band sweeping the label left to right and
  * running off the end before wrapping, so the sweep reads as motion rather
  * than as a stutter at the edges.
  */
-export function shimmerFrames(label: string, theme: UiTheme): string[] {
+export function shimmerFrames(label: string, theme: UiTheme, accent = "accent"): string[] {
 	const chars = [...label];
 	const frames: string[] = [];
 	const positions = chars.length + BAND * 2;
@@ -122,10 +147,10 @@ export function shimmerFrames(label: string, theme: UiTheme): string[] {
 		const text = chars
 			.map((ch, i) => {
 				const d = Math.abs(i - centre);
-				return d === 0 ? theme.bold(theme.fg("accent", ch)) : d < BAND ? theme.fg("accent", ch) : theme.fg("muted", ch);
+				return d === 0 ? theme.bold(theme.fg(accent, ch)) : d < BAND ? theme.fg(accent, ch) : theme.fg("muted", ch);
 			})
 			.join("");
-		frames.push(`${theme.fg("accent", SPINNER[p % SPINNER.length])} ${text}`);
+		frames.push(`${theme.fg(accent, SPINNER[p % SPINNER.length])} ${text}`);
 	}
 	return frames;
 }

@@ -8,10 +8,12 @@
 // editor, the shimmer and the completer: print and RPC modes have none of the
 // surfaces those draw on.
 
-import { dirname, join } from "node:path";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import {
 	buildSessionContext,
 	CustomEditor,
+	generateDiffString,
 	type ExtensionAPI,
 	type ExtensionContext,
 	getAgentDir,
@@ -25,7 +27,7 @@ import { type Component, SettingsList } from "@earendil-works/pi-tui";
 import { createCompleter } from "./complete.ts";
 import { loadConfig, saveConfig, type UiConfig } from "./config.ts";
 import { computeBreakdown, ContextView } from "./context.ts";
-import { createPromptEditor, type EditorBase, shimmerFrames } from "./editor.ts";
+import { createPromptEditor, type EditorBase, sessionAccent, shimmerFrames } from "./editor.ts";
 import { Framed } from "./frame.ts";
 import { fileSuggestions, registerSearchTools, SearchIndex, trackSelection } from "./fff.ts";
 import { transformMarkdown } from "./markdown.ts";
@@ -41,6 +43,9 @@ import { createResolver } from "./render.ts";
 import { applySetting, settingItems } from "./settings.ts";
 
 const REFERENCE_TYPE = "pi-ui:reference";
+// A write over a file larger than this shows the new content, not a diff: a
+// diff of a file that size is not something to read in a transcript.
+const PRIOR_MAX_BYTES = 2 * 1024 * 1024;
 // Lists for the completer go stale slowly; re-reading them on every keystroke
 // would hit the disk once per character typed after an @.
 const LIST_TTL_MS = 15_000;
@@ -79,6 +84,9 @@ export default function piUi(pi: ExtensionAPI): void {
 	const index = new SearchIndex();
 	let ctxRef: ExtensionContext | undefined;
 	let completerInstalled = false;
+	// What each write call's target held before it ran. The write tool's result
+	// does not say, and by the time the card draws, the file is already new.
+	const priorContent = new Map<string, string | null>();
 
 	pi.registerToolRenderer(
 		createResolver({
@@ -86,8 +94,23 @@ export default function piUi(pi: ExtensionAPI): void {
 			highlight: (code, lang) => highlightCode(code, lang),
 			languageOf: (path) => getLanguageFromPath(path),
 			expandHint: () => keyHint("app.tools.expand", "to expand"),
+			diff: (oldContent, newContent) => generateDiffString(oldContent, newContent).diff,
+			priorContent: (toolCallId) => priorContent.get(toolCallId),
 		}),
 	);
+
+	pi.on("tool_call", (event, ctx) => {
+		if (event.toolName !== "write") return;
+		const path = resolve(ctx.cwd, String((event.input as { path?: unknown }).path ?? ""));
+		try {
+			priorContent.set(
+				event.toolCallId,
+				existsSync(path) && statSync(path).size <= PRIOR_MAX_BYTES ? readFileSync(path, "utf8") : null,
+			);
+		} catch {
+			// Unreadable before the write is the same as unknown: show the content.
+		}
+	});
 
 	pi.registerMarkdownTransformer((markdown, context) => transformMarkdown(markdown, context, config));
 
@@ -223,7 +246,8 @@ export default function piUi(pi: ExtensionAPI): void {
 			ctx.ui.setEditorComponent(undefined);
 		}
 		if (config.shimmer) {
-			ctx.ui.setWorkingIndicator({ frames: shimmerFrames("Working…", ctx.ui.theme), intervalMs: 80 });
+			const accent = sessionAccent(ctx.sessionManager.getSessionId());
+			ctx.ui.setWorkingIndicator({ frames: shimmerFrames("Working…", ctx.ui.theme, accent), intervalMs: 80 });
 			// The frames carry the word; pi's own message would repeat it.
 			ctx.ui.setWorkingMessage("");
 		} else {
@@ -260,6 +284,7 @@ export default function piUi(pi: ExtensionAPI): void {
 	});
 
 	pi.on("session_shutdown", () => {
+		priorContent.clear();
 		index.close();
 		ctxRef = undefined;
 	});

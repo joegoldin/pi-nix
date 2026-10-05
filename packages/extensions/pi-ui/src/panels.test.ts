@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import type { UiTheme } from "./card.ts";
 import { DEFAULTS } from "./config.ts";
 import { computeBreakdown, ContextView, formatTokens, renderBar } from "./context.ts";
-import { shimmerFrames } from "./editor.ts";
+import { sessionAccent, shimmerFrames } from "./editor.ts";
 import { Framed } from "./frame.ts";
 import { applySetting, settingItems } from "./settings.ts";
 
@@ -85,6 +85,18 @@ describe("shimmer", () => {
 		const frames = shimmerFrames("Working…", plain);
 		expect(frames.length).toBe([..."Working…"].length + 6);
 		for (const f of frames) expect(f.endsWith("Working…")).toBe(true);
+	});
+
+	it("colours the band with the session's own accent", () => {
+		const slots = new Set<string>();
+		shimmerFrames("ab", { ...plain, fg: (slot, t) => (slots.add(slot), t) }, "syntaxString");
+		expect(slots).toEqual(new Set(["syntaxString", "muted"]));
+	});
+
+	it("gives a session one accent for life and spreads sessions across accents", () => {
+		expect(sessionAccent("01a10e01")).toBe(sessionAccent("01a10e01"));
+		const seen = new Set(Array.from({ length: 40 }, (_, i) => sessionAccent(`session-${i}`)));
+		expect(seen.size).toBeGreaterThan(4);
 	});
 });
 

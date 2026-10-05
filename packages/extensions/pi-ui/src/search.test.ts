@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { fffGlob, fffQuery, formatGrep, insideRoot, withinSearch } from "./search.ts";
+import { deniedPathMatcher, deniedPathsFromEnv, fffGlob, fffQuery, formatGrep, insideRoot, withinSearch } from "./search.ts";
 
 const keep = (line: string) => ({ text: line, wasTruncated: false });
 
@@ -68,5 +68,27 @@ describe("withinSearch", () => {
 		expect(withinSearch({ relativePath: "src/a", lineNumber: 1, lineContent: "" }, "src", false)).toBe(true);
 		expect(withinSearch({ relativePath: "srcx/a", lineNumber: 1, lineContent: "" }, "src", false)).toBe(false);
 		expect(withinSearch({ relativePath: "a", lineNumber: 1, lineContent: "", isBinary: true }, "", false)).toBe(false);
+	});
+});
+
+describe("denied paths", () => {
+	const denied = deniedPathMatcher(["*.env", "~/.ssh/*", "/run/agenix/*"], "/home/u");
+
+	it("matches the way auto mode does: anchored, * across directories, ~ expanded", () => {
+		expect(denied("/repo/.env")).toBe(true);
+		expect(denied("/repo/deep/prod.env")).toBe(true);
+		expect(denied("/home/u/.ssh/id_ed25519")).toBe(true);
+		expect(denied("/repo/.envrc")).toBe(false);
+		expect(denied("/repo/src/env.ts")).toBe(false);
+	});
+
+	it("is case-insensitive", () => {
+		expect(denied("/repo/PROD.ENV")).toBe(true);
+	});
+
+	it("reads the list from the auto-mode settings pi was started with", () => {
+		expect(deniedPathsFromEnv({ PI_AUTOMODE_SETTINGS_JSON: JSON.stringify({ autoMode: { deniedPaths: ["*.env"] } }) })).toEqual(["*.env"]);
+		expect(deniedPathsFromEnv({})).toEqual([]);
+		expect(deniedPathsFromEnv({ PI_AUTOMODE_SETTINGS_JSON: "not json" })).toEqual([]);
 	});
 });

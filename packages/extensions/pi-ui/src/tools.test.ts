@@ -129,6 +129,25 @@ describe("write", () => {
 	});
 });
 
+describe("write over an existing file", () => {
+	const diffDeps: CardDeps = { ...deps, diff: () => "-1 old\n+1 new" };
+
+	it("shows the change as a diff", () => {
+		const card = buildCard({ ...done("write", { path: "/repo/a.md", content: "new\n" }, "ok"), prior: "old\n" }, diffDeps);
+		expect(card.summary).toBe("Overwrote a.md with 1 addition and 1 removal");
+		expect(typeof card.body).toBe("function");
+	});
+
+	it("says so when the content did not change", () => {
+		expect(buildCard({ ...done("write", { path: "a", content: "x" }, "ok"), prior: "x" }, diffDeps).summary).toBe("Unchanged");
+	});
+
+	it("previews the content for a new file or an unknown prior", () => {
+		expect(buildCard({ ...done("write", { path: "a", content: "x" }, "ok"), prior: null }, diffDeps).summary).toBe("Wrote 1 line");
+		expect(buildCard(done("write", { path: "a", content: "x" }, "ok"), diffDeps).summary).toBe("Wrote 1 line");
+	});
+});
+
 describe("ls, find and grep", () => {
 	it("lists directories and files", () => {
 		const card = buildCard(done("ls", { path: "." }, "src/\nREADME.md"), deps);
