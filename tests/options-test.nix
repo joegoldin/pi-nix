@@ -488,8 +488,15 @@ assert
 # be `finalPackage` itself rather than a wrapper around it.
 assert (evalPi { }).installedPackage == (evalPi { }).finalPackage;
 assert
-  (evalPi { pi.coding-agent.sandbox.enable = true; }).installedPackage
-  == (evalPi { pi.coding-agent.sandbox.enable = true; }).finalPackage;
+  let
+    sandboxed = evalPi { pi.coding-agent.sandbox.enable = true; };
+  in
+  # On darwin the same option is the sandbox-exec wrapper, so the check runs
+  # on both hosts rather than only holding where seatbelt does not exist.
+  if pkgs.stdenv.hostPlatform.isDarwin then
+    sandboxed.installedPackage != sandboxed.finalPackage
+  else
+    sandboxed.installedPackage == sandboxed.finalPackage;
 # The profile is rendered only when asked for.
 assert (evalPi { }).sandbox.profile == null;
 assert (evalPi { pi.coding-agent.sandbox.enable = true; }).sandbox.profile != null;
