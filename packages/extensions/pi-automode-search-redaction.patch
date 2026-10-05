@@ -1,0 +1,77 @@
+--- a/extensions/auto-mode/extension.ts
++++ b/extensions/auto-mode/extension.ts
+@@ -439,6 +439,57 @@
+       return { systemPrompt: `${event.systemPrompt}\n\n${AUTO_MODE_GUIDANCE}` };
+     });
+ 
++    // Recursive searches whose scope can reach a denied path still run; what
++    // they found under denied paths is withheld from the result instead.
++    // Blocking the call outright made every search fail as soon as a denied
++    // pattern could match anywhere, which "*.env" always can. toolCallId ->
++    // the search root the result's relative paths are under.
++    const searchRedactions = new Map<string, string>();
++
++    pi.on("tool_result", (event) => {
++      const root = searchRedactions.get(event.toolCallId);
++      if (root === undefined) return undefined;
++      searchRedactions.delete(event.toolCallId);
++      const denied = effectiveConfig().deniedPaths;
++      let withheld = 0;
++      const pathOf = (line: string): string | undefined => {
++        if (event.toolName === "grep") {
++          // "path:N: text" for a match, "path-N- text" for context.
++          return /^(.+?)(?::\d+: |-\d+- )/.exec(line)?.[1];
++        }
++        // find: one path per line; notices are bracketed.
++        const path = line.trim();
++        return path && !path.startsWith("[") ? path : undefined;
++      };
++      const keep = (line: string): boolean => {
++        const rel = pathOf(line);
++        if (rel === undefined) return true;
++        const abs = resolve(root, rel);
++        const hit =
++          matchesDeniedPath(abs, denied) ||
++          matchesDeniedPath(resolvePathForPolicy(abs) ?? abs, denied);
++        if (hit) withheld++;
++        return !hit;
++      };
++      const content = event.content.map((part) =>
++        part.type === "text"
++          ? { ...part, text: part.text.split("\n").filter(keep).join("\n") }
++          : part,
++      );
++      if (withheld === 0) return undefined;
++      const last = content.findLastIndex((part) => part.type === "text");
++      if (last >= 0) {
++        const part = content[last] as { type: "text"; text: string };
++        content[last] = {
++          ...part,
++          text: `${part.text}\n\n[${withheld} result lines under paths denied by policy were withheld]`,
++        };
++      }
++      // Replacing content alone would drop structuredContent, which still
++      // carries the withheld lines for programmatic callers.
++      return { content, structuredContent: undefined };
++    });
++
+     pi.on("tool_call", async (event, ctx) => {
+       // Enforcement order:
+       // 1. permission deny/ask rules,
+@@ -667,13 +718,9 @@
+                 cfg.deniedPaths,
+               ));
+           if (deniedSearchScope) {
+-            return block(ctx, {
+-              timestamp: Date.now(),
+-              toolName: event.toolName,
+-              reason: `Search scope can contain a path denied by policy: ${policyPath}`,
+-              action: summary,
+-              kind: "deterministic-path-deny",
+-            }, logCtx);
++            // Searching is not reading a denied file; showing one is. The
++            // tool_result handler withholds denied paths from the output.
++            searchRedactions.set(event.toolCallId, policyPath);
+           }
+           if (deterministicOnly) return undefined;
+           if (cfg.allowInsideWorkingDirectory) {
