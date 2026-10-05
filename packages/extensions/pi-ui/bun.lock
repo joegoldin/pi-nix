@@ -1,0 +1,33 @@
+{
+  "lockfileVersion": 1,
+  "configVersion": 0,
+  "workspaces": {
+    "": {
+      "name": "pi-ui",
+      "dependencies": {
+        "@ff-labs/fff-bun": "0.11.0",
+      },
+    },
+  },
+  "packages": {
+    "@ff-labs/fff-bin-android-arm64": ["@ff-labs/fff-bin-android-arm64@0.11.0", "", { "os": "android", "cpu": "arm64" }, "sha512-7CmURAtJg1xCETKE8d46CUpeql9tpdsdbyoNCrNRkH+t608jMy+mLQxmyw7cBDOI0ljg5BaffxGZfOS2E6kasA=="],
+
+    "@ff-labs/fff-bin-darwin-arm64": ["@ff-labs/fff-bin-darwin-arm64@0.11.0", "", { "os": "darwin", "cpu": "arm64" }, "sha512-C2VLBldxqNhTMtp1/NXULdEWpqfUKugP9E8BOMUDPw5qZH/YGC0tZQmeOlQUYOSScFQOiXZLJGXJMp3Uk+FGxg=="],
+
+    "@ff-labs/fff-bin-darwin-x64": ["@ff-labs/fff-bin-darwin-x64@0.11.0", "", { "os": "darwin", "cpu": "x64" }, "sha512-DOnG46YoSOR8SxNVMMe+xhPS2JjFUigMS2r0M4oCGfHDaWVY2mnYK/g1YxrAeJS3cRGO5N8Aj4RP1zq5Z2f6jQ=="],
+
+    "@ff-labs/fff-bin-linux-arm64-gnu": ["@ff-labs/fff-bin-linux-arm64-gnu@0.11.0", "", { "os": "linux", "cpu": "arm64" }, "sha512-wOTyNzovqN1+Kg3kPqfKqZ2+A262Um4bHrEIeAwKU9R7YoyMXI9oo6DTbEl2ullF3G01FaBt/PPHOZYi1q8ubw=="],
+
+    "@ff-labs/fff-bin-linux-arm64-musl": ["@ff-labs/fff-bin-linux-arm64-musl@0.11.0", "", { "os": "linux", "cpu": "arm64" }, "sha512-dtVOgT/mKN4VTqOh4i3AWjc3Kd9uDX9xz9YsiPs33lNXpEi/x68qynuaqb7JM7x/eD/nYrsJRsb5ivtH1D6nrQ=="],
+
+    "@ff-labs/fff-bin-linux-x64-gnu": ["@ff-labs/fff-bin-linux-x64-gnu@0.11.0", "", { "os": "linux", "cpu": "x64" }, "sha512-MJ1AJz9c5kxdTiIhmlEwA+hw57vBDoa+VQSr4F+1inaEiFDtem7EnXE1P8Bdhf4okGM557mCXgRrvCt4kM5pSg=="],
+
+    "@ff-labs/fff-bin-linux-x64-musl": ["@ff-labs/fff-bin-linux-x64-musl@0.11.0", "", { "os": "linux", "cpu": "x64" }, "sha512-UjqEBtZphjH6MTK18kTlA+5ccUAu3PBATerAKh9otEWbLCwqpFV0ke8LON2+UavaO5+VhBUCk7Zi97AOQhn/9Q=="],
+
+    "@ff-labs/fff-bin-win32-arm64": ["@ff-labs/fff-bin-win32-arm64@0.11.0", "", { "os": "win32", "cpu": "arm64" }, "sha512-IF54PgYYi+AsCGseNG5kYpMqkwTmp/9bB8zvndp6tXZp4xLQ4G6x/NgHgM4vyK85Sv3FWr6Sf4OZQhP4mSSipA=="],
+
+    "@ff-labs/fff-bin-win32-x64": ["@ff-labs/fff-bin-win32-x64@0.11.0", "", { "os": "win32", "cpu": "x64" }, "sha512-NFnFcueeRZ+QHvBg/k3KhduH20zFRCGqPHqjslk/3H0CHOMyP5AMTbscNwn5TZUhMutIRCfFzVI7mm+oU8jvCQ=="],
+
+    "@ff-labs/fff-bun": ["@ff-labs/fff-bun@0.11.0", "", { "optionalDependencies": { "@ff-labs/fff-bin-android-arm64": "0.11.0", "@ff-labs/fff-bin-darwin-arm64": "0.11.0", "@ff-labs/fff-bin-darwin-x64": "0.11.0", "@ff-labs/fff-bin-linux-arm64-gnu": "0.11.0", "@ff-labs/fff-bin-linux-arm64-musl": "0.11.0", "@ff-labs/fff-bin-linux-x64-gnu": "0.11.0", "@ff-labs/fff-bin-linux-x64-musl": "0.11.0", "@ff-labs/fff-bin-win32-arm64": "0.11.0", "@ff-labs/fff-bin-win32-x64": "0.11.0" }, "os": [ "!aix", "!sunos", "!freebsd", "!openbsd", ], "cpu": [ "x64", "arm64", ] }, "sha512-IWN7pKGcYYX/g0KxZkPp2fuLrLydbKstnFswb1RfRxr0lXaw7WBchefMKUFvpfbxCWOAi3sUXHIlbfDA/Vpo4Q=="],
+  }
+}

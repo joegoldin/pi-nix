@@ -16,10 +16,12 @@
 # upstream split runtime dependencies out is an install lock, not the source.
 {
   pkgs,
+  self,
   ...
 }:
 let
   inherit (pkgs) lib;
+  inherit (pkgs.stdenv.hostPlatform) system;
 
   piSrc =
     let
@@ -106,10 +108,68 @@ let
 
         touch $out
       '';
+
+  # pi-ui calls into pi at runtime (its helpers, editor and components) rather
+  # than importing types only, and it is written against pi 1.0's renderer API,
+  # which the pinned 0.87 types above predate. So it is tested and typechecked
+  # against the pi this flake builds: that pi's node_modules, plus pi-ui's own
+  # FFF dependency taken from its package.
+  piUiTsconfig = pkgs.writeText "pi-ui-tsconfig.json" (
+    builtins.toJSON {
+      compilerOptions = {
+        strict = true;
+        noEmit = true;
+        module = "esnext";
+        moduleResolution = "bundler";
+        target = "esnext";
+        lib = [ "esnext" ];
+        allowImportingTsExtensions = true;
+        skipLibCheck = true;
+        types = [ "node" ];
+      };
+      include = [ "src/**/*.ts" ];
+      exclude = [ "src/**/*.test.ts" ];
+    }
+  );
+
+  piUiTest =
+    let
+      piModules = "${self.packages.${system}.coding-agent-bun}/lib/node_modules";
+      piUi = self.packages.${system}.ext-pi-ui;
+    in
+    pkgs.runCommand "pi-nix-pi-ui-tests"
+      {
+        src = ../packages/extensions/pi-ui;
+        nativeBuildInputs = [
+          pkgs.bun
+          pkgs.typescript
+        ];
+      }
+      ''
+        set -euo pipefail
+        cp -R "$src" work
+        chmod -R u+w work
+        cd work
+
+        export HOME="$TMPDIR"
+        mkdir node_modules
+        for d in ${piModules}/*; do ln -s "$d" node_modules/; done
+        rm -f node_modules/@ff-labs
+        ln -s ${piUi}/node_modules/@ff-labs node_modules/@ff-labs
+
+        bun test
+        cp ${piUiTsconfig} tsconfig.json
+        tsc -p tsconfig.json
+
+        touch $out
+      '';
 in
 lib.mapAttrs mkTest {
   pi-notify = ../packages/extensions/pi-notify;
   pi-voice = ../packages/extensions/pi-voice;
   pi-foreign-skills = ../packages/extensions/pi-foreign-skills;
   pi-extras = ../packages/extensions/pi-extras;
+}
+// {
+  pi-ui = piUiTest;
 }
