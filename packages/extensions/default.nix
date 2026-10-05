@@ -61,6 +61,21 @@ let
         configurableDelegationEnvelope
         ;
     };
+    ext-pi-lens = mkPiExtension {
+      pname = "pi-lens";
+      inherit (pins."pi-lens")
+        version
+        url
+        hash
+        bundled
+        entrypoints
+        skills
+        prompts
+        ;
+      bunLock = ./pi-lens/bun.lock;
+      bunNix = ./pi-lens/bun.nix;
+      patchPhaseExtra = (bunPkgs.callPackage ./pi-lens-patches.nix { }).lazyCoreTools;
+    };
     ext-czottmann-pi-automode = bunPkgs.callPackage ./czottmann-pi-automode.nix {
       inherit mkPiExtension;
       pin = pins."@czottmann/pi-automode";
