@@ -1,8 +1,8 @@
 {
   "pi-subagents": {
-    "version": "0.74.0",
-    "url": "https://registry.npmjs.org/pi-subagents/-/pi-subagents-0.74.0.tgz",
-    "hash": "sha512-7+67TCpQuYoW2kMu4Kmt4j90hiR8uX8ozg3F/eakApUU6PxK7NteO58ylOWPql7fh/uTIEfS00FT2LKVDTSicw==",
+    "version": "0.76.0",
+    "url": "https://registry.npmjs.org/pi-subagents/-/pi-subagents-0.76.0.tgz",
+    "hash": "sha512-r1uoi43ysqbi2MJOGAnJWMbF3o2xBwaWI7/pwJHgGaenv/JqGEmtt5YHYWoq8JRvlhVCquTnrtFeB7e0apLlOQ==",
     "bundled": false,
     "entrypoints": [],
     "skills": [
@@ -49,9 +49,9 @@
     "prompts": []
   },
   "@gotgenes/pi-permission-system": {
-    "version": "37.0.0",
-    "url": "https://registry.npmjs.org/@gotgenes/pi-permission-system/-/pi-permission-system-37.0.0.tgz",
-    "hash": "sha512-4EB1OHYvR8d/V1FF+vPC5iXZfVz7rhI6BdHW3EPsVtwk7t4zaAa+/RcqxX/aS5nm0SMwZ3WNNrIZtueUJwTUAQ==",
+    "version": "39.0.4",
+    "url": "https://registry.npmjs.org/@gotgenes/pi-permission-system/-/pi-permission-system-39.0.4.tgz",
+    "hash": "sha512-GOTdx8eVfilNhK5jJzCmmf3PnB/eYOb5ZUChiROsIQJFx3nL0jvD6+slYAMnqVbJOpphur2YqA92AEu/pkHLhA==",
     "bundled": false,
     "entrypoints": [],
     "skills": [],
@@ -67,9 +67,9 @@
     "prompts": []
   },
   "pi-cache-optimizer": {
-    "version": "2.8.16",
-    "url": "https://registry.npmjs.org/pi-cache-optimizer/-/pi-cache-optimizer-2.8.16.tgz",
-    "hash": "sha512-0Nuh51qvMhtPBR0dN4G6dxTICWTANBdb5IUd1VGL7d5zRzMKPTcg84nVhXKJ61JSe2nbZEyrAKDn0s29V1NYcQ==",
+    "version": "2.8.19",
+    "url": "https://registry.npmjs.org/pi-cache-optimizer/-/pi-cache-optimizer-2.8.19.tgz",
+    "hash": "sha512-nJPXytQzpWD6BnXm877RhWi3sL7m8tkQxBrUUE+xknK9VjNvVq9SYmAEInsLD1UawaEIRe8QWgZBhMYa7n9UBA==",
     "bundled": true,
     "entrypoints": [],
     "skills": [],
@@ -85,9 +85,9 @@
     "prompts": []
   },
   "pi-intercom": {
-    "version": "0.16.0",
-    "url": "https://registry.npmjs.org/pi-intercom/-/pi-intercom-0.16.0.tgz",
-    "hash": "sha512-ClGQuovPsz7r1iQwMRjEN+8wxywfrDrMILAkCSf/z19Nezzyfz77U8362Wb/VFNoZOwmF4PBsuGWCtB9AsEJMQ==",
+    "version": "0.16.1",
+    "url": "https://registry.npmjs.org/pi-intercom/-/pi-intercom-0.16.1.tgz",
+    "hash": "sha512-LhNm2JgittzbvxLSjT+fB9RIEWgJpeBSrnL5O8rfPd60SgAph5VcJWrfd5GrI0GHtSELKnw0yjjyZfcPWTaD9w==",
     "bundled": true,
     "entrypoints": [],
     "skills": [
@@ -115,6 +115,35 @@
     "bundled": false,
     "entrypoints": [],
     "skills": [],
+    "prompts": []
+  },
+  "@narumitw/pi-usage": {
+    "version": "0.62.0",
+    "url": "https://registry.npmjs.org/@narumitw/pi-usage/-/pi-usage-0.62.0.tgz",
+    "hash": "sha512-tGkGngatykXhBL7O3H4izGCA39ZzyW7ACnff0yF7ODVQT9fSG43NMbRHESZdJN7L7B8B+B+BQ7KgRtNl1Z1o8A==",
+    "bundled": false,
+    "entrypoints": [],
+    "skills": [],
+    "prompts": []
+  },
+  "pi-antigravity": {
+    "version": "0.9.0",
+    "url": "https://registry.npmjs.org/pi-antigravity/-/pi-antigravity-0.9.0.tgz",
+    "hash": "sha512-H9DJKCXbsdfVjAhiRsEmmtVd+VYcy+031x8TGToaX+MeSzUbJxE1tTIAi6ovqHVUdvhkJ9pFe+xRbdYXvl4lDg==",
+    "bundled": false,
+    "entrypoints": [],
+    "skills": [],
+    "prompts": []
+  },
+  "pi-lens": {
+    "version": "4.3.0",
+    "url": "https://registry.npmjs.org/pi-lens/-/pi-lens-4.3.0.tgz",
+    "hash": "sha512-6PTzboAc9z2WSEA6aNXCWGsd5ES5MKNJBMIxazbEk2fzcXZFerhJ1k07UDrGjE+hkkd6TnPhsHAxMQ28ZT0WGQ==",
+    "bundled": false,
+    "entrypoints": [],
+    "skills": [
+      "skills"
+    ],
     "prompts": []
   }
 }

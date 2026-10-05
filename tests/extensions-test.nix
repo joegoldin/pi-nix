@@ -33,6 +33,8 @@ let
     "ext-juicesharp-rpiv-todo"
     "ext-narumitw-pi-btw"
     "ext-narumitw-pi-goal"
+    "ext-narumitw-pi-usage"
+    "ext-pi-antigravity"
     "ext-pi-background-tasks"
     "ext-pi-cache-optimizer"
     # extras, foreign-skills, notify and voice are first-party, from
@@ -42,6 +44,7 @@ let
     "ext-pi-extras"
     "ext-pi-foreign-skills"
     "ext-pi-intercom"
+    "ext-pi-lens"
     "ext-pi-notify"
     "ext-pi-subagents"
     "ext-pi-voice"
