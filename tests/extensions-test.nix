@@ -28,15 +28,12 @@ let
   expectedNames = [
     "ext-czottmann-pi-automode"
     "ext-gotgenes-pi-permission-system"
-    "ext-heyhuynhgiabuu-pi-pretty"
     "ext-juicesharp-rpiv-ask-user-question"
     "ext-juicesharp-rpiv-todo"
     "ext-narumitw-pi-btw"
     "ext-narumitw-pi-goal"
     "ext-narumitw-pi-usage"
-    "ext-pi-antigravity"
     "ext-pi-background-tasks"
-    "ext-pi-cache-optimizer"
     # extras, foreign-skills, notify, ui and voice are first-party, from
     # packages/extensions/<name>: no pin, and only ui vendors a lockfile. They
     # are listed in sorted order with the rest rather than grouped, because the
@@ -92,16 +89,14 @@ let
     # grown one.
     assert !(pins ? pi-notify);
     assert !(pins ? pi-voice);
-    # Only cache optimizer and intercom need no installed runtime dependencies.
-    # Auto mode uses unbash for command-aware deny rules.
-    assert pins."pi-cache-optimizer".bundled;
+    # Only intercom needs no installed runtime dependencies. Auto mode uses
+    # unbash for command-aware deny rules.
     assert pins."pi-intercom".bundled;
     assert !pins."@czottmann/pi-automode".bundled;
     assert lib.all (n: !pins.${n}.bundled) (
       lib.filter (
         n:
         !(lib.elem n [
-          "pi-cache-optimizer"
           "pi-intercom"
         ])
       ) (builtins.attrNames pins)
@@ -139,8 +134,7 @@ pkgs.runCommand "pi-nix-extensions-tests" { nativeBuildInputs = [ pkgs.jq ]; } '
   check ${exts.ext-juicesharp-rpiv-todo} deps
   check ${exts.ext-gotgenes-pi-permission-system} deps
   check ${exts.ext-narumitw-pi-btw} deps
-  check ${exts.ext-heyhuynhgiabuu-pi-pretty} deps
-  check ${exts.ext-pi-cache-optimizer} nodeps
+  check ${exts.ext-pi-intercom} nodeps
   check ${exts.ext-czottmann-pi-automode} deps
 
   # Skills and prompts advertised through the passthru must be real directories.
@@ -153,9 +147,9 @@ pkgs.runCommand "pi-nix-extensions-tests" { nativeBuildInputs = [ pkgs.jq ]; } '
   test -d ${exts.ext-pi-background-tasks}/node_modules/typebox
   test -d ${exts.ext-narumitw-pi-goal}/node_modules/typebox
 
-  # pi-cache-optimizer has no dependencies at all; a node_modules here would
-  # mean the bundled branch quietly grew a bun install.
-  ! test -e ${exts.ext-pi-cache-optimizer}/node_modules
+  # pi-intercom is the bundled pin; a node_modules here would mean the bundled
+  # branch quietly grew a bun install.
+  ! test -e ${exts.ext-pi-intercom}/node_modules
   test -d ${exts.ext-czottmann-pi-automode}/node_modules/unbash
 
   touch $out

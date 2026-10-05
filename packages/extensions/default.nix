@@ -54,11 +54,6 @@ let
       pin = pins."pi-intercom";
       inherit (bunPkgs.callPackage ./pi-intercom-patches.nix { }) securityPatch;
     };
-    ext-pi-cache-optimizer = bunPkgs.callPackage ./pi-cache-optimizer.nix {
-      inherit mkPiExtension;
-      pin = pins."pi-cache-optimizer";
-      inherit (bunPkgs.callPackage ./pi-cache-optimizer-patches.nix { }) suppressibleStatusSlot;
-    };
     ext-gotgenes-pi-permission-system = bunPkgs.callPackage ./gotgenes-pi-permission-system.nix {
       inherit mkPiExtension;
       pin = pins."@gotgenes/pi-permission-system";

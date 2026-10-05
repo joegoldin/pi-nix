@@ -1014,7 +1014,7 @@ in
     jail.privateAgentSubdirs = lib.mkOption {
       type = lib.types.listOf lib.types.str;
       default = [ ];
-      example = [ "pi-pretty" ];
+      example = [ "pi-ui/fff" ];
       description = ''
         Paths under the coding-agent directory, relative to it, that each
         jailed session gets as its own tmpfs instead of the host's shared
@@ -1028,7 +1028,8 @@ in
         `lock.mdb` (`mdb_reader_pid`), so a second concurrent session asks the
         kernel for a byte the first one already holds and `mdb_txn_begin`
         returns EAGAIN. Observed as `@heyhuynhgiabuu/pi-pretty` refusing to
-        start a session while another was open:
+        start a session while another was open (pi-ui now keeps the same FFF
+        index, under `pi-ui/fff`):
 
           Error: FFF init failed: Failed to start read transaction for
           frecency database: Resource temporarily unavailable (os error 11)

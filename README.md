@@ -318,8 +318,6 @@ Pinned extensions are exposed as `packages.<system>.ext-<slug>`:
 | `ext-juicesharp-rpiv-todo` | `@juicesharp/rpiv-todo` | todos |
 | `ext-gotgenes-pi-permission-system` | `@gotgenes/pi-permission-system` | deterministic permissions |
 | `ext-narumitw-pi-btw` | `@narumitw/pi-btw` | side questions off the main thread |
-| `ext-pi-cache-optimizer` | `pi-cache-optimizer` | prefix-cache hit rate |
-| `ext-heyhuynhgiabuu-pi-pretty` | `@heyhuynhgiabuu/pi-pretty` | TUI syntax highlighting |
 | `ext-czottmann-pi-automode` | `@czottmann/pi-automode` | the auto-mode classifier, with permission-chain and shared-statusline patches; its npm version is pinned in `extensions.json` |
 
 Two more are first-party, built from `packages/extensions/` in this repo rather

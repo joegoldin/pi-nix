@@ -66,24 +66,6 @@
     "skills": [],
     "prompts": []
   },
-  "pi-cache-optimizer": {
-    "version": "2.8.19",
-    "url": "https://registry.npmjs.org/pi-cache-optimizer/-/pi-cache-optimizer-2.8.19.tgz",
-    "hash": "sha512-nJPXytQzpWD6BnXm877RhWi3sL7m8tkQxBrUUE+xknK9VjNvVq9SYmAEInsLD1UawaEIRe8QWgZBhMYa7n9UBA==",
-    "bundled": true,
-    "entrypoints": [],
-    "skills": [],
-    "prompts": []
-  },
-  "@heyhuynhgiabuu/pi-pretty": {
-    "version": "0.6.30",
-    "url": "https://registry.npmjs.org/@heyhuynhgiabuu/pi-pretty/-/pi-pretty-0.6.30.tgz",
-    "hash": "sha512-sF8LyssZYxcnGLohA7I/IXLRJMN43wxh45fjZ6gLQCnqfgsFZyQ7lmoFUIYjpJoPzf6c09bqHGJC55PCEN2GWA==",
-    "bundled": false,
-    "entrypoints": [],
-    "skills": [],
-    "prompts": []
-  },
   "pi-intercom": {
     "version": "0.16.1",
     "url": "https://registry.npmjs.org/pi-intercom/-/pi-intercom-0.16.1.tgz",
@@ -121,15 +103,6 @@
     "version": "0.62.0",
     "url": "https://registry.npmjs.org/@narumitw/pi-usage/-/pi-usage-0.62.0.tgz",
     "hash": "sha512-tGkGngatykXhBL7O3H4izGCA39ZzyW7ACnff0yF7ODVQT9fSG43NMbRHESZdJN7L7B8B+B+BQ7KgRtNl1Z1o8A==",
-    "bundled": false,
-    "entrypoints": [],
-    "skills": [],
-    "prompts": []
-  },
-  "pi-antigravity": {
-    "version": "0.9.0",
-    "url": "https://registry.npmjs.org/pi-antigravity/-/pi-antigravity-0.9.0.tgz",
-    "hash": "sha512-H9DJKCXbsdfVjAhiRsEmmtVd+VYcy+031x8TGToaX+MeSzUbJxE1tTIAi6ovqHVUdvhkJ9pFe+xRbdYXvl4lDg==",
     "bundled": false,
     "entrypoints": [],
     "skills": [],
