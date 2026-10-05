@@ -45,6 +45,7 @@ let
     "ext-pi-notify"
     "ext-pi-subagents"
     "ext-pi-voice"
+    "ext-pi-web-access"
   ];
 
   # A pin is complete when its tarball coordinates are real. There is no

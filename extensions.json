@@ -107,5 +107,14 @@
       "skills"
     ],
     "prompts": []
+  },
+  "pi-web-access": {
+    "version": "0.36.0",
+    "url": "https://registry.npmjs.org/pi-web-access/-/pi-web-access-0.36.0.tgz",
+    "hash": "sha512-7o863phmEIi85GQ2xig8Gn9MJWBG/cVfCGsa3T+5xjTagq3fqaPxjTQ4GgsT2ENQmIleveDaBbFL0dOTd2Ay7g==",
+    "bundled": false,
+    "entrypoints": [],
+    "skills": [],
+    "prompts": []
   }
 }
