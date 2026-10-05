@@ -61,7 +61,10 @@ pkgs.writeShellApplication {
       pi-patch
 
       npm dedupe --package-lock-only --ignore-scripts
-      npm audit fix --package-lock-only --ignore-scripts
+      # Apply available fixes; the scoped security scans below own the gate.
+      # audit-level=none allows remaining advisories, not npm command failures.
+      npm audit fix --package-lock-only --ignore-scripts --audit-level=none
+      node scripts/generate-coding-agent-install-lock.mjs
 
       bun install --ignore-scripts
       bun2nix -o bun.nix
@@ -93,6 +96,8 @@ pkgs.writeShellApplication {
       cp "$tmpdir/package-lock.json" package-lock.json
       cp "$tmpdir/bun.lock" bun.lock
       cp "$tmpdir/bun.nix" coding-agent/bun.nix
+      mkdir -p coding-agent/install-lock
+      cp "$tmpdir/packages/coding-agent/install-lock/"*.json coding-agent/install-lock/
       cp "$tmpdir/VERSION.json" VERSION.json
       echo "Updated lockfiles and VERSION.json for $rev"
     '';

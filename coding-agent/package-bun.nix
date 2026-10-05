@@ -1,35 +1,13 @@
 {
-  lib,
   stdenv,
-  runCommand,
   bun2nix,
   bun,
   nodejs,
-  python3,
-  makeWrapper,
-  pkg-config,
-  pixman,
-  cairo,
-  pango,
-  libpng,
-  libjpeg,
-  giflib,
-  librsvg,
-  fd,
-  gitMinimal,
-  openssh,
-  ripgrep,
+  callPackage,
   src,
   version,
 }:
 let
-  runtimeBins = lib.makeBinPath [
-    gitMinimal
-    openssh # required for git SSH clones
-    ripgrep
-    fd
-  ];
-
   bunInstallFlags =
     if stdenv.hostPlatform.isDarwin then
       [
@@ -42,175 +20,97 @@ let
         "--linker=hoisted"
         "--frozen-lockfile"
       ];
-in
-stdenv.mkDerivation {
-  pname = "pi-coding-agent-bun";
-  inherit src version bunInstallFlags;
+  workspacePackages = stdenv.mkDerivation {
+    pname = "pi-coding-agent-bun-workspace";
+    inherit src version bunInstallFlags;
 
-  nativeBuildInputs = [
-    bun2nix.hook
-    bun
-    makeWrapper
-    pkg-config
-  ];
-
-  buildInputs = [
-    pixman
-    cairo
-    pango
-    libpng
-    libjpeg
-    giflib
-    librsvg
-    fd
-  ];
-
-  bunDeps = bun2nix.fetchBunDeps {
-    bunNix =
-      {
-        copyPathToStore,
-        fetchFromGitHub,
-        fetchgit,
-        fetchurl,
-        ...
-      }@args:
-      import ./bun.nix (
-        args
-        // {
-          # A DERIVATION per workspace member, not a path read during
-          # evaluation. bun2nix emits `copyPathToStore ./packages/x`, and
-          # copyPathToStore reads its argument while nix is still evaluating;
-          # pointed at the fetched pi source that meant downloading and
-          # unpacking pi's tarball before a single build line appeared, which
-          # is import-from-derivation and cost minutes on a cold eval cache.
-          #
-          # `${src}/${sub}` inside a builder is a store-path reference instead,
-          # resolved when the build is scheduled. Evaluation never touches it.
-          workspaceSubdir =
-            sub:
-            runCommand "pi-workspace-${lib.replaceStrings [ "/" ] [ "-" ] sub}" { } ''
-              cp -R ${src}/${sub} "$out"
-            '';
-        }
-      );
-  };
-
-  dontRunLifecycleScripts = true;
-
-  # Bun lifecycle scripts are disabled above, so native modules that rely on
-  # install hooks need to be built explicitly. Without this, requiring
-  # `canvas` fails at runtime because build/Release/canvas.node is missing.
-  postBunNodeModulesInstallPhase = ''
-    pushd node_modules/canvas
-    PATH=${nodejs}/bin:$PATH PYTHON=${python3}/bin/python3 \
-      ${nodejs}/bin/node \
-      ${nodejs}/lib/node_modules/npm/node_modules/node-gyp/bin/node-gyp.js \
-      rebuild --nodedir=${nodejs}
-
-    releaseDir=$(mktemp -d)
-    cp build/Release/*.node "$releaseDir"/
-    rm -rf build
-    mkdir -p build/Release
-    cp "$releaseDir"/*.node build/Release/
-    popd
-  '';
-
-  postPatch = ''
-    cp ${../bun.lock} bun.lock
-  '';
-
-  preBuild = ''
-        find packages -name "package.json" -exec sed -i \
-          -e 's/--watch --preserveWatchOutput//g' \
-          {} \;
-
-        for f in packages/ai/src/models.ts packages/agent/src/agent.ts packages/tui/src/utils.ts; do
-          [ -f "$f" ] && echo '// @ts-nocheck' | cat - "$f" > tmp && mv tmp "$f"
-        done
-
-        changelogReplacement='`https://github.com/earendil-works/pi/blob/v${version}/packages/coding-agent/CHANGELOG.md`'
-        for changelogUrl in \
-          '"https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/CHANGELOG.md"' \
-          '"https://github.com/earendil-works/pi-mono/blob/main/packages/coding-agent/CHANGELOG.md"'
-        do
-          if grep -qF "$changelogUrl" packages/coding-agent/src/modes/interactive/interactive-mode.ts; then
-            substituteInPlace packages/coding-agent/src/modes/interactive/interactive-mode.ts \
-              --replace-fail "$changelogUrl" "$changelogReplacement"
-          fi
-        done
-
-        cp ${../ai/models.generated.ts} packages/ai/src/models.generated.ts
-        cp -R ${../ai/providers}/. packages/ai/src/providers/
-
-        substituteInPlace packages/ai/package.json \
-          --replace-fail 'npm run generate-models && ' '''
-
-        # Under `bun cli.js` the loader takes its Node path and hands jiti an
-        # alias map, but jiti on Bun tries a native import first, which ignores
-        # the aliases. Bun's NODE_PATH lookup misses subpath exports such as
-        # `typebox/compile`, so an extension importing one fails natively, and
-        # jiti's retry gets back the half-evaluated module: pi-subagents then
-        # dies with "Cannot access 'registerExtension' before initialization".
-        substituteInPlace packages/coding-agent/src/core/extensions/loader.ts \
-          --replace-fail ': { alias: getAliases() };' ': { alias: getAliases(), tryNative: false };'
-
-        cat > patch-package-json.js <<'BUN'
-    const fs = require('fs');
-    for (const file of ['package.json', 'packages/ai/package.json', 'packages/coding-agent/package.json']) {
-      const pkg = JSON.parse(fs.readFileSync(file, 'utf8'));
-      for (const [name, script] of Object.entries(pkg.scripts ?? {})) {
-        pkg.scripts[name] = script.replaceAll('npm run ', 'bun run ');
-      }
-      // Follow the root build order without producing its Node-only bundle.
-      if (file === 'packages/coding-agent/package.json' && pkg.scripts['build:unbundled']) {
-        pkg.scripts.build = pkg.scripts['build:unbundled'];
-      }
-      fs.writeFileSync(file, JSON.stringify(pkg, null, 2) + '\n');
-    }
-    BUN
-        bun patch-package-json.js
-        rm patch-package-json.js
-  '';
-
-  buildPhase = ''
-    runHook preBuild
-    bun run build:offline
-    runHook postBuild
-  '';
-
-  installPhase = ''
-    runHook preInstall
-    mkdir -p $out/bin $out/lib/node_modules/@earendil-works
-
-    for pkg in tui telemetry ai agent protocol client coding-agent mom pods; do
-      [ -d "packages/$pkg/dist" ] || continue
-      mkdir -p "$out/lib/node_modules/@earendil-works/pi-$pkg"
-      cp -r packages/$pkg/dist/* "$out/lib/node_modules/@earendil-works/pi-$pkg/"
-      cp packages/$pkg/package.json "$out/lib/node_modules/@earendil-works/pi-$pkg/"
-    done
-
-    cp -rL node_modules/. "$out/lib/node_modules/"
-
-    makeWrapper ${bun}/bin/bun $out/bin/pi \
-      --add-flags "$out/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js" \
-      --set PI_PACKAGE_DIR "$out/lib/node_modules/@earendil-works/pi-coding-agent" \
-      --prefix NODE_PATH : "$out/lib/node_modules" \
-      --suffix PATH : "${runtimeBins}" \
-      --run 'export NPM_CONFIG_PREFIX="''${NPM_CONFIG_PREFIX:-''${XDG_DATA_HOME:-$HOME/.local/share}/pi/npm}"'
-    runHook postInstall
-  '';
-
-  meta = {
-    description = "Pi - a minimal terminal coding harness (built with Bun)";
-    homepage = "https://github.com/earendil-works/pi";
-    license = lib.licenses.mit;
-    mainProgram = "pi";
-    maintainers = [
-      {
-        name = "Lukas";
-        email = "me@lukasl.dev";
-        github = "lukasl-dev";
-      }
+    nativeBuildInputs = [
+      bun2nix.hook
+      bun
+      nodejs
     ];
+
+    bunDeps = bun2nix.fetchBunDeps {
+      bunNix =
+        {
+          copyPathToStore,
+          fetchFromGitHub,
+          fetchgit,
+          fetchurl,
+          ...
+        }@args:
+        import ./bun.nix (args // { workspaceRoot = src; });
+    };
+
+    dontRunLifecycleScripts = true;
+
+    postPatch = ''
+      cp ${../bun.lock} bun.lock
+    '';
+
+    preBuild = ''
+          find packages -name "package.json" -exec sed -i \
+            -e 's/--watch --preserveWatchOutput//g' \
+            {} \;
+
+          for f in packages/ai/src/models.ts packages/agent/src/agent.ts packages/tui/src/utils.ts; do
+            [ -f "$f" ] && echo '// @ts-nocheck' | cat - "$f" > tmp && mv tmp "$f"
+          done
+
+          changelogReplacement='`https://github.com/earendil-works/pi/blob/v${version}/packages/coding-agent/CHANGELOG.md`'
+          for changelogUrl in \
+            '"https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/CHANGELOG.md"' \
+            '"https://github.com/earendil-works/pi-mono/blob/main/packages/coding-agent/CHANGELOG.md"'
+          do
+            if grep -qF "$changelogUrl" packages/coding-agent/src/modes/interactive/interactive-mode.ts; then
+              substituteInPlace packages/coding-agent/src/modes/interactive/interactive-mode.ts \
+                --replace-fail "$changelogUrl" "$changelogReplacement"
+            fi
+          done
+
+          cp ${../ai/models.generated.ts} packages/ai/src/models.generated.ts
+          cp -R ${../ai/providers}/. packages/ai/src/providers/
+
+          substituteInPlace packages/ai/package.json \
+            --replace-fail 'npm run generate-models && ' '''
+
+          cat > patch-package-json.js <<'BUN'
+      const fs = require('fs');
+      for (const file of ['package.json', 'packages/ai/package.json', 'packages/coding-agent/package.json']) {
+        const pkg = JSON.parse(fs.readFileSync(file, 'utf8'));
+        for (const [name, script] of Object.entries(pkg.scripts ?? {})) {
+          pkg.scripts[name] = script.replaceAll('npm run ', 'bun run ');
+        }
+        // Follow the root build order without producing its Node-only bundle.
+        if (file === 'packages/coding-agent/package.json' && pkg.scripts['build:unbundled']) {
+          pkg.scripts.build = pkg.scripts['build:unbundled'];
+          pkg.bin.pi = 'dist/cli.js';
+          pkg.exports['./rpc-entry'].import = './dist/rpc-entry.js';
+        }
+        fs.writeFileSync(file, JSON.stringify(pkg, null, 2) + '\n');
+      }
+      BUN
+          bun patch-package-json.js
+          rm patch-package-json.js
+    '';
+
+    buildPhase = ''
+      runHook preBuild
+      bun run build:offline
+      runHook postBuild
+    '';
+
+    installPhase = ''
+      runHook preInstall
+      ${builtins.readFile ./pack.sh}
+      runHook postInstall
+    '';
+
   };
+in
+callPackage ./runtime.nix {
+  inherit workspacePackages version;
+  pname = "pi-coding-agent-bun";
+  runtime = bun;
+  cli = "dist/cli.js";
 }
