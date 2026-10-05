@@ -10,19 +10,26 @@
 #     ToolCallEventResult to the shapes pi really has rather than to the shapes
 #     this fork believes it has. A pi bump that changes one fails here.
 #
-# PI_CODING_AGENT_SRC points at the same fetchFromGitHub output
-# packages.coding-agent builds from, so a test that wants to read pi's real
-# source can.
+# PI_CODING_AGENT_SRC points at the same fetchFromGitHub output flake.nix
+# builds pi from, so a test that wants to read pi's real source can. It is
+# fetched here rather than read off packages.coding-agent.src, which since
+# upstream split runtime dependencies out is an install lock, not the source.
 {
   pkgs,
-  self,
   ...
 }:
 let
   inherit (pkgs) lib;
-  inherit (pkgs.stdenv.hostPlatform) system;
 
-  piSrc = self.packages.${system}.coding-agent.src;
+  piSrc =
+    let
+      pin = lib.importJSON ../VERSION.json;
+    in
+    pkgs.fetchFromGitHub {
+      owner = "earendil-works";
+      repo = "pi";
+      inherit (pin) rev hash;
+    };
 
   # The npm tarball, not the GitHub source: only the published package carries
   # dist/*.d.ts, and the published types are what a third-party extension author

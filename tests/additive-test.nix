@@ -35,14 +35,14 @@ let
   #   options.nix -- jail.privateAgentSubdirs has to append its tmpfs after the
   #   agent-directory bind, and that bind is emitted here.
   expected = {
-    "VERSION.json" = "76a53cc37800ccfee29a4827f38b2e04638f3493a57e174de403cce23b569e72";
-    "coding-agent/bun.nix" = "7f463e3c8be2b6b4b3090527d1d75250c9d2baa611b7b0d9f40d6da45ed45a72";
+    "VERSION.json" = "9edc0cc1c23cf92df06b75a7a80da22b5c92f42892829b824e5b53d770ee5841";
+    "coding-agent/bun.nix" = "283e48b1c3106d6351bc4f75a5030cb536510af7b77a5ab2079891ff5027283c";
     "coding-agent/options.nix" = "9aa0f06210faddd4e4724f286c591bbffb0935f11a0d3bad4634d5b91d753b03";
-    "coding-agent/package-bun.nix" = "5ea57719bb85881001f97465aa161efdeba4c77dc63a50bc123c19aa72612dde";
-    "coding-agent/package.nix" = "f572b98fcfcadf627f92700fa5a3989ae7f3935668ac8b68b7928b1b49c622a9";
+    "coding-agent/package-bun.nix" = "12d41d833bd73a6d10591beb8c1f3673544a4c90550063f91a9539a61ec630b4";
+    "coding-agent/package.nix" = "faf1fab660452e42cb2d9a528ccc273e88c4b6dd00996e7161493c080d433faa";
     "regenerate-models.nix" = "d9ade9a165e7de1a1cefc1ae859a1f30cff317e2076e3d9fbae07d4bd8cfbea5";
-    "scan.nix" = "5fab541f642cdd7ef2887c58acfe826017bc035899f25540e1c01483e79d4080";
-    "sync.nix" = "aba26550a83ddf84a21936cc88f6fee1dc0ab794e90677df8ec73e053199d2d0";
+    "scan.nix" = "916d7beef7edc2b9c586b5e2050f826d311af9e95a3d31b315be1648b8a2da14";
+    "sync.nix" = "7a0055e9684df1aa61d634ff8f8d360341da1c05537c350979a5dccfd5e4717d";
   };
 
   drifted = pkgs.lib.attrNames (
