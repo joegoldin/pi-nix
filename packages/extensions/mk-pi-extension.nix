@@ -28,9 +28,11 @@
   pname,
   version,
   # A local source tree, for the first-party extensions this repo carries. When
-  # set, `url`/`hash`/`bunLock`/`bunNix` are all unused: there is no tarball to
-  # fetch and, because a first-party extension imports from @earendil-works/*
-  # with `import type` only, nothing to install either.
+  # set, `url`/`hash` are unused: there is no tarball to fetch. Most
+  # first-party extensions depend on nothing pi does not supply, so
+  # `bunLock`/`bunNix` stay null and the tree is copied as is; one that needs
+  # a package of its own (pi-ui needs FFF's native index) sets both and is
+  # installed the way a pinned extension is.
   src ? null,
   # npm dist.tarball
   url ? null,
@@ -88,7 +90,7 @@ let
   };
 
   drv =
-    if src != null then
+    if src != null && bunLock == null then
       # First-party. Test files and the typecheck config are dropped: what pi
       # loads is the shipped tree, and pi has neither a test runner nor tsc.
       runCommand "pi-ext-${slug}-${version}" { } ''
@@ -114,7 +116,7 @@ let
       stdenv.mkDerivation {
         pname = "pi-ext-${slug}";
         inherit version;
-        src = tarball;
+        src = if src != null then src else tarball;
 
         nativeBuildInputs = [
           bun2nix.hook
@@ -187,6 +189,12 @@ let
           mkdir -p $out
           cp -R . $out/
           (cd $out && ${hostPeerDependencies})
+          ${lib.optionalString (src != null) ''
+            # A first-party tree ships without its tests and Nix files, as the
+            # dependency-free first-party branch above does.
+            find $out/src -name '*.test.ts' -delete
+            find $out -maxdepth 1 -name '*.nix' -delete
+          ''}
           runHook postInstall
         '';
 
