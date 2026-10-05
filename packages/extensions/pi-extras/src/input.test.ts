@@ -88,6 +88,10 @@ describe("expandPathRefs", () => {
 });
 
 describe("unresolvedRefs", () => {
+	it("leaves typed references such as @session:id to the extension that owns them", () => {
+		expect(unresolvedRefs("@session:01a1 and @agent:oracle", "/repo", "/home/joe", () => false)).toEqual([]);
+	});
+
 	const exists = (path: string) => path === "/repo/src/a.ts" || path === "/home/joe/notes.md";
 
 	it("says nothing when every reference resolves", () => {

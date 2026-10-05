@@ -32,12 +32,16 @@ const REF = /(^|\s)@(\S+)/g;
 /** Sentence punctuation a path almost never ends in, and prose often does. */
 const TRAILING = /[,;:.]+$/;
 
+/** `@session:id` and `@agent:name` are typed references another extension
+ *  resolves; a lowercase word and a colon is not how a path starts. */
+const TYPED = /^[a-z][a-z-]*:/;
+
 export function findPathRefs(text: string): PathRef[] {
 	const refs: PathRef[] = [];
 	REF.lastIndex = 0;
 	for (let match = REF.exec(text); match !== null; match = REF.exec(text)) {
 		const path = (match[2] as string).replace(TRAILING, "");
-		if (path === "") continue;
+		if (path === "" || TYPED.test(path)) continue;
 		const start = match.index + (match[1] as string).length;
 		refs.push({ token: `@${path}`, path, start, end: start + path.length + 1 });
 	}
