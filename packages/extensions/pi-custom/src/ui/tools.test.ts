@@ -193,3 +193,21 @@ describe("other tools", () => {
 		expect(card.body).toEqual(["second"]);
 	});
 });
+
+describe("intercom card", () => {
+	it("names the action and target, and drops the markdown bold", () => {
+		const card = buildCard(done("intercom", { action: "ask", to: "beta", message: "what is 2+2?" }, "**Reply from beta:**\n4"), deps);
+		expect([card.title, card.target, card.detail, card.summary]).toEqual(["Intercom", "ask → beta", "what is 2+2?", "Reply from beta:"]);
+		expect(card.body).toEqual(["4"]);
+	});
+
+	it("summarises a roster by its peer count", () => {
+		const input = done("intercom", { action: "list" }, "**Current session:**\n• me", {
+			result: { content: [{ type: "text", text: "**Current session:**\n• me" }], details: { roster: { peers: 2, total: 3 } } },
+		});
+		const card = buildCard(input, deps);
+		expect(card.target).toBe("list");
+		expect(card.summary).toBe("2 peers (3 connected)");
+		expect(card.body).toEqual(["Current session:", "• me"]);
+	});
+});

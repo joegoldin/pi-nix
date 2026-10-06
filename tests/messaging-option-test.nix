@@ -1,7 +1,9 @@
-# Eval-level assertions on the messaging option. Cheap, and it catches the three
+# Eval-level assertions on the messaging option. Cheap, and it catches the
 # mistakes that would actually hurt: a default that lets an unauthenticated
-# local peer drive the agent, a config file written to a path the extension
-# never reads, and a broker command that resolves through PATH.
+# local peer drive the agent, a config file written to a path pi-custom never
+# reads, a broker command that resolves through PATH, a second copy of the
+# intercom tool, and Claude Code peering switched on inside a jail that cannot
+# reach Claude's registry.
 {
   pkgs,
   self,
@@ -18,7 +20,7 @@ let
       inherit (self.packages.${system})
         ext-czottmann-pi-automode
         ext-pi-notify
-        ext-pi-intercom
+        ext-pi-custom
         ;
     };
     inputs.agent-statusline = self.inputs.agent-statusline;
@@ -51,11 +53,33 @@ let
     map (e: builtins.elemAt args (e.i + 1)) (lib.filter (e: e.a == flag) indexed);
 
   off = evalModule { };
-  on = evalModule { messaging.enable = true; };
+  # Intercom is part of pi-custom, so every case that turns messaging on turns
+  # pi-custom on too, and `customOnly` is the baseline it must not add to.
+  customOnly = evalModule { custom.enable = true; };
+  on = evalModule {
+    custom.enable = true;
+    messaging.enable = true;
+  };
   loud = evalModule {
+    custom.enable = true;
     messaging.enable = true;
     messaging.inboundTrigger = "always";
+    messaging.claude.fromMode = "bypass";
   };
+  jailed = evalModule {
+    custom.enable = true;
+    messaging.enable = true;
+    jail.enable = true;
+  };
+
+  # Forced deeply because the refusal sits on the values, not the attribute
+  # names. tryEval cannot see a throw's text, so this proves the eval fails,
+  # not which message it fails with.
+  withoutCustom =
+    let
+      cfg = evalModule { messaging.enable = true; };
+    in
+    builtins.tryEval (builtins.deepSeq cfg.finalConfigFiles cfg.finalConfigFiles);
 
   intercomConfig = cfg: cfg.finalConfigFiles."intercom/config.json";
 
@@ -78,16 +102,22 @@ let
       ok = off.finalConfigFiles == { };
     }
     {
-      name = "enabled passes exactly one --extension";
-      ok = lib.count (a: a == "--extension") on.finalArgs == 1;
+      name = "enabled loads nothing beyond pi-custom, so the intercom tool registers once";
+      ok =
+        flagValues on.finalArgs "--extension" == flagValues customOnly.finalArgs "--extension"
+        && flagValues on.finalArgs "--extension" != [ ];
     }
     {
-      name = "the entrypoint is the package root, so pi reads the pi manifest";
-      ok = flagValues on.finalArgs "--extension" == [ "${on.messaging.package}" ];
+      name = "enabling messaging without pi-custom fails evaluation";
+      ok = !withoutCustom.success;
     }
     {
       name = "the config lands at intercom/config.json, not settings.json";
       ok = lib.attrNames on.finalConfigFiles == [ "intercom/config.json" ] && on.settings == { };
+    }
+    {
+      name = "the config switches intercom on";
+      ok = (intercomConfig on).enabled == true;
     }
     {
       name = "inboundTrigger defaults to replies";
@@ -110,7 +140,23 @@ let
       ok = !((intercomConfig on) ? stableId);
     }
     {
-      name = "the bundled skill is not installed by default";
+      name = "Claude Code peering defaults to on, prompting, outside the jail";
+      ok =
+        (intercomConfig on).claude == {
+          enabled = true;
+          fromMode = "prompting";
+        };
+    }
+    {
+      name = "fromMode is overridable to bypass";
+      ok = (intercomConfig loud).claude.fromMode == "bypass";
+    }
+    {
+      name = "Claude Code peering defaults to off under the jail, which cannot reach its registry";
+      ok = (intercomConfig jailed).claude.enabled == false;
+    }
+    {
+      name = "no skill is passed";
       ok = flagValues on.finalArgs "--skill" == [ ];
     }
     {
@@ -120,8 +166,8 @@ let
     {
       name = "the untrusted-peer prompt fragment reaches the appended prompt";
       ok =
-        lib.any (t: t == on.messaging.package.passthru.promptFragment) appendedPrompts
-        && lib.any (t: lib.hasInfix "peer" (lib.toLower t)) appendedPrompts;
+        lib.any (lib.hasInfix (builtins.readFile ../prompt/untrusted-peer-input.md)) appendedPrompts
+        && flagValues customOnly.finalArgs "--append-system-prompt" == [ ];
     }
   ];
 

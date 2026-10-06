@@ -101,8 +101,9 @@ let
   # The same treatment for config that does not live in settings.json. An
   # extension whose settings live in its own file under the agent directory
   # carries them on passthru.configFiles, and the launcher installs each one.
-  # pi-permission-system's authorizerChain (docs/assumption-a2.md) is the second
-  # case in this class after pi-intercom's inboundTrigger.
+  # pi-permission-system's authorizerChain (docs/assumption-a2.md) and
+  # intercom's inboundTrigger are both in this class, though both are written
+  # by an option below rather than by a package's passthru.
   extConfigFiles = lib.foldl' lib.recursiveUpdate { } (
     map (p: p.passthru.configFiles or { }) extPkgs
   );
@@ -450,8 +451,7 @@ let
       # The messaging broker is a separate process the extension spawns from
       # inside the sandbox, so its interpreter has to be in there with it. That
       # interpreter is bun, the same runtime pi already is, which is why this is
-      # one package rather than the nodejs plus tsx pair upstream's default launch
-      # path would have needed.
+      # one package rather than a nodejs plus tsx pair.
       (combinators.add-pkg-deps (
         [
           # Upstream's own settings prelude runs `cmp -s` bare, while every
@@ -578,27 +578,55 @@ let
 
   msg = cfg.messaging;
 
-  # Extension-owned config files, with the option's overrides applied on top of
-  # the package's own defaults.
+  # Intercom is part of pi-custom, which custom.enable already loads; messaging
+  # only writes the file that switches it on. Loading anything extra for it
+  # would register the intercom tool twice, so without pi-custom there is
+  # nothing to switch on and saying so beats a config file nobody reads.
+  messagingEnabled = lib.throwIf (msg.enable && !custom.enable) ''
+    pi.coding-agent.messaging.enable is set, but pi.coding-agent.custom.enable
+    is not.
+
+    Intercom lives in pi-custom: the messaging option writes
+    intercom/config.json, and only pi-custom reads it. Set
+    pi.coding-agent.custom.enable = true, or turn messaging off.
+  '' msg.enable;
+
+  # The file is the switch: pi-custom's intercom stays off unless it exists.
   #
-  # brokerCommand is set here rather than in the derivation so the extension
-  # package does not have to depend on pkgs.bun. Pointing it at a store path is
-  # not a tidiness measure: upstream's default path calls
-  # getNodeCommand(process.execPath), which falls back to the literal string
-  # "node" resolved through PATH whenever the interpreter is not Node, and under
-  # coding-agent-bun it never is. With brokerArgs empty the broker is launched
-  # as `bun <broker.ts>`, so tsx is never invoked either.
-  configFiles = lib.recursiveUpdate (lib.recursiveUpdate extConfigFiles permissionSystemConfigFiles) (
-    lib.optionalAttrs msg.enable (
-      lib.recursiveUpdate msg.package.passthru.configFiles {
-        "intercom/config.json" = {
-          brokerCommand = lib.getExe pkgs.bun;
-          brokerArgs = [ ];
-          inherit (msg) inboundTrigger confirmSend;
-        };
-      }
-    )
-  );
+  # brokerCommand pins the broker's interpreter to a store path. Left unset,
+  # pi-custom runs the broker under pi's own runtime when that is bun or node
+  # and refuses to spawn it otherwise, so a consumer's own `package` would
+  # decide whether messaging works. With brokerArgs empty it is launched as
+  # `bun broker.ts`, the same bun messagingRuntimeInputs puts in the jail.
+  #
+  # stableId is deliberately absent. It would be the session id of every
+  # session reading this shared file, and the broker refuses a register that
+  # claims a live session's id, so every session after the first would be
+  # turned away.
+  #
+  # inboundTrigger defaults to "replies" (addendum §17.9 Risk 1): the broker
+  # does not authenticate peers, and under "always" any process that can open
+  # the socket starts a model turn in any session with text that arrives as a
+  # *user* message.
+  messagingConfigFiles = lib.optionalAttrs messagingEnabled {
+    "intercom/config.json" = {
+      brokerCommand = lib.getExe pkgs.bun;
+      brokerArgs = [ ];
+      enabled = true;
+      inherit (msg) inboundTrigger confirmSend;
+      replyHint = true;
+      claude = {
+        enabled = msg.claude.enable;
+        inherit (msg.claude) fromMode;
+      };
+    };
+  };
+
+  configFiles = lib.foldl' lib.recursiveUpdate { } [
+    extConfigFiles
+    permissionSystemConfigFiles
+    messagingConfigFiles
+  ];
 
   configFilesPrelude = lib.concatStringsSep "\n" (
     lib.mapAttrsToList (
@@ -637,22 +665,18 @@ let
           exec ${lib.escapeShellArg (lib.getExe base)} "$@"
         '';
 
-  # piEntrypoint is a LIST (phase 2's contract). With entrypoints = [ ] it holds
-  # the package root, so pi reads pi.extensions = ["./index.ts"] from the
-  # package's own manifest.
-  messagingEntrypoints = lib.optionals msg.enable msg.package.passthru.piEntrypoint;
+  # Trust policy for peer-authored text. The intercom tool's promptSnippet
+  # covers how to call it; it cannot say what authority the *received* text
+  # carries, which is why this uses design §8's escape hatch.
+  messagingFragments = lib.optional messagingEnabled (
+    builtins.readFile ../prompt/untrusted-peer-input.md
+  );
 
-  messagingSkills = lib.optionals (msg.enable && msg.installSkill) msg.package.passthru.piSkills;
-
-  messagingFragments = lib.optional (
-    msg.enable && msg.package.passthru.promptFragment != null
-  ) msg.package.passthru.promptFragment;
-
-  messagingRuntimeInputs = lib.optionals msg.enable [ pkgs.bun ];
+  messagingRuntimeInputs = lib.optionals messagingEnabled [ pkgs.bun ];
 
   # The one env var worth setting. inboundTrigger has no environment override at
   # all, which is why configFiles exists; the ask timeout does.
-  messagingEnv = lib.optionalAttrs msg.enable {
+  messagingEnv = lib.optionalAttrs messagingEnabled {
     PI_INTERCOM_ASK_TIMEOUT_MS.value = toString (msg.askTimeoutSeconds * 1000);
   };
 
@@ -1759,27 +1783,20 @@ in
 
     messaging = {
       enable = lib.mkEnableOption ''
-        peer messaging between separately launched pi instances.
+        peer messaging between separately launched agent sessions, through
+        pi-custom's intercom. Requires {option}`custom.enable`.
 
         This is pi's missing equivalent of Claude Code's ListAgents and
         SendMessage: two pi processes started independently, in different
         terminals or different repositories, can enumerate each other and
-        exchange messages while both stay alive. It is NOT subagents: a
-        subagent is a child of one session; these are peers.
+        exchange messages while both stay alive, and with
+        {option}`messaging.claude.enable` so can pi and Claude Code. It is NOT
+        subagents: a subagent is a child of one session; these are peers.
 
-        Transport is a unix domain socket under the pi agent directory. No
-        network, no daemon, no relay, and no remote access of any kind
+        Transport is unix domain sockets: pi's broker under the pi agent
+        directory, Claude Code's own per-session sockets for Claude peers. No
+        network, no relay, and no remote access of any kind
       '';
-
-      package = lib.mkOption {
-        type = lib.types.package;
-        default = self.packages.${system}.ext-pi-intercom;
-        defaultText = lib.literalExpression "pi-nix's packages.ext-pi-intercom";
-        description = ''
-          The messaging extension to install. Must satisfy the mkPiExtension
-          passthru contract.
-        '';
-      };
 
       inboundTrigger = lib.mkOption {
         type = lib.types.enum [
@@ -1791,9 +1808,10 @@ in
         description = ''
           Whether an inbound peer message may start a model turn on its own.
 
-          The broker does not authenticate peers: any process running as this
-          user that can open the socket may register and send. Upstream's
-          default is `always`, under which such a message immediately starts a
+          Neither transport authenticates peers: any process running as this
+          user that can open the broker's socket, or this session's Claude
+          peer socket, may send. pi-intercom's default was `always`, under
+          which such a message immediately starts a
           turn and arrives as a *user* message, which routes around the
           permission layers entirely, since those gate tool calls and not the
           provenance of instructions.
@@ -1819,22 +1837,43 @@ in
         default = 300;
         description = ''
           How long a blocking request to a peer waits for its answer before
-          giving up. The upstream default is 600s; a peer that never answers
+          giving up. Without this option it is 600s; a peer that never answers
           holds the caller's turn for the whole window, so this is set
           deliberately rather than inherited.
         '';
       };
 
-      installSkill = lib.mkOption {
-        type = lib.types.bool;
-        default = false;
-        description = ''
-          Also pass the extension's bundled skills via `--skill`.
+      claude = {
+        enable = lib.mkOption {
+          type = lib.types.bool;
+          default = !cfg.jail.enable;
+          defaultText = lib.literalExpression "!jail.enable";
+          description = ''
+            Make top-level interactive pi sessions peers of Claude Code's
+            cross-session messaging: they register in Claude's peer list, so
+            Claude's ListAgents and SendMessage reach them, and the intercom
+            tool can list and message Claude sessions.
 
-          Off by default: `~/.agents/skills` is already a discovery path, and
-          whether a package-provided skill de-duplicates against it is design
-          assumption A3, still unresolved.
-        '';
+            Off under {option}`jail.enable` by default. Claude's registry lives
+            in `~/.claude/sessions` and its sockets in `$XDG_RUNTIME_DIR` or
+            `/tmp/cc-socks`, and the jail exposes neither.
+          '';
+        };
+
+        fromMode = lib.mkOption {
+          type = lib.types.enum [
+            "prompting"
+            "bypass"
+          ];
+          default = "prompting";
+          description = ''
+            The permission mode pi asserts to Claude Code on every message.
+            Claude holds a message for its user's approval when the sender's
+            asserted mode differs from its own, so with `prompting` a prompting
+            Claude session takes pi's messages directly and a bypass-mode one
+            holds them.
+          '';
+        };
       };
     };
 
@@ -2070,11 +2109,10 @@ in
       autoModeEntrypoints
       ++ extEntrypoints
       ++ notificationEntrypoints
-      ++ messagingEntrypoints
       ++ voiceEntrypoints
       ++ foreignSkillsEntrypoints
       ++ customEntrypoints;
-    skills = extSkills ++ messagingSkills;
+    skills = extSkills;
     promptTemplates = extPrompts;
     settings = extSettings;
   };

@@ -1,5 +1,5 @@
-// The chord reader: a two-key sequence starting at ctrl+s, plus the standalone
-// alt+i.
+// The chord reader: two-key sequences starting at ctrl+g, plus the standalone
+// ctrl+s, alt+i and ctrl+?.
 //
 // pi's registerShortcut takes a single KeyId, and its KeybindingsManager
 // resolves one key to one action, so neither can express "ctrl+s, then s".

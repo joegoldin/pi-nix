@@ -144,6 +144,9 @@ let
         nativeBuildInputs = [
           pkgs.bun
           pkgs.typescript
+          # intercom's Claude registry entry carries `ps -o lstart=` for its
+          # pid, which its tests compare against the real thing.
+          pkgs.ps
         ];
         PI_CODING_AGENT_SRC = piSrc;
       }

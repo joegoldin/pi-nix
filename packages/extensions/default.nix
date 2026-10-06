@@ -48,11 +48,6 @@ let
 
   # These npm packages need integration patches in addition to the generic build.
   patched = {
-    ext-pi-intercom = bunPkgs.callPackage ./pi-intercom.nix {
-      inherit mkPiExtension;
-      pin = pins."pi-intercom";
-      inherit (bunPkgs.callPackage ./pi-intercom-patches.nix { }) securityPatch;
-    };
     ext-gotgenes-pi-permission-system = bunPkgs.callPackage ./gotgenes-pi-permission-system.nix {
       inherit mkPiExtension;
       pin = pins."@gotgenes/pi-permission-system";

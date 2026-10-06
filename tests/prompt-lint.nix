@@ -32,7 +32,7 @@ let
     "Claude Code"
     "SendMessage"
     "ListAgents"
-    "pi-intercom"
+    "pi-custom"
     "pi-subagents"
     "claude-"
     "gpt-"

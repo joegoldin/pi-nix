@@ -21,19 +21,6 @@
     "skills": [],
     "prompts": []
   },
-  "pi-intercom": {
-    "version": "0.16.1",
-    "url": "https://registry.npmjs.org/pi-intercom/-/pi-intercom-0.16.1.tgz",
-    "hash": "sha512-LhNm2JgittzbvxLSjT+fB9RIEWgJpeBSrnL5O8rfPd60SgAph5VcJWrfd5GrI0GHtSELKnw0yjjyZfcPWTaD9w==",
-    "bundled": true,
-    "entrypoints": [],
-    "skills": [
-      "skills"
-    ],
-    "prompts": [],
-    "repositoryUnverifiable": "https://github.com/nicobailon/pi-intercom",
-    "pinVerification": "npm publishes no repository field; see plan Task 2 Step 1"
-  },
   "@czottmann/pi-automode": {
     "version": "1.17.0",
     "url": "https://registry.npmjs.org/@czottmann/pi-automode/-/pi-automode-1.17.0.tgz",

@@ -1,4 +1,4 @@
-// pi-custom's prompt-and-session part: the prompt stash, the ctrl+s chords that drive it, and
+// pi-custom's prompt-and-session part: the prompt stash, the chords that drive it, and
 // the four session commands that go with them.
 //
 // Everything the extension does is optional to the session. pi runs in four

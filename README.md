@@ -138,12 +138,12 @@ This fork adds:
 | `autoMode.log.enable` | bool | `false` | JSONL decision log beside the session file. |
 | `autoMode.log.classifierIo` | bool | `false` | Also log the classifier's prompt, responses, and parsed verdict. |
 | `jail.nixAccess` | bool | `false` | Put `nix` in the jail, with the store read-only and the daemon socket read-write. |
-| `messaging.enable` | bool | `false` | Peer messaging between separately launched pi instances, over a local unix socket. |
-| `messaging.package` | package | `ext-pi-intercom` | The messaging extension. Must satisfy the `mkPiExtension` passthru contract. |
+| `messaging.enable` | bool | `false` | Peer messaging between separately launched pi and Claude Code sessions, through pi-custom's intercom. Requires `custom.enable`. |
 | `messaging.inboundTrigger` | enum | `replies` | Whether an inbound peer message may start a model turn. Upstream ships `always`; this fork does not. |
 | `messaging.confirmSend` | bool | `false` | Confirm ordinary outbound messages. Replies are never gated. |
 | `messaging.askTimeoutSeconds` | int | `300` | How long a blocking request to a peer waits. Upstream's default is 600. |
-| `messaging.installSkill` | bool | `false` | Also pass the extension's bundled skills via `--skill`. |
+| `messaging.claude.enable` | bool | `!jail.enable` | Put top-level interactive pi sessions in Claude Code's peer list, and let the intercom tool reach Claude sessions. Off under the jail, which exposes neither Claude's registry nor its sockets. |
+| `messaging.claude.fromMode` | enum | `prompting` | The permission mode asserted to Claude Code. Claude holds a message for approval when this differs from its own. |
 | `voice.enable` | bool | `false` | Dictation through the first-party `pi-voice` extension, over `audiomemo record --stream`. |
 | `voice.package` | package | `ext-pi-voice` | The `pi-voice` derivation. Must satisfy the `mkPiExtension` passthru contract. |
 | `voice.audiomemo` | package | *(none)* | The audiomemo package providing `record`. No default: the jail binds this exact derivation's closure. |
@@ -188,43 +188,63 @@ alone, or defines it with `mkDefault`, needs nothing further.
 ### Messaging
 
 pi has no equivalent of Claude Code's `ListAgents` and `SendMessage`, so two pi
-sessions started in different terminals cannot see or reach each other.
-`messaging.enable` fixes that with `pi-intercom` over a unix domain socket at
-`$PI_CODING_AGENT_DIR/intercom/broker.sock`. No relay, no daemon, no network,
-and no remote or phone access: the package contains no network code at all.
+sessions started in different terminals cannot see or reach each other, and
+neither can pi and Claude Code. `messaging.enable` fixes both through the
+intercom part of pi-custom, which is why it requires `custom.enable`. The option
+loads nothing of its own; it writes `$PI_CODING_AGENT_DIR/intercom/config.json`,
+and that file is what switches intercom on.
 
-Two defaults differ from upstream's, and both are security decisions rather
-than taste.
+pi peers talk through a broker on a unix domain socket at
+`$PI_CODING_AGENT_DIR/intercom/broker.sock` (directory `0700`, files `0600`).
+The first session that needs it starts it, and it exits shortly after the last
+one leaves. It is a port of pi-intercom's broker, wire-compatible with it.
+
+Claude Code peers talk through Claude's own registry. With
+`messaging.claude.enable`, each top-level interactive pi session writes an entry
+under `~/.claude/sessions` and listens on a socket beside Claude's own, so
+Claude's `ListAgents` shows it and `SendMessage` reaches it, and the `intercom`
+tool lists and messages Claude sessions in turn. Subagent children stay off
+that list. The default follows the jail: the jail exposes neither
+`~/.claude/sessions` nor `$XDG_RUNTIME_DIR`/`/tmp/cc-socks`, so a jailed pi
+leaves Claude peering off and keeps pi peering. Every message to Claude asserts
+`messaging.claude.fromMode`; Claude holds a message for its user's approval
+when that differs from its own mode, so the default `prompting` reaches a
+prompting Claude session directly and is held by a bypass-mode one.
+
+No relay and no network either way: both transports are local sockets.
+
+Two defaults are security decisions rather than taste.
 
 **`inboundTrigger` is `replies`.** The broker authenticates nobody. Any process
-running as this user can open the socket, register, and send. Upstream's
-`always` makes such a message start a model turn immediately, with the text
-arriving as a *user* message, which routes around every permission layer: those
-gate tool calls, not the provenance of instructions. Under `replies` only a
-reply to a request this session originated may start a turn. Unsolicited
-messages are still delivered and rendered. Raising this to `always` is a
-per-host choice, not a convenience.
+running as this user can open the socket, register, and send, and the same is
+true of a Claude socket. pi-intercom's `always` makes such a message start a
+model turn immediately, with the text arriving as a *user* message, which
+routes around every permission layer: those gate tool calls, not the
+provenance of instructions. Under `replies` only a reply to a request this
+session originated may start a turn. Unsolicited messages are still delivered
+and rendered. Raising this to `always` is a per-host choice, not a convenience.
 
-**The broker refuses a live session-ID collision.** Upstream lets a client pick
-its own `sessionId` at register time and, when a live session already holds it,
-ends the incumbent's socket and hands the ID over. No flag is needed, and the ID
-is not secret: any registered peer may call `list`, and `list` returns every
-session's UUID along with its cwd, model and pid. `packages/extensions/pi-intercom-patches.nix`
-replaces that branch with a refusal, and `checks.pi-intercom-smoke` fails
-against the unpatched tarball.
+**The broker refuses a live session-ID collision.** A client picks its own
+`sessionId` at register time, and the ID is not secret: any registered peer may
+call `list`, and `list` returns every session's UUID along with its cwd, model
+and pid. pi-intercom ended the incumbent's socket and handed the ID over; this
+broker answers "Session ID already held by a live session" and leaves the
+incumbent alone. That used to be a patch over pi-intercom and is now the code
+itself; `checks.intercom-smoke` exercises it against the packaged broker and
+`checks.intercom-hardening` keeps it from going missing.
 
 What neither fixes: a process under this uid can still connect, still enumerate
-every session, and still deliver text. The package exposes no peer credential to
-check, so presence on the socket cannot be refused. `prompt/untrusted-peer-input.md`
-is what tells the model that the name a message arrives under is a claim rather
-than a fact.
+every session, and still deliver text. Neither transport exposes a peer
+credential to check, so presence on the socket cannot be refused.
+`prompt/untrusted-peer-input.md`, appended whenever messaging is on, is what
+tells the model that the name a message arrives under is a claim rather than a
+fact.
 
-`brokerCommand` is written as a bun store path with empty `brokerArgs`.
-Upstream's default launch path calls `getNodeCommand(process.execPath)`, which
-falls back to the literal string `node` resolved through `PATH` whenever the
-interpreter is not Node, and under the Bun build it never is. Pointing it at a
-store path means nothing resolves through `PATH` and `tsx` is never invoked, so
-the package needs no `node_modules`.
+`brokerCommand` is written as a bun store path with empty `brokerArgs`, so the
+broker runs as `bun broker.ts` under a known interpreter whatever `package` a
+consumer sets, and it is the same bun `messagingRuntimeInputs` puts in the jail.
+`stableId` is never written: one value in a shared config file would be every
+session's ID, and the broker would turn away every session after the first.
 
 ### Verified assumptions
 
@@ -313,7 +333,6 @@ Pinned extensions are exposed as `packages.<system>.ext-<slug>`:
 | `ext-pi-subagents` | `pi-subagents` | subagents |
 | `ext-gotgenes-pi-permission-system` | `@gotgenes/pi-permission-system` | deterministic permissions |
 | `ext-czottmann-pi-automode` | `@czottmann/pi-automode` | the auto-mode classifier, with permission-chain, shared-statusline and search-redaction patches; its npm version is pinned in `extensions.json` |
-| `ext-pi-intercom` | `pi-intercom` | messaging between sessions |
 | `ext-pi-lens` | `pi-lens` | LSP and linter feedback, its tools deferred behind its loader |
 | `ext-pi-web-access` | `pi-web-access` | web search and fetch |
 
@@ -326,7 +345,7 @@ rather than from a pin:
 
 | Attribute | Source | What it adds |
 | --- | --- | --- |
-| `ext-pi-custom` | `packages/extensions/pi-custom` | Claude Code-style tool cards, /ui, /context, @ references and FFF search; the prompt stash and chords; background tasks, todos, structured questions, /goal and /btw |
+| `ext-pi-custom` | `packages/extensions/pi-custom` | Claude Code-style tool cards, /ui, /context, @ references and FFF search; the prompt stash and chords; background tasks, todos, structured questions, /goal and /btw; intercom messaging with pi and Claude Code sessions |
 | `ext-pi-notify` | `packages/extensions/pi-notify` | Desktop notifications on prompts, settle, and long tool calls |
 | `ext-pi-voice` | `packages/extensions/pi-voice` | Push-to-talk dictation into the editor |
 | `ext-pi-foreign-skills` | `packages/extensions/pi-foreign-skills` | Skills from other agents' directories |

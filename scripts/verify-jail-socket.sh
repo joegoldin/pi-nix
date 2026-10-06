@@ -11,7 +11,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-ROOT=$(nix eval --raw .#ext-pi-intercom)
+ROOT=$(nix build --no-link --print-out-paths .#ext-pi-custom)
 BUN=$(nix build --no-link --print-out-paths nixpkgs#bun)/bin/bun
 
 AGENT_DIR=$(mktemp -d /tmp/pi-jail-a9.XXXXXX)
@@ -39,7 +39,7 @@ jail() {
 }
 
 # Jail A: run the broker.
-jail "$CWD_A" "$BUN" "$ROOT/broker/broker.ts" &
+jail "$CWD_A" "$BUN" "$ROOT/src/intercom/broker/broker.ts" &
 BROKER_JAIL=$!
 
 for _ in $(seq 1 200); do

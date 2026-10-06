@@ -1,51 +1,61 @@
-// End-to-end check of the Nix-packaged pi-intercom broker.
+// End-to-end check of the broker pi-custom ships.
 //
-// Speaks the 0.10.1 wire protocol directly (4-byte BE length + JSON) so the
-// test depends on nothing but the broker itself: no pi, no extension host, no
-// node_modules. Proves the store-path bun launcher starts the broker, that the
-// socket lands where paths.ts says it will with the modes it promises, that two
-// peers can see each other, that a message routes with its body intact, and
-// that the hardened broker refuses to hand over a live session's ID.
+// Starts the broker through spawn.ts with a bun store path as brokerCommand,
+// which is how pi-custom launches it under the messaging option, then speaks
+// the wire protocol directly (4-byte BE length + JSON) so the rest of the test
+// depends on nothing but the broker itself: no pi, no extension host, no
+// node_modules. Proves the socket lands where paths.ts says it will with the
+// modes it promises, that two peers can see each other, that a message routes
+// with its body intact, and that the broker refuses to hand over a live
+// session's ID.
 //
-// usage: bun intercom-smoke.mjs <extension package root> <bun executable>
+// usage: bun intercom-smoke.mjs <pi-custom package root> <bun executable>
 
 import assert from "node:assert/strict";
 import net from "node:net";
-import { spawn } from "node:child_process";
-import { existsSync, statSync, mkdtempSync } from "node:fs";
+import { existsSync, readFileSync, statSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const [root, bunExe] = process.argv.slice(2);
-assert.ok(root, "argv[2] must be the pi-intercom package root");
+assert.ok(root, "argv[2] must be the pi-custom package root");
 assert.ok(bunExe, "argv[3] must be the bun executable");
 
-// Hostile umask on purpose. pi-intercom passes explicit modes AND chmods, so
-// unlike some of its competitors its permissions must not depend on this.
+// Hostile umask on purpose. The broker and spawn.ts pass explicit modes AND
+// chmod, so the permissions must not depend on this.
 process.umask(0o002);
 
 const agentDir = mkdtempSync(join(tmpdir(), "intercom-smoke-"));
-const sockPath = join(agentDir, "intercom", "broker.sock");
+const intercomDir = join(agentDir, "intercom");
+const sockPath = join(intercomDir, "broker.sock");
+const pidPath = join(intercomDir, "broker.pid");
+// spawn.ts and paths.ts read the agent dir from the environment at call time.
+process.env.PI_CODING_AGENT_DIR = agentDir;
 
-const broker = spawn(bunExe, [join(root, "broker", "broker.ts")], {
-  env: { ...process.env, PI_CODING_AGENT_DIR: agentDir },
-  stdio: ["ignore", "ignore", "inherit"],
-});
-broker.on("exit", (code, signal) => {
-  if (code !== null && code !== 0) {
-    console.error(`broker exited early: code=${code} signal=${signal}`);
-    process.exit(1);
-  }
-});
+const { spawnBrokerIfNeeded } = await import(join(root, "src", "intercom", "broker", "spawn.ts"));
+
+// spawn.ts detaches the broker so it outlives the pi that started it; this
+// kills it by its pid file so the build does not wait out its idle timer.
+function stopBroker(signal) {
+  try {
+    process.kill(Number.parseInt(readFileSync(pidPath, "utf-8").trim(), 10), signal);
+  } catch {}
+}
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-for (let i = 0; i < 200 && !existsSync(sockPath); i++) await sleep(50);
+
+try {
+  await spawnBrokerIfNeeded(bunExe, []);
+} catch (error) {
+  console.error(error);
+  process.exit(1);
+}
 assert.ok(existsSync(sockPath), `broker socket never appeared at ${sockPath}`);
 
 const mode = (p) => (statSync(p).mode & 0o777).toString(8);
-assert.equal(mode(join(agentDir, "intercom")), "700", "intercom dir must be 0700");
+assert.equal(mode(intercomDir), "700", "intercom dir must be 0700");
 assert.equal(mode(sockPath), "600", "broker socket must be 0600");
-assert.equal(mode(join(agentDir, "intercom", "broker.pid")), "600", "pid file must be 0600");
+assert.equal(mode(pidPath), "600", "pid file must be 0600");
 
 function writeMessage(socket, msg) {
   const json = JSON.stringify(msg);
@@ -137,10 +147,10 @@ try {
   );
   // Recorded, not asserted as a defect: the broker sets no peer credentials, so
   // every entry carries peerUid undefined and trustedLocal true purely because
-  // the transport is a UDS. The prompt fragment in Task 8 is what tells the
+  // the transport is a UDS. The untrusted-peer prompt fragment is what tells the
   // model that a sender name is a claim rather than a fact.
   assert.ok(listed.sessions.every((s) => s.peerUid === undefined),
-    "peerUid is expected to be unset; if upstream starts setting it, revisit the threat model");
+    "peerUid is expected to be unset; if the broker starts setting it, revisit the threat model");
 
   // SendMessage equivalent.
   const messageId = "smoke-message-1";
@@ -157,8 +167,7 @@ try {
   assert.equal(inbound.message.content.text, text, "message body must survive routing");
 
   // Hardening regression, addendum §17.9 Risk 2: claiming a live session's ID
-  // must be refused. Against the unpatched package the thief is registered and
-  // the incumbent's socket is closed.
+  // must be refused, and the incumbent must keep its socket.
   let plannerClosed = false;
   planner.raw.on("close", () => { plannerClosed = true; });
   const thief = await connect();
@@ -168,14 +177,15 @@ try {
     "thief verdict",
   );
   assert.equal(verdict.type, "error", "claiming a live session ID must be refused, got a registration");
+  assert.equal(verdict.error, "Session ID already held by a live session");
   await sleep(300);
   assert.equal(plannerClosed, false, "the incumbent session's socket must stay open");
 
   console.log("intercom smoke: 0700/0600 under umask 002, 2 listed, 1 delivered, session-ID takeover refused");
-  broker.kill("SIGTERM");
+  stopBroker("SIGTERM");
   process.exit(0);
 } catch (error) {
   console.error(error);
-  broker.kill("SIGKILL");
+  stopBroker("SIGKILL");
   process.exit(1);
 }

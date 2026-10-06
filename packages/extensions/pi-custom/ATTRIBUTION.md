@@ -1,8 +1,10 @@
 # Attribution
 
-pi-custom is written for this repository. No source file is copied from
-another project, but its features are modelled on the projects below, and it
-was designed by reading their code. Each is credited for what it contributed.
+pi-custom is written for this repository. Its features are modelled on the
+projects below, and it was designed by reading their code. Each is credited for
+what it contributed. One part is a port rather than a reimplementation: the
+intercom broker, adapted from pi-intercom, whose licence is kept in
+[`src/intercom/broker/LICENSE`](src/intercom/broker/LICENSE).
 
 ## pi-cc-extensions
 
@@ -77,6 +79,41 @@ know. The wording of those model-facing strings is theirs.
 - [pi-btw](https://github.com/narumiruna/pi-extensions) (read at
   **v0.61.1**), licensed under the MIT License: `/btw` side threads and the
   bring-back draft.
+
+## Intercom
+
+`src/intercom/` combines two extensions into one `intercom` tool and one inbox,
+with pi sessions and Claude Code sessions as peers.
+
+- [pi-intercom](https://github.com/nicobailon/pi-intercom) (read at
+  **v0.16.1**, commit `a5fad4d`), Copyright (c) 2026 Nico Bailon, licensed
+  under the MIT License. `src/intercom/broker/` is adapted from its broker,
+  client, framing, paths and spawn code; the copyright and licence notice are
+  kept in [`src/intercom/broker/LICENSE`](src/intercom/broker/LICENSE). The
+  `intercom` tool's name, parameters, descriptions and result text, the
+  inbox's trigger and hold rules, reply tracking, the handover prompt, and
+  the event contract pi-subagents relies on follow pi-intercom; the rest of
+  the extension is reimplemented. Left out: the cross-machine relay, Herdr
+  panes, the CLI and the extension bus. Fixed: a live session ID can't be
+  taken over (carried from pi-nix's patch), ask edges are cleared when a
+  session leaves, a late socket error can't crash pi, a busy non-interactive
+  session no longer answers asks with a canned reply, and a malformed config
+  disables intercom instead of failing the extension.
+- [pi-claude-link](https://github.com/alonw0/pi-claude-link) (read at
+  **v0.1.0**, commit `7fdccbd`), Copyright (c) 2026 alonw0, licensed under the
+  MIT License. The idea and approach of joining Claude Code's own peer
+  messaging, so pi appears in its ListAgents and can use SendMessage, come
+  from here, as does the close-on-half-close lesson. `src/intercom/claude/` is
+  written from the protocol as Claude Code implements it rather than from
+  pi-claude-link's protocol file, and fixes the issues listed in
+  [`src/intercom/claude/README.md`](src/intercom/claude/README.md):
+  no delivery receipts (pi-claude-link#2), a permission mode asserted to the
+  receiver, receipts from Claude surfaced instead of dropped, explicit replies
+  instead of relaying the last assistant text, and registry entries Claude can
+  verify and clean up.
+
+Claude Code's peer protocol belongs to Anthropic; pi-custom implements it for
+interoperability and copies none of Claude Code's code.
 
 ## Runtime dependency
 

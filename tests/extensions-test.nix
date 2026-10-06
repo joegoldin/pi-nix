@@ -35,7 +35,6 @@ let
     # because the assertion compares against `builtins.attrNames`, which sorts.
     "ext-pi-custom"
     "ext-pi-foreign-skills"
-    "ext-pi-intercom"
     "ext-pi-lens"
     "ext-pi-notify"
     "ext-pi-subagents"
@@ -46,17 +45,12 @@ let
   # A pin is complete when its tarball coordinates are real. There is no
   # dependency hash to check: bun2nix keeps those in the per-pin bun.nix, and
   # Step 6's guard proves every unbundled pin has one on disk.
-  # Either SRI algorithm is a real hash. Every pin but one carries npm's own
-  # dist.integrity, which is sha512; pi-intercom carries a sha256 computed from
-  # the downloaded tarball, because that package publishes no repository field
-  # and the plan that pinned it recorded a hash it derived itself rather than
-  # one the registry asserted. `nix run .#update-extensions` will rewrite it to
-  # sha512 at the next bump, which pins the same bytes.
+  # Every pin carries npm's own dist.integrity, which is sha512.
   pinComplete =
     _name: pin:
     pin.version != ""
     && lib.hasPrefix "https://registry.npmjs.org/" pin.url
-    && (lib.hasPrefix "sha512-" pin.hash || lib.hasPrefix "sha256-" pin.hash);
+    && lib.hasPrefix "sha512-" pin.hash;
 
   evalAssertions =
     assert lib.sort (a: b: a < b) (builtins.attrNames exts) == expectedNames;
@@ -83,18 +77,10 @@ let
     # grown one.
     assert !(pins ? pi-notify);
     assert !(pins ? pi-voice);
-    # Only intercom needs no installed runtime dependencies. Auto mode uses
-    # unbash for command-aware deny rules.
-    assert pins."pi-intercom".bundled;
+    # Every pin installs runtime dependencies. Auto mode uses unbash for
+    # command-aware deny rules.
     assert !pins."@czottmann/pi-automode".bundled;
-    assert lib.all (n: !pins.${n}.bundled) (
-      lib.filter (
-        n:
-        !(lib.elem n [
-          "pi-intercom"
-        ])
-      ) (builtins.attrNames pins)
-    );
+    assert lib.all (n: !pins.${n}.bundled) (builtins.attrNames pins);
     assert lib.all (n: pinComplete n pins.${n}) (builtins.attrNames pins);
     true;
 in
@@ -123,16 +109,12 @@ pkgs.runCommand "pi-nix-extensions-tests" { nativeBuildInputs = [ pkgs.jq ]; } '
 
   check ${exts.ext-pi-subagents} deps
   check ${exts.ext-gotgenes-pi-permission-system} deps
-  check ${exts.ext-pi-intercom} nodeps
   check ${exts.ext-czottmann-pi-automode} deps
 
   # Skills and prompts advertised through the passthru must be real directories.
   test -d ${exts.ext-pi-subagents}/skills
   test -d ${exts.ext-pi-subagents}/prompts
 
-  # pi-intercom is the bundled pin; a node_modules here would mean the bundled
-  # branch quietly grew a bun install.
-  ! test -e ${exts.ext-pi-intercom}/node_modules
   test -d ${exts.ext-czottmann-pi-automode}/node_modules/unbash
 
   touch $out

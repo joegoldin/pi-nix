@@ -58,11 +58,11 @@
   # $PI_CODING_AGENT_DIR; value is any JSON-serialisable attrset.
   #
   # settings.json is not the only configuration surface an extension reads, and
-  # for some packages it is the wrong one. pi-intercom reads
-  # $PI_CODING_AGENT_DIR/intercom/config.json, and its inboundTrigger setting,
-  # which decides whether an unauthenticated local peer may start a model turn
-  # in this session, has no environment override at all. Without this field
-  # that default cannot be set from Nix.
+  # for some packages it is the wrong one. pi-permission-system reads
+  # $PI_CODING_AGENT_DIR/extensions/pi-permission-system/config.json, and its
+  # authorizerChain, which decides whether a registered chain link is ever
+  # consulted, is read from nowhere else. A package whose defaults live in such
+  # a file carries them here; the launcher installs them on every start.
   configFiles ? { },
   # Shell appended to the unpack/patch phase, run with the package root as the
   # working directory. Written with substituteInPlace --replace-fail so an

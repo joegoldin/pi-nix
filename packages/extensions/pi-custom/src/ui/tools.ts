@@ -370,6 +370,34 @@ function genericCard(input: CardInput, deps: CardDeps): CardModel {
 	return { ...model, summary: theme.fg("toolOutput", first), body: rest.map((line) => theme.fg("toolOutput", line)) };
 }
 
+/** intercom (pi-custom's own): who it talked to, and what came back, without the markdown bold. */
+function intercomCard(input: CardInput, deps: CardDeps): CardModel {
+	const { theme } = deps;
+	const action = str(input.args.action) ?? "intercom";
+	const to = str(input.args.to)?.trim() || str(input.args.cwd)?.trim();
+	const message = str(input.args.message);
+	const model: CardModel = {
+		title: "Intercom",
+		target: to ? `${action} → ${to}` : action,
+		detail: message ? oneLine(message, 60) : undefined,
+		state: stateOf(input),
+	};
+	if (model.state === "pending") return model;
+	if (model.state === "error") return { ...model, ...errorBody(input, deps) };
+	const lines = linesOf(textOf(input.result).replace(/\*\*/g, "").trim());
+	const roster = (input.result?.details as { roster?: { peers: number; total: number } } | undefined)?.roster;
+	if (roster) {
+		return {
+			...model,
+			summary: theme.fg("toolOutput", `${plural(roster.peers, "peer")} ${theme.fg("muted", `(${roster.total} connected)`)}`),
+			body: lines.map((line) => theme.fg("toolOutput", line)),
+		};
+	}
+	if (lines.length === 0) return { ...model, summary: theme.fg("muted", "Done") };
+	const [first, ...rest] = lines;
+	return { ...model, summary: theme.fg("toolOutput", first), body: rest.map((line) => theme.fg("toolOutput", line)) };
+}
+
 export function buildCard(input: CardInput, deps: CardDeps): CardModel {
 	switch (input.toolName) {
 		case "read":
@@ -386,6 +414,8 @@ export function buildCard(input: CardInput, deps: CardDeps): CardModel {
 			return findCard(input, deps);
 		case "grep":
 			return grepCard(input, deps);
+		case "intercom":
+			return intercomCard(input, deps);
 		default:
 			return genericCard(input, deps);
 	}
