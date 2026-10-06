@@ -5,6 +5,7 @@
 //   ask.ts   ask_user_question
 //   goal.ts  /goal and goal_complete, goal_blocked, goal_wait
 //   btw.ts   /btw side questions
+//   turn.ts  the summary line after a run: how long, done when, shells left
 //
 // These replace pi-background-tasks, rpiv-todo, rpiv-ask-user-question,
 // pi-goal and pi-btw, keeping the tool names, parameters and result text the
@@ -17,12 +18,14 @@ import { registerBackgroundTasks } from "./bg.ts";
 import { registerBtw } from "./btw.ts";
 import { registerGoal } from "./goal.ts";
 import { registerTodo } from "./todo.ts";
+import { registerRunSummary } from "./turn.ts";
 
 export default function tools(pi: ExtensionAPI): void {
-	registerBackgroundTasks(pi);
+	const shells = registerBackgroundTasks(pi);
 	registerTodo(pi);
 	registerAsk(pi);
 	// Read on use, so a limit changed in /ui applies to the running goal.
 	registerGoal(pi, () => loadConfig());
 	registerBtw(pi);
+	registerRunSummary(pi, () => loadConfig(), shells.running);
 }

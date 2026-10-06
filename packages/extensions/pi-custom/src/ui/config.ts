@@ -46,6 +46,10 @@ export interface UiConfig {
 	goalTurnLimit: number;
 	/** Identical tool-free goal replies in a row before the goal pauses; 0 to never. */
 	goalNoProgressTurns: number;
+	/** The "✓ 57s · done 11:11 AM" line after a run, so a long one's end is visible. */
+	turnSummary: boolean;
+	/** Runs shorter than this get no summary line; 0 for every run. */
+	turnSummaryMinSeconds: number;
 }
 
 export const DEFAULTS: UiConfig = {
@@ -64,6 +68,8 @@ export const DEFAULTS: UiConfig = {
 	fffSearch: true,
 	goalTurnLimit: 25,
 	goalNoProgressTurns: 3,
+	turnSummary: true,
+	turnSummaryMinSeconds: 5,
 };
 
 const TOOL_MODES: readonly ToolMode[] = ["on", "compact", "off"];
@@ -107,6 +113,8 @@ export function normalise(raw: unknown): UiConfig {
 		fffSearch: pickBool(v.fffSearch, DEFAULTS.fffSearch),
 		goalTurnLimit: pickInt(v.goalTurnLimit, DEFAULTS.goalTurnLimit, 0, 10_000),
 		goalNoProgressTurns: pickInt(v.goalNoProgressTurns, DEFAULTS.goalNoProgressTurns, 0, 100),
+		turnSummary: pickBool(v.turnSummary, DEFAULTS.turnSummary),
+		turnSummaryMinSeconds: pickInt(v.turnSummaryMinSeconds, DEFAULTS.turnSummaryMinSeconds, 0, 3600),
 	};
 }
 

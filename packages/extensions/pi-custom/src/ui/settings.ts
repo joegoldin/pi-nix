@@ -50,6 +50,13 @@ const ROWS: Row[] = [
 		description: "Identical tool-free replies in a row before /goal pauses. 0 turns the check off.",
 		values: ["2", "3", "5", "0"],
 	},
+	{ key: "turnSummary", label: "Run summary", description: "A line after each run: how long it took, when it finished, what is still running.", values: ON_OFF },
+	{
+		key: "turnSummaryMinSeconds",
+		label: "Run summary from",
+		description: "Seconds a run has to last before it gets a summary line. 0 means every run.",
+		values: ["0", "5", "10", "30", "60"],
+	},
 ];
 
 function shown(value: UiConfig[Key]): string {

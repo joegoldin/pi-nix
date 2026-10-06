@@ -63,7 +63,8 @@ function userShell(): string {
 	return process.env.SHELL || "/bin/sh";
 }
 
-export function registerBackgroundTasks(pi: ExtensionAPI): void {
+/** Returns how many tasks are running now, for the run summary. */
+export function registerBackgroundTasks(pi: ExtensionAPI): { running(): number } {
 	const tasks = new Map<string, Task>();
 	const seen = new Set<string>();
 	// Pinned to the first task's cwd for the session, so output stays in one
@@ -446,4 +447,6 @@ export function registerBackgroundTasks(pi: ExtensionAPI): void {
 		runDir = undefined;
 		ctxRef = undefined;
 	});
+
+	return { running: () => list().filter((t) => t.status === "running").length };
 }
