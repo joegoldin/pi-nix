@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { BODY_GUTTER, type CardLayout, type CardModel, header, layoutCard, type UiTheme } from "./card.ts";
+import { BODY_GUTTER, type CardLayout, type CardModel, header, layoutCard, paint, type UiTheme } from "./card.ts";
 
 const plain: UiTheme = { fg: (_s, t) => t, bold: (t) => t, italic: (t) => t };
 
@@ -8,7 +8,7 @@ const layout = (over: Partial<CardLayout> = {}): CardLayout => ({
 	expanded: false,
 	collapsedLines: 2,
 	expandedLines: 4,
-	expandHint: "(ctrl+o to expand)",
+	expandHint: "(click or ctrl+o)",
 	...over,
 });
 
@@ -47,15 +47,25 @@ describe("layoutCard", () => {
 		expect(rows[2]).toBe(`${" ".repeat(BODY_GUTTER)}1`);
 	});
 
-	it("folds the body behind the expand hint, counting what it hid", () => {
+	it("folds the body behind the hint, counting what it hid", () => {
 		const rows = layoutCard(model(), layout(), plain, 80);
-		expect(rows.at(-1)).toContain("… +3 lines (ctrl+o to expand)");
+		expect(rows.at(-1)).toContain("… +3 lines (click or ctrl+o)");
 	});
 
-	it("shows more when expanded, still capped, without the hint", () => {
+	it("says a capped expanded card hit the view's limit, so it never reads as folded", () => {
 		const rows = layoutCard(model(), layout({ expanded: true }), plain, 80);
-		expect(rows.at(-1)).toContain("… +1 line");
-		expect(rows.at(-1)).not.toContain("expand");
+		expect(rows.at(-1)?.trim()).toBe("… 1 more line not shown (expanded view limit)");
+		expect(rows.at(-1)).not.toContain("ctrl+o");
+	});
+
+	it("counts rows the producer dropped as plain hidden rows when expanded under the cap", () => {
+		const rows = layoutCard(model({ body: ["1"], omitted: 2 }), layout({ expanded: true }), plain, 80);
+		expect(rows.at(-1)?.trim()).toBe("… +2 lines");
+	});
+
+	it("shows everything when expanded under the cap, with no remainder line", () => {
+		const rows = layoutCard(model({ body: ["1", "2"] }), layout({ expanded: true }), plain, 80);
+		expect(rows.map((r) => r.trim())).toEqual(["● Read(src/a.ts)", "⎿  Read 5 lines", "1", "2"]);
 	});
 
 	it("keeps the last rows for a tail card, with the count above them", () => {
@@ -76,14 +86,52 @@ describe("layoutCard", () => {
 		expect(layoutCard(model(), layout({ mode: "compact", expanded: true }), plain, 80).length).toBeGreaterThan(1);
 	});
 
-	it("clips rows to the width instead of wrapping them", () => {
-		const rows = layoutCard(model({ target: "x".repeat(200) }), layout(), plain, 30);
+	it("clips rows to the width when collapsed", () => {
+		const rows = layoutCard(model({ target: "x".repeat(200), body: ["y".repeat(200)] }), layout(), plain, 30);
+		expect(rows).toHaveLength(3);
 		expect(rows.every((r) => Bun.stringWidth(r) <= 30)).toBe(true);
+	});
+
+	it("wraps long rows when expanded, continuing under the same gutter", () => {
+		const rows = layoutCard(model({ summary: undefined, body: ["a".repeat(40)] }), layout({ expanded: true }), plain, 30);
+		const body = rows.slice(1);
+		expect(body).toHaveLength(2);
+		expect(body[0].startsWith("  ⎿  ")).toBe(true);
+		expect(body[1].startsWith(" ".repeat(BODY_GUTTER))).toBe(true);
+		expect(body.map((r) => r.slice(BODY_GUTTER)).join("")).toBe("a".repeat(40));
+		expect(body.every((r) => Bun.stringWidth(r) <= 30)).toBe(true);
+	});
+
+	it("wraps a long header when expanded instead of cutting the command off", () => {
+		const rows = layoutCard(model({ target: "x".repeat(50), summary: undefined, body: [] }), layout({ expanded: true }), plain, 30);
+		expect(rows.length).toBeGreaterThan(1);
+		expect(rows.join("")).not.toContain("…");
+	});
+
+	it("paints every row edge to edge when given a background", () => {
+		const bg = "\x1b[48;5;236m";
+		const rows = layoutCard(model(), layout({ background: bg }), plain, 40);
+		expect(rows.every((r) => r.startsWith(bg) && Bun.stringWidth(r) === 40)).toBe(true);
 	});
 
 	it("gives a width-dependent body the width left after the gutter", () => {
 		let seen = 0;
 		layoutCard(model({ body: (w) => ((seen = w), ["x"]) }), layout(), plain, 50);
 		expect(seen).toBe(50 - BODY_GUTTER);
+	});
+});
+
+describe("paint", () => {
+	it("pads to the width and closes the background", () => {
+		expect(paint("ab", 4, "<bg>")).toBe("<bg>ab  \x1b[49m");
+	});
+
+	it("reopens the background after resets inside the row", () => {
+		const row = paint("a\x1b[49mb\x1b[0mc", 3, "<bg>");
+		expect(row).toBe("<bg>a\x1b[49m<bg>b\x1b[0m<bg>c\x1b[49m");
+	});
+
+	it("leaves foreground resets alone", () => {
+		expect(paint("\x1b[31ma\x1b[39m", 1, "<bg>")).toBe("<bg>\x1b[31ma\x1b[39m\x1b[49m");
 	});
 });

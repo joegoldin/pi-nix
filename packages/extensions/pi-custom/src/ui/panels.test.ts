@@ -14,6 +14,7 @@ describe("/ui settings", () => {
 		expect(items).toHaveLength(Object.keys(DEFAULTS).length);
 		expect(items.find((i) => i.id === "toolMode")?.currentValue).toBe("on");
 		expect(items.find((i) => i.id === "nerdIcons")?.currentValue).toBe("on");
+		expect(items.find((i) => i.id === "groupRuns")).toMatchObject({ label: "Group tool runs", currentValue: "on" });
 	});
 
 	it("keeps a hand-edited number visible as its own stop", () => {
@@ -25,6 +26,7 @@ describe("/ui settings", () => {
 		expect(applySetting(DEFAULTS, "nerdIcons", "off").nerdIcons).toBe(false);
 		expect(applySetting(DEFAULTS, "collapsedLines", "10").collapsedLines).toBe(10);
 		expect(applySetting(DEFAULTS, "toolMode", "compact").toolMode).toBe("compact");
+		expect(applySetting(DEFAULTS, "groupRuns", "off").groupRuns).toBe(false);
 		expect(applySetting(DEFAULTS, "nope", "x")).toBe(DEFAULTS);
 	});
 });

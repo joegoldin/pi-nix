@@ -7,8 +7,12 @@
 // Every tool renderer builds a CardModel and hands it here, so the layout rules
 // live in one place: how the header truncates, how the body collapses, and what
 // compact mode keeps. The renderers only decide what to say.
+//
+// A collapsed card is a summary, so its rows are clipped. An expanded card is
+// for reading, so its rows wrap, and it sits on a panel background so it reads
+// as one block apart from the prose around it.
 
-import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import type { ToolMode } from "./config.ts";
 
 /** The slice of pi's Theme the cards use, declared structurally so tests can pass a recorder. */
@@ -44,8 +48,10 @@ export interface CardLayout {
 	expanded: boolean;
 	collapsedLines: number;
 	expandedLines: number;
-	/** The "to expand" hint, already themed; pi supplies it from the live keybinding. */
+	/** The hint after a collapsed card's count, already themed: "(click or ctrl+o)" from the live keybinding. */
 	expandHint: string;
+	/** An SGR background opener to paint every row with, edge to edge: the panel or the hover highlight. */
+	background?: string;
 }
 
 const BULLET = "●";
@@ -77,10 +83,29 @@ function fit(line: string, width: number): string {
 	return visibleWidth(line) > width ? truncateToWidth(line, width, "…") : line;
 }
 
-/** Lay a card out at a given width. Every row is clipped, never wrapped: a card is a summary. */
+// Resets that would end the background part way along a row: a full reset and
+// the default-background code theme.bg closes with.
+const BG_RESET = /\x1b\[(?:0?|49)m/g;
+
+/** Paint a row's background across the full width, surviving the resets inside it. */
+export function paint(line: string, width: number, background: string): string {
+	const padded = line + " ".repeat(Math.max(0, width - visibleWidth(line)));
+	return `${background}${padded.replace(BG_RESET, (reset) => reset + background)}\x1b[49m`;
+}
+
+/** Lay a card out at a given width: clipped when collapsed, wrapped when expanded. */
 export function layoutCard(model: CardModel, layout: CardLayout, theme: UiTheme, width: number): string[] {
 	const w = Math.max(1, width);
+	const rows = layoutRows(model, layout, theme, w);
+	const background = layout.background;
+	return background ? rows.map((row) => paint(row, w, background)) : rows;
+}
 
+function plural(n: number): string {
+	return n === 1 ? "line" : "lines";
+}
+
+function layoutRows(model: CardModel, layout: CardLayout, theme: UiTheme, w: number): string[] {
 	if (layout.mode === "compact" && !layout.expanded) {
 		// Without a summary, the body's most telling line stands in: the last
 		// for a tail card such as command output, the first otherwise.
@@ -90,15 +115,30 @@ export function layoutCard(model: CardModel, layout: CardLayout, theme: UiTheme,
 		return [fit(header(model, theme) + summary, w)];
 	}
 
-	const rows: string[] = [fit(header(model, theme), w)];
+	// One logical line as rows: clipped to one row, or wrapped with the rest
+	// under the same gutter.
+	const place = (first: string, rest: string, line: string): string[] => {
+		if (!layout.expanded) return [fit(first + line, w)];
+		const gutter = Math.max(visibleWidth(first), visibleWidth(rest));
+		return wrapTextWithAnsi(line, Math.max(1, w - gutter)).map((part, i) => fit((i === 0 ? first : rest) + part, w));
+	};
+
+	const rows: string[] = place("", HEAD_INDENT, header(model, theme));
 	const body = typeof model.body === "function" ? model.body(Math.max(1, w - BODY_GUTTER)) : (model.body ?? []);
 	const limit = layout.expanded ? layout.expandedLines : layout.collapsedLines;
 	const shown = model.tail ? body.slice(Math.max(0, body.length - limit)) : body.slice(0, limit);
-	const hidden = body.length - shown.length + (model.omitted ?? 0);
+	const capped = body.length - shown.length;
+	const hidden = capped + (model.omitted ?? 0);
+	// Expanded, a remainder is the view's limit, not a fold: say so, so a
+	// truncated card never reads as one that only needs another click.
 	const more =
-		hidden > 0
-			? `${theme.fg("muted", `… +${hidden} ${hidden === 1 ? "line" : "lines"}`)}${layout.expanded ? "" : ` ${layout.expandHint}`}`
-			: undefined;
+		hidden === 0
+			? undefined
+			: !layout.expanded
+				? `${theme.fg("muted", `… +${hidden} ${plural(hidden)}`)} ${layout.expandHint}`
+				: capped > 0
+					? theme.fg("muted", `… ${hidden} more ${plural(hidden)} not shown (expanded view limit)`)
+					: theme.fg("muted", `… +${hidden} ${plural(hidden)}`);
 
 	const lines: string[] = [];
 	if (model.summary) lines.push(model.summary);
@@ -107,7 +147,7 @@ export function layoutCard(model: CardModel, layout: CardLayout, theme: UiTheme,
 	if (more && !model.tail) lines.push(more);
 
 	lines.forEach((line, i) => {
-		rows.push(fit(`${i === 0 ? theme.fg("muted", ELBOW_PREFIX) : BODY_PREFIX}${line}`, w));
+		rows.push(...place(i === 0 ? theme.fg("muted", ELBOW_PREFIX) : BODY_PREFIX, BODY_PREFIX, line));
 	});
 	return rows;
 }

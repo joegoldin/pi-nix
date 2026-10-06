@@ -20,7 +20,7 @@ import {
 	getLanguageFromPath,
 	getSettingsListTheme,
 	highlightCode,
-	keyHint,
+	keyText,
 	SessionManager,
 } from "@earendil-works/pi-coding-agent";
 import { type Component, SettingsList } from "@earendil-works/pi-tui";
@@ -30,6 +30,8 @@ import { computeBreakdown, ContextView } from "./context.ts";
 import { createPromptEditor, type EditorBase, sessionAccent, shimmerFrames } from "./editor.ts";
 import { Framed } from "./frame.ts";
 import { fileSuggestions, registerSearchTools, SearchIndex, trackSelection } from "./fff.ts";
+import { type EntryLike, GroupState, LiveFeed, type MessageLike, RunModel } from "./group.ts";
+import { HoverTracker, movesPointer } from "./hover.ts";
 import { transformMarkdown } from "./markdown.ts";
 import {
 	type AgentSummary,
@@ -88,16 +90,75 @@ export default function piUi(pi: ExtensionAPI): void {
 	// does not say, and by the time the card draws, the file is already new.
 	const priorContent = new Map<string, string | null>();
 
+	// Runs of exploratory calls (group.ts): rebuilt from the branch whenever pi
+	// redraws the transcript from it, then followed live.
+	const runs = new RunModel();
+	const feed = new LiveFeed(runs);
+	const groups = new GroupState();
+	const hover = new HoverTracker();
+	// Any row's repaint asks pi for a frame, which redraws every row.
+	let repaint: (() => void) | undefined;
+	let stopWatchingPointer: (() => void) | undefined;
+
 	pi.registerToolRenderer(
 		createResolver({
 			config: () => config,
 			highlight: (code, lang) => highlightCode(code, lang),
 			languageOf: (path) => getLanguageFromPath(path),
-			expandHint: () => keyHint("app.tools.expand", "to expand"),
+			expandKey: () => keyText("app.tools.expand"),
 			diff: (oldContent, newContent) => generateDiffString(oldContent, newContent).diff,
 			priorContent: (toolCallId) => priorContent.get(toolCallId),
+			runs: { model: runs, groups, toolsExpanded: () => (ctxRef?.hasUI ? ctxRef.ui.getToolsExpanded() : false) },
+			hover,
+			noteRepaint: (fn) => {
+				repaint = fn;
+			},
 		}),
 	);
+
+	function loadRuns(ctx: ExtensionContext): void {
+		runs.load(ctx.sessionManager.getBranch() as EntryLike[]);
+		groups.clear();
+		hover.clear();
+	}
+
+	pi.on("session_tree", (_event, ctx) => loadRuns(ctx));
+	pi.on("agent_start", () => runs.agentStart());
+	pi.on("agent_end", () => {
+		runs.agentEnd();
+		// The last run folds now; pi may already have drawn its final frame.
+		repaint?.();
+	});
+	pi.on("message_start", (event) => {
+		if ((event.message as MessageLike).role === "assistant") feed.begin();
+	});
+	pi.on("message_update", (event) => {
+		const message = event.message as MessageLike;
+		if (message.role !== "assistant" || !Array.isArray(message.content)) return;
+		feed.update(event.assistantMessageEvent, message.content);
+	});
+	pi.on("message_end", (event) => {
+		const message = event.message as MessageLike;
+		if (message.role === "assistant") feed.end(message);
+		else runs.addMessage(message);
+	});
+	pi.on("tool_execution_end", (event) => {
+		if (!event.parentToolCallId) runs.setFailed(event.toolCallId, event.isError);
+	});
+
+	/**
+	 * Watch stdin for pointer reports to know when the pointer leaves every card
+	 * (hover.ts says why pi's input listeners cannot see them). Read-only: pi's
+	 * own reader still gets every byte.
+	 */
+	function watchPointer(): void {
+		if (stopWatchingPointer) return;
+		const onData = (chunk: string | Buffer) => {
+			if (movesPointer(String(chunk))) setImmediate(() => hover.settle());
+		};
+		process.stdin.on("data", onData);
+		stopWatchingPointer = () => process.stdin.off("data", onData);
+	}
 
 	pi.on("tool_call", (event, ctx) => {
 		if (event.toolName !== "write") return;
@@ -262,9 +323,11 @@ export default function piUi(pi: ExtensionAPI): void {
 		ctxRef = ctx;
 		sessions.clear();
 		agents.clear();
+		loadRuns(ctx);
 		if (config.fffSearch) index.open(ctx.cwd, getAgentDir());
 		if (ctx.mode !== "tui") return;
 		applyLive(ctx);
+		watchPointer();
 		// The completer wraps whatever is installed; installing it again on the
 		// next session_start would wrap it around itself.
 		if (!completerInstalled) {
@@ -285,6 +348,9 @@ export default function piUi(pi: ExtensionAPI): void {
 
 	pi.on("session_shutdown", () => {
 		priorContent.clear();
+		stopWatchingPointer?.();
+		stopWatchingPointer = undefined;
+		repaint = undefined;
 		index.close();
 		ctxRef = undefined;
 	});

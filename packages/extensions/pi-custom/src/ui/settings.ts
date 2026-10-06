@@ -30,6 +30,12 @@ const ROWS: Row[] = [
 	{ key: "diffSplitMinWidth", label: "Side-by-side from", description: "Terminal width at which auto shows diffs side by side.", values: ["100", "120", "140", "160"] },
 	{ key: "collapsedLines", label: "Collapsed rows", description: "Result rows shown before a card folds behind the expand hint.", values: ["0", "3", "6", "10", "20"] },
 	{ key: "expandedLines", label: "Expanded rows", description: "Most rows an expanded card shows.", values: ["50", "200", "1000"] },
+	{
+		key: "groupRuns",
+		label: "Group tool runs",
+		description: "Fold a finished run of reads, searches and shell commands into one line. Click it or press ctrl+o to open it.",
+		values: ON_OFF,
+	},
 	{ key: "nerdIcons", label: "File icons", description: "Nerd Font glyphs beside paths. Turn off without a Nerd Font.", values: ON_OFF },
 	{ key: "admonitions", label: "Callouts", description: "Render > [!NOTE] and friends as labelled callouts.", values: ON_OFF },
 	{ key: "linkUrls", label: "Link bare URLs", description: "Make bare URLs in messages clickable.", values: ON_OFF },

@@ -124,7 +124,7 @@ describe("edit", () => {
 describe("write", () => {
 	it("counts what it wrote from the arguments, since the result does not say", () => {
 		const card = buildCard(done("write", { path: "a.md", content: "one\ntwo\n" }, "Successfully wrote"), deps);
-		expect(card.summary).toBe("Wrote 2 lines");
+		expect(card.summary).toBe("Wrote 2 lines to a.md");
 		expect(card.body).toEqual(["1  one", "2  two"]);
 	});
 });
@@ -143,8 +143,8 @@ describe("write over an existing file", () => {
 	});
 
 	it("previews the content for a new file or an unknown prior", () => {
-		expect(buildCard({ ...done("write", { path: "a", content: "x" }, "ok"), prior: null }, diffDeps).summary).toBe("Wrote 1 line");
-		expect(buildCard(done("write", { path: "a", content: "x" }, "ok"), diffDeps).summary).toBe("Wrote 1 line");
+		expect(buildCard({ ...done("write", { path: "a", content: "x" }, "ok"), prior: null }, diffDeps).summary).toBe("Wrote 1 line to a");
+		expect(buildCard(done("write", { path: "a", content: "x" }, "ok"), diffDeps).summary).toBe("Wrote 1 line to a");
 	});
 });
 

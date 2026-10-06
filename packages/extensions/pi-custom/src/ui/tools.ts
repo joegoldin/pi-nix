@@ -234,10 +234,13 @@ function writeCard(input: CardInput, deps: CardDeps): CardModel {
 			body: (width) => renderDiffRows(rows, config.diffLayout, config.diffSplitMinWidth, width, theme),
 		};
 	}
+	// A new file (or one whose old content is unknown) is shown as Claude Code
+	// shows it: the opening lines, numbered and highlighted, not a diff
+	// against nothing.
 	const lines = linesOf(content);
 	return {
 		...model,
-		summary: `Wrote ${theme.bold(String(lines.length))} ${lines.length === 1 ? "line" : "lines"}`,
+		summary: `Wrote ${theme.bold(String(lines.length))} ${lines.length === 1 ? "line" : "lines"} to ${theme.bold(model.target ?? path)}`,
 		body: numberedCode(lines.join("\n"), path, 1, deps),
 	};
 }

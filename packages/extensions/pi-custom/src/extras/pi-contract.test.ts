@@ -107,3 +107,40 @@ describeAgainstPi("the prefix key", () => {
 		expect(readFileSync(`${SRC}/packages/tui/src/keybindings.ts`, "utf8")).not.toContain('"ctrl+s"');
 	});
 });
+
+// The ui part's folded tool runs and hover highlight (src/ui/group.ts,
+// hover.ts) lean on how pi draws and dispatches to tool rows.
+describeAgainstPi("the tool rows pi-custom folds", () => {
+	const tui = (path: string) => readFileSync(`${SRC}/packages/tui/src/${path}`, "utf8");
+
+	it("are fed by the events the run model follows", () => {
+		const source = types();
+		for (const event of ["session_tree", "agent_end", "message_start", "message_update", "message_end", "tool_execution_end"]) {
+			expect(source).toContain(`on(event: "${event}", handler:`);
+		}
+		expect(source).toContain("getToolsExpanded(): boolean;");
+	});
+
+	it("vanish entirely when a self-rendered row draws nothing", () => {
+		expect(read("modes/interactive/components/tool-execution.ts")).toContain(
+			"if (contentLines.length === 0 && this.imageComponents.length === 0) {",
+		);
+	});
+
+	it("offer mouse events to the card before pi's own click-to-expand", () => {
+		expect(tui("components/mouse-region.ts")).toContain("return childResult ?? this.onMouse(event);");
+	});
+
+	// Why hover.ts watches stdin: an extension's onTerminalInput listener is
+	// added after this one, listeners run in insertion order, and this one
+	// consumes every mouse report.
+	it("keep mouse reports from extension input listeners in fullscreen", () => {
+		const source = tui("tui-alt-screen.ts");
+		const ctor = source.indexOf("constructor(");
+		const listener = source.indexOf("this.addInputListener((data) => this.handleViewportInput(data));");
+		expect(ctor).toBeGreaterThan(-1);
+		expect(listener).toBeGreaterThan(ctor);
+		const dispatch = source.indexOf("const mouseEvent = this.parseSgrMouseEvent(data);");
+		expect(source.slice(dispatch, dispatch + 160)).toContain("return { consume: true };");
+	});
+});

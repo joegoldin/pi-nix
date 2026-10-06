@@ -18,6 +18,12 @@ describe("normalise", () => {
 		expect(c.collapsedLines).toBe(3);
 	});
 
+	it("groups tool runs unless told not to", () => {
+		expect(normalise({}).groupRuns).toBe(true);
+		expect(normalise({ groupRuns: false }).groupRuns).toBe(false);
+		expect(normalise({ groupRuns: "no" }).groupRuns).toBe(true);
+	});
+
 	it("rejects enum values it does not know", () => {
 		expect(normalise({ toolMode: "fancy" }).toolMode).toBe(DEFAULTS.toolMode);
 	});

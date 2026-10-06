@@ -26,6 +26,8 @@ export interface UiConfig {
 	collapsedLines: number;
 	/** Hard cap on body rows even when expanded, so one huge result cannot bury the transcript. */
 	expandedLines: number;
+	/** Fold a finished run of reads, searches and shell commands into one line, as Claude Code does. */
+	groupRuns: boolean;
 	/** Nerd Font glyphs for files and directories; off for terminals without the font. */
 	nerdIcons: boolean;
 	/** `> [!NOTE]` and friends drawn as callouts instead of plain quotes. */
@@ -58,6 +60,7 @@ export const DEFAULTS: UiConfig = {
 	diffSplitMinWidth: 120,
 	collapsedLines: 6,
 	expandedLines: 200,
+	groupRuns: true,
 	nerdIcons: true,
 	admonitions: true,
 	linkUrls: true,
@@ -103,6 +106,7 @@ export function normalise(raw: unknown): UiConfig {
 		diffSplitMinWidth: pickInt(v.diffSplitMinWidth, DEFAULTS.diffSplitMinWidth, 60, 400),
 		collapsedLines: pickInt(v.collapsedLines, DEFAULTS.collapsedLines, 0, 100),
 		expandedLines: pickInt(v.expandedLines, DEFAULTS.expandedLines, 10, 5000),
+		groupRuns: pickBool(v.groupRuns, DEFAULTS.groupRuns),
 		nerdIcons: pickBool(v.nerdIcons, DEFAULTS.nerdIcons),
 		admonitions: pickBool(v.admonitions, DEFAULTS.admonitions),
 		linkUrls: pickBool(v.linkUrls, DEFAULTS.linkUrls),
