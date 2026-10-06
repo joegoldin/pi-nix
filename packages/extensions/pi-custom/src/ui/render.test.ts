@@ -117,7 +117,7 @@ describe("a minimized run", () => {
 	it("leaves a click on a card to pi, which expands that row", () => {
 		const { model, groups, row } = setup();
 		model.load([{ type: "message", message: assistant("a") }]);
-		groups.toggle("a", false);
+		groups.toggle(model.runOf("a")!, false);
 		const head = row("a", "ls", "x");
 		head.render(60);
 		expect(head.handleMouse(mouse("click", 1))).toBeUndefined();
@@ -196,7 +196,7 @@ describe("hover", () => {
 	it("brightens a run's line apart from its cards", () => {
 		const { model, groups, hover, row } = setup();
 		model.load([{ type: "message", message: assistant("a") }]);
-		groups.toggle("a", false);
+		groups.toggle(model.runOf("a")!, false);
 		const head = row("a", "ls", "x");
 		head.render(60);
 		head.handleMouse(mouse("move", 0));

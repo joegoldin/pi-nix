@@ -149,7 +149,7 @@ class LiveCard {
 		const runs = this.runs(config);
 		if (this.context.invalidate) this.deps.noteRepaint?.(this.repaint);
 		const plan = runs
-			? planRow(runs.model, this.context.toolCallId, (run) => runs.groups.isExpanded(run.id, runs.toolsExpanded()))
+			? planRow(runs.model, this.context.toolCallId, (run) => runs.groups.isShown(run, runs.toolsExpanded()))
 			: STANDALONE;
 		const backgrounds = backgroundsFor(this.theme);
 
@@ -205,7 +205,7 @@ class LiveCard {
 		}
 		const runs = this.runs(this.deps.config());
 		if (event.type === "click" && event.button === "left" && onHeader && this.run && runs) {
-			runs.groups.toggle(this.run.id, runs.toolsExpanded());
+			runs.groups.toggle(this.run, runs.toolsExpanded());
 			return { handled: true };
 		}
 		return undefined;
@@ -231,6 +231,7 @@ export function cardRenderers(toolName: string, deps: RendererDeps): ToolRendere
 				isError: context.isError,
 				expanded: options.expanded,
 			};
+			deps.runs?.groups.setCardOpen(context.toolCallId, options.expanded);
 			return EMPTY;
 		},
 	};

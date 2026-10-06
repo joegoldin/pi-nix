@@ -239,18 +239,47 @@ export class LiveFeed {
 export class GroupState {
 	private overrides = new Map<string, boolean>();
 	private lastGlobal: boolean | undefined;
+	/** Cards pi has expanded, by a click or ctrl+o. */
+	private openCards = new Set<string>();
+	/** Each card's last expanded state, so only a change is acted on. */
+	private seenCards = new Map<string, boolean>();
 
 	isExpanded(runId: string, global: boolean): boolean {
 		this.sync(global);
 		return this.overrides.get(runId) ?? global;
 	}
 
-	toggle(runId: string, global: boolean): void {
-		this.overrides.set(runId, !this.isExpanded(runId, global));
+	/** Note whether pi has a card expanded; renderResult hears it on every update. */
+	setCardOpen(toolCallId: string, open: boolean): void {
+		// pi re-renders a row for many reasons; only a change of state counts, so
+		// a run folded on purpose is not reopened by the next repaint.
+		if (this.seenCards.get(toolCallId) === open) return;
+		this.seenCards.set(toolCallId, open);
+		if (open) this.openCards.add(toolCallId);
+		else this.openCards.delete(toolCallId);
+	}
+
+	/**
+	 * Whether the run shows its cards. A card you opened, most often one whose
+	 * output you were watching while it ran, keeps its run open after the run
+	 * ends, until you collapse it; folding it away under you would hide what
+	 * you chose to look at.
+	 */
+	isShown(run: ToolRun, global: boolean): boolean {
+		return this.isExpanded(run.id, global) || run.calls.some((c) => this.openCards.has(c.id));
+	}
+
+	/** Open or fold a run from its line. Folding also lets go of any card that held it open. */
+	toggle(run: ToolRun, global: boolean): void {
+		const shown = this.isShown(run, global);
+		this.overrides.set(run.id, !shown);
+		if (shown) for (const call of run.calls) this.openCards.delete(call.id);
 	}
 
 	clear(): void {
 		this.overrides.clear();
+		this.openCards.clear();
+		this.seenCards.clear();
 		this.lastGlobal = undefined;
 	}
 

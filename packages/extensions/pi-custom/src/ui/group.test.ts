@@ -225,21 +225,49 @@ describe("planRow", () => {
 });
 
 describe("GroupState", () => {
+	const run = (id: string, ...ids: string[]) => ({
+		id,
+		calls: [id, ...ids].map((c) => ({ id: c, toolName: "bash", failed: false })),
+		thinkingMs: 0,
+		thinkingUnknown: false,
+	});
+
 	it("follows the global state until a run is clicked", () => {
 		const groups = new GroupState();
 		expect(groups.isExpanded("r", false)).toBe(false);
-		groups.toggle("r", false);
+		groups.toggle(run("r"), false);
 		expect(groups.isExpanded("r", false)).toBe(true);
 		expect(groups.isExpanded("other", false)).toBe(false);
 	});
 
 	it("lets ctrl+o reset every clicked run to the new global state", () => {
 		const groups = new GroupState();
-		groups.toggle("r", false);
+		groups.toggle(run("r"), false);
 		expect(groups.isExpanded("r", true)).toBe(true);
 		expect(groups.isExpanded("r", false)).toBe(false);
-		groups.toggle("r", false);
-		groups.toggle("r", false);
+		groups.toggle(run("r"), false);
+		groups.toggle(run("r"), false);
 		expect(groups.isExpanded("r", false)).toBe(false);
+	});
+
+	it("keeps a run shown while a card in it is open, as when watching it run", () => {
+		const groups = new GroupState();
+		const r = run("r", "s");
+		expect(groups.isShown(r, false)).toBe(false);
+		groups.setCardOpen("s", true);
+		expect(groups.isShown(r, false)).toBe(true);
+		groups.setCardOpen("s", false);
+		expect(groups.isShown(r, false)).toBe(false);
+	});
+
+	it("folds a run held open by a card when its line is clicked, and keeps it folded through repaints", () => {
+		const groups = new GroupState();
+		const r = run("r", "s");
+		groups.setCardOpen("s", true);
+		groups.toggle(r, false);
+		expect(groups.isShown(r, false)).toBe(false);
+		// pi re-renders the still-expanded card: no change, so no reopening.
+		groups.setCardOpen("s", true);
+		expect(groups.isShown(r, false)).toBe(false);
 	});
 });
