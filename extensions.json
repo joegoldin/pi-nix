@@ -99,15 +99,6 @@
     "skills": [],
     "prompts": []
   },
-  "@narumitw/pi-usage": {
-    "version": "0.62.0",
-    "url": "https://registry.npmjs.org/@narumitw/pi-usage/-/pi-usage-0.62.0.tgz",
-    "hash": "sha512-tGkGngatykXhBL7O3H4izGCA39ZzyW7ACnff0yF7ODVQT9fSG43NMbRHESZdJN7L7B8B+B+BQ7KgRtNl1Z1o8A==",
-    "bundled": false,
-    "entrypoints": [],
-    "skills": [],
-    "prompts": []
-  },
   "pi-lens": {
     "version": "4.3.0",
     "url": "https://registry.npmjs.org/pi-lens/-/pi-lens-4.3.0.tgz",
