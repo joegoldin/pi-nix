@@ -1,8 +1,8 @@
 {
   "pi-subagents": {
-    "version": "0.76.0",
-    "url": "https://registry.npmjs.org/pi-subagents/-/pi-subagents-0.76.0.tgz",
-    "hash": "sha512-r1uoi43ysqbi2MJOGAnJWMbF3o2xBwaWI7/pwJHgGaenv/JqGEmtt5YHYWoq8JRvlhVCquTnrtFeB7e0apLlOQ==",
+    "version": "0.76.1",
+    "url": "https://registry.npmjs.org/pi-subagents/-/pi-subagents-0.76.1.tgz",
+    "hash": "sha512-DTHVUUyLx5KfwikpSQF4sWIKaazbxanAoKd8v4ZGt9OqLM2xNQ79BrPHjaqOARipoUb0kZIKyEYwTPItPqYq1g==",
     "bundled": false,
     "entrypoints": [],
     "skills": [
@@ -13,11 +13,22 @@
     ]
   },
   "@gotgenes/pi-permission-system": {
-    "version": "39.0.4",
-    "url": "https://registry.npmjs.org/@gotgenes/pi-permission-system/-/pi-permission-system-39.0.4.tgz",
-    "hash": "sha512-GOTdx8eVfilNhK5jJzCmmf3PnB/eYOb5ZUChiROsIQJFx3nL0jvD6+slYAMnqVbJOpphur2YqA92AEu/pkHLhA==",
+    "version": "40.0.1",
+    "url": "https://registry.npmjs.org/@gotgenes/pi-permission-system/-/pi-permission-system-40.0.1.tgz",
+    "hash": "sha512-Al/hn5vJwVKFUZKaHuYvEQne3O1sIMFkb2pdtbc4NVGidUq6YQwwdK0NJryxtTwC3wTWghBQTIbuBTSXTPfQsw==",
     "bundled": false,
     "entrypoints": [],
+    "skills": [],
+    "prompts": []
+  },
+  "@narumitw/pi-usage": {
+    "version": "0.63.0",
+    "url": "https://registry.npmjs.org/@narumitw/pi-usage/-/pi-usage-0.63.0.tgz",
+    "hash": "sha512-YS3xY7bbMkWhDXhx3/dMYQ7ra51u9mvChZ5uz7/+LtcIQdoaSqPkE4Jv9onAlTx7KHzLDwpaUXoe6B1oMnG6yw==",
+    "bundled": false,
+    "entrypoints": [
+      "src/index.ts"
+    ],
     "skills": [],
     "prompts": []
   },
@@ -33,9 +44,9 @@
     "prompts": []
   },
   "pi-web-access": {
-    "version": "0.36.0",
-    "url": "https://registry.npmjs.org/pi-web-access/-/pi-web-access-0.36.0.tgz",
-    "hash": "sha512-7o863phmEIi85GQ2xig8Gn9MJWBG/cVfCGsa3T+5xjTagq3fqaPxjTQ4GgsT2ENQmIleveDaBbFL0dOTd2Ay7g==",
+    "version": "0.37.0",
+    "url": "https://registry.npmjs.org/pi-web-access/-/pi-web-access-0.37.0.tgz",
+    "hash": "sha512-Je7D5ghQi9dpN0KhpFMuHYwKy0oBvpNrNR7zuTzSyCRsIJDC5in8yGz/3yItxvWYHF1W+q2Sq190nyaLkoWhgg==",
     "bundled": false,
     "entrypoints": [],
     "skills": [],

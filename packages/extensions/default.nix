@@ -55,7 +55,10 @@ let
         configurableDelegationEnvelope
         ;
     };
-    ext-narumitw-pi-usage = bunPkgs.callPackage ./narumitw-pi-usage.nix { inherit mkPiExtension; };
+    ext-narumitw-pi-usage = bunPkgs.callPackage ./narumitw-pi-usage.nix {
+      inherit mkPiExtension;
+      pin = pins."@narumitw/pi-usage";
+    };
     ext-pi-lens = mkPiExtension {
       pname = "pi-lens";
       inherit (pins."pi-lens")

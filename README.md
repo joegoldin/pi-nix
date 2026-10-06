@@ -335,10 +335,7 @@ Pinned extensions are exposed as `packages.<system>.ext-<slug>`:
 | `ext-czottmann-pi-automode` | `@czottmann/pi-automode` | the auto-mode classifier, with permission-chain, shared-statusline and search-redaction patches; its npm version is pinned in `extensions.json` |
 | `ext-pi-lens` | `pi-lens` | LSP and linter feedback, its tools deferred behind its loader |
 | `ext-pi-web-access` | `pi-web-access` | web search and fetch |
-
-`ext-narumitw-pi-usage` is the exception to npm pinning: it is built from a
-pi-extensions commit until the ChatGPT companion-usage change reaches npm (see
-`packages/extensions/narumitw-pi-usage.nix`).
+| `ext-narumitw-pi-usage` | `@narumitw/pi-usage` | subscription and API usage, patched to publish its report for the footer |
 
 Four more are first-party, built from `packages/extensions/` in this repo
 rather than from a pin:
