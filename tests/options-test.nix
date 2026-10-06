@@ -8,12 +8,29 @@ let
 
   statuslineLib = self.inputs.agent-statusline.lib.${system};
 
+  # Stands in for the Bun build. It carries the lines pi-patches.nix rewrites,
+  # because that patch fails the build of any package that lacks them.
+  piStub =
+    pkgs.runCommand "pi-stub"
+      {
+        meta.mainProgram = "pi";
+      }
+      ''
+        mkdir -p $out/bin $out/lib/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components
+        printf '#!/bin/sh\n' > $out/bin/pi
+        chmod +x $out/bin/pi
+        cat > $out/lib/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/assistant-message.js <<'JS'
+        const hidden = this.thinkingVisibilityOverrides.get(runIndex) ?? this.hideThinkingBlock;
+        this.contentContainer.addChild(new MouseRegion(thinkingComponent, (event) => {
+        JS
+      '';
+
   selfStub = {
     packages.${system} = {
       coding-agent = pkgs.hello;
       # Distinguishable from coding-agent so the default-package assertion
       # below cannot pass by accident.
-      coding-agent-bun = pkgs.cowsay;
+      coding-agent-bun = piStub;
       inherit (self.packages.${system})
         ext-czottmann-pi-automode
         ext-pi-notify
@@ -356,10 +373,11 @@ let
       "unreachable"
   );
 in
-# The fork ships the Bun build by default. Upstream's option declares
-# `default = coding-agent`; a mkDefault from extra-options.nix outranks it
-# without options.nix changing.
-assert bare.package == pkgs.cowsay;
+# The fork ships the Bun build by default, with pi-patches.nix applied on top.
+# Upstream's option declares `default = coding-agent`; a mkDefault from
+# extra-options.nix outranks it without options.nix changing.
+assert
+  bare.package.drvPath == (import ../coding-agent/pi-patches.nix { inherit lib; } piStub).drvPath;
 # An explicit choice still wins, so the npm build stays reachable.
 assert (evalPi { pi.coding-agent.package = pkgs.hello; }).package == pkgs.hello;
 assert !(lib.elem "--system-prompt" bare.finalArgs);

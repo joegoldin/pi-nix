@@ -25,7 +25,11 @@ let
   # makes it the option default. Taking the sibling here and handing it back
   # through mkDefault is how the fork changes that answer without touching the
   # file that asks the question.
-  inherit (self.packages.${system}) coding-agent-bun;
+  #
+  # pi-patches.nix applies this fork's few patches to pi itself on top.
+  coding-agent-bun = import ./pi-patches.nix {
+    inherit lib;
+  } self.packages.${system}.coding-agent-bun;
 
   # The shared schema lives in agent-statusline so claude-nix and pi-nix cannot
   # drift. Each consumer mounts it under its own namespace.
