@@ -574,7 +574,7 @@ let
     # list, and a microphone that is simply absent reports no error at all. The
     # same function is exposed as `voice.jailPermissions` for exactly that case.
     ++ cfg.voice.jailPermissions combinators
-    ++ extrasJailPermissions combinators;
+    ++ customJailPermissions combinators;
 
   msg = cfg.messaging;
 
@@ -761,7 +761,7 @@ let
           ${lib.getExe cfg.finalPackage} "$@"
       '';
 
-  extras = cfg.extras;
+  custom = cfg.custom;
 
   # The clipboard crosses the jail boundary as text, not as a socket.
   #
@@ -776,14 +776,14 @@ let
   # the jail whose single argument is piped to a script outside it. No socket is
   # bound, no WAYLAND_DISPLAY is forwarded, and a headless host degrades to a
   # failing copy rather than a session that will not start.
-  extrasClipboardChannel = "piExtrasCopyToHost";
+  customClipboardChannel = "piCustomCopyToHost";
 
   # The channel takes its text as argv[1]; the extension writes to stdin
   # (clipboard.ts's spawnRunner). This shim is the whole bridge.
-  extrasClipboardShim = pkgs.writeShellApplication {
-    name = "pi-extras-copy";
+  customClipboardShim = pkgs.writeShellApplication {
+    name = "pi-custom-copy";
     text = ''
-      exec ${extrasClipboardChannel} "$(cat)"
+      exec ${customClipboardChannel} "$(cat)"
     '';
   };
 
@@ -791,26 +791,26 @@ let
   # pointed straight at the command; it already writes the text to stdin,
   # which is what wl-copy and pbcopy read. A null command keeps the shim, whose
   # exec of a missing channel fails the copy the same way it does in the jail.
-  extrasClipboardOverride =
-    if cfg.jail.enable || extras.clipboardCommand == null then
-      lib.getExe extrasClipboardShim
+  customClipboardOverride =
+    if cfg.jail.enable || custom.clipboardCommand == null then
+      lib.getExe customClipboardShim
     else
-      extras.clipboardCommand;
+      custom.clipboardCommand;
 
-  extrasEnv = lib.optionalAttrs extras.enable {
-    PI_EXTRAS_CLIPBOARD.value = extrasClipboardOverride;
-    PI_EXTRAS_GIT_EDITOR.value = extras.gitEditorCommand;
+  customEnv = lib.optionalAttrs custom.enable {
+    PI_CUSTOM_CLIPBOARD.value = customClipboardOverride;
+    PI_CUSTOM_GIT_EDITOR.value = custom.gitEditorCommand;
   };
 
-  extrasEntrypoints = lib.optionals extras.enable extras.package.passthru.piEntrypoint;
+  customEntrypoints = lib.optionals custom.enable custom.package.passthru.piEntrypoint;
 
-  extrasJailPermissions =
+  customJailPermissions =
     combinators:
-    lib.optionals (extras.enable && extras.clipboardCommand != null) [
-      (combinators.jail-to-host-channel extrasClipboardChannel ''
-        printf '%s' "$1" | ${extras.clipboardCommand}
+    lib.optionals (custom.enable && custom.clipboardCommand != null) [
+      (combinators.jail-to-host-channel customClipboardChannel ''
+        printf '%s' "$1" | ${custom.clipboardCommand}
       '')
-      (combinators.add-pkg-deps [ extrasClipboardShim ])
+      (combinators.add-pkg-deps [ customClipboardShim ])
     ];
 
   foreignSkillsEntrypoints = lib.optionals cfg.foreignSkills.enable cfg.foreignSkills.package.passthru.piEntrypoint;
@@ -878,7 +878,7 @@ let
     // notifyEnv
     // messagingEnv
     // voiceEnv
-    // extrasEnv;
+    // customEnv;
 in
 {
   options = lib.setAttrByPath optionPath {
@@ -1659,16 +1659,20 @@ in
       '';
     };
 
-    extras = {
+    custom = {
       enable = lib.mkEnableOption ''
-        prompt stash, chord keybindings, registers and session shortcuts.
+        pi-custom, this setup's first-party extension.
 
-        A first-party extension covering what @mrclrchtr/supi-extras and
-        @pi-unipi/input-shortcuts each provide: /exit, /clear, /clone-session
-        and a /stash overlay, a persistent prompt stash with ten numbered
-        registers, undo and redo over the input, clipboard copy and cut, a
-        thinking-level cycle, and a terminal tab title that shows when the
-        agent is working.
+        Its interface part draws Claude Code-style tool cards with diffs, adds
+        markdown callouts and linked URLs, the prompt box and working shimmer,
+        /ui settings, /context, @session: and @agent: references, and find,
+        grep and @ completion through FFF. Its prompt part covers what
+        @mrclrchtr/supi-extras and @pi-unipi/input-shortcuts each provide:
+        /exit, /clear, /clone-session and a /stash overlay, a persistent prompt
+        stash, clipboard copy and cut, a thinking-level cycle, and a terminal
+        tab title that shows when the agent is working. Its tools part adds
+        background shell tasks, a todo list, structured questions, /goal and
+        /btw.
 
         It deliberately draws no status line of its own. Both upstreams render
         a footer, and this stack already has one
@@ -1676,9 +1680,9 @@ in
 
       package = lib.mkOption {
         type = lib.types.package;
-        default = self.packages.${system}.ext-pi-extras;
-        defaultText = lib.literalExpression "pi-nix's packages.ext-pi-extras";
-        description = "The extension providing the stash, chords and shortcuts.";
+        default = self.packages.${system}.ext-pi-custom;
+        defaultText = lib.literalExpression "pi-nix's packages.ext-pi-custom";
+        description = "The pi-custom package.";
       };
 
       clipboardCommand = lib.mkOption {
@@ -2069,7 +2073,7 @@ in
       ++ messagingEntrypoints
       ++ voiceEntrypoints
       ++ foreignSkillsEntrypoints
-      ++ extrasEntrypoints;
+      ++ customEntrypoints;
     skills = extSkills ++ messagingSkills;
     promptTemplates = extPrompts;
     settings = extSettings;

@@ -109,12 +109,13 @@ let
         touch $out
       '';
 
-  # pi-ui calls into pi at runtime (its helpers, editor and components) rather
-  # than importing types only, and it is written against pi 1.0's renderer API,
-  # which the pinned 0.87 types above predate. So it is tested and typechecked
-  # against the pi this flake builds: that pi's node_modules, plus pi-ui's own
-  # FFF dependency taken from its package.
-  piUiTsconfig = pkgs.writeText "pi-ui-tsconfig.json" (
+  # pi-custom calls into pi at runtime (its helpers, editor, components and
+  # model registry) rather than importing types only, and it is written against
+  # pi 1.0's renderer API, which the pinned 0.87 types above predate. So it is
+  # tested and typechecked against the pi this flake builds: that pi's
+  # node_modules, plus pi-custom's own FFF dependency taken from its package.
+  # Its contract tests read pi's source, as the other first-party ones do.
+  piCustomTsconfig = pkgs.writeText "pi-custom-tsconfig.json" (
     builtins.toJSON {
       compilerOptions = {
         strict = true;
@@ -132,18 +133,19 @@ let
     }
   );
 
-  piUiTest =
+  piCustomTest =
     let
       piModules = "${self.packages.${system}.coding-agent-bun}/lib/node_modules";
-      piUi = self.packages.${system}.ext-pi-ui;
+      piCustom = self.packages.${system}.ext-pi-custom;
     in
-    pkgs.runCommand "pi-nix-pi-ui-tests"
+    pkgs.runCommand "pi-nix-pi-custom-tests"
       {
-        src = ../packages/extensions/pi-ui;
+        src = ../packages/extensions/pi-custom;
         nativeBuildInputs = [
           pkgs.bun
           pkgs.typescript
         ];
+        PI_CODING_AGENT_SRC = piSrc;
       }
       ''
         set -euo pipefail
@@ -155,10 +157,10 @@ let
         mkdir node_modules
         for d in ${piModules}/*; do ln -s "$d" node_modules/; done
         rm -f node_modules/@ff-labs
-        ln -s ${piUi}/node_modules/@ff-labs node_modules/@ff-labs
+        ln -s ${piCustom}/node_modules/@ff-labs node_modules/@ff-labs
 
         bun test
-        cp ${piUiTsconfig} tsconfig.json
+        cp ${piCustomTsconfig} tsconfig.json
         tsc -p tsconfig.json
 
         touch $out
@@ -168,8 +170,7 @@ lib.mapAttrs mkTest {
   pi-notify = ../packages/extensions/pi-notify;
   pi-voice = ../packages/extensions/pi-voice;
   pi-foreign-skills = ../packages/extensions/pi-foreign-skills;
-  pi-extras = ../packages/extensions/pi-extras;
 }
 // {
-  pi-ui = piUiTest;
+  pi-custom = piCustomTest;
 }

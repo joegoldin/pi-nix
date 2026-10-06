@@ -43,8 +43,7 @@ let
     ext-pi-notify = bunPkgs.callPackage ./pi-notify { inherit mkPiExtension; };
     ext-pi-voice = bunPkgs.callPackage ./pi-voice { inherit mkPiExtension; };
     ext-pi-foreign-skills = bunPkgs.callPackage ./pi-foreign-skills { inherit mkPiExtension; };
-    ext-pi-extras = bunPkgs.callPackage ./pi-extras { inherit mkPiExtension; };
-    ext-pi-ui = bunPkgs.callPackage ./pi-ui { inherit mkPiExtension; };
+    ext-pi-custom = bunPkgs.callPackage ./pi-custom { inherit mkPiExtension; };
   };
 
   # These npm packages need integration patches in addition to the generic build.

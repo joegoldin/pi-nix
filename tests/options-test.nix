@@ -19,7 +19,7 @@ let
         ext-pi-notify
         ext-pi-voice
         ext-pi-foreign-skills
-        ext-pi-extras
+        ext-pi-custom
         ;
     };
     inputs.agent-statusline = self.inputs.agent-statusline;
@@ -522,15 +522,15 @@ assert
   && lib.hasInfix "(deny file-read*" profile
   && lib.hasInfix ''(subpath "/Users/joe/.ssh")'' profile;
 
-# pi-extras is off by default and contributes its entrypoint when enabled. The
+# pi-custom is off by default and contributes its entrypoint when enabled. The
 # clipboard crosses the jail as text through a host channel, never as a bound
 # compositor socket, so enabling it adds no wayland permission.
-assert !(lib.any (e: lib.hasInfix "pi-extras" e) (evalPi { }).extensions);
-assert lib.any (e: lib.hasInfix "pi-extras" e)
-  (evalPi { pi.coding-agent.extras.enable = true; }).extensions;
+assert !(lib.any (e: lib.hasInfix "pi-custom" e) (evalPi { }).extensions);
+assert lib.any (e: lib.hasInfix "pi-custom" e)
+  (evalPi { pi.coding-agent.custom.enable = true; }).extensions;
 assert
   let
-    perms = (evalPi { pi.coding-agent.extras.enable = true; }).jail.permissions fakeCombinators;
+    perms = (evalPi { pi.coding-agent.custom.enable = true; }).jail.permissions fakeCombinators;
   in
   !(lib.any (p: lib.hasInfix "wayland" p) perms);
 # Without the jail there is no channel to reach, so the extension is handed
@@ -538,24 +538,24 @@ assert
 assert
   let
     unjailed = evalPi {
-      pi.coding-agent.extras = {
+      pi.coding-agent.custom = {
         enable = true;
         clipboardCommand = "/fake/wl-copy";
       };
     };
   in
-  (envValue unjailed "PI_EXTRAS_CLIPBOARD").value == "/fake/wl-copy";
+  (envValue unjailed "PI_CUSTOM_CLIPBOARD").value == "/fake/wl-copy";
 assert
   let
     jailed = evalPi {
       pi.coding-agent.jail.enable = true;
-      pi.coding-agent.extras = {
+      pi.coding-agent.custom = {
         enable = true;
         clipboardCommand = "/fake/wl-copy";
       };
     };
   in
-  lib.hasInfix "pi-extras-copy" (envValue jailed "PI_EXTRAS_CLIPBOARD").value;
+  lib.hasInfix "pi-custom-copy" (envValue jailed "PI_CUSTOM_CLIPBOARD").value;
 
 # The foreign-skills extension is off by default and contributes its entrypoint
 # when enabled. `.claude/skills` is not one of pi's skill roots and settings.json

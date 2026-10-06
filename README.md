@@ -83,10 +83,9 @@ nix.settings = {
     systemPrompt = ./SYSTEM.md;
     extensionPackages = with inputs.pi-nix.packages.${pkgs.system}; [
       ext-pi-subagents
-      ext-juicesharp-rpiv-todo
-      ext-juicesharp-rpiv-ask-user-question
-      ext-narumitw-pi-goal
+      ext-pi-web-access
     ];
+    custom.enable = true;
     statusline.enable = true;
   };
 }
@@ -312,29 +311,31 @@ Pinned extensions are exposed as `packages.<system>.ext-<slug>`:
 | Attribute | npm package | What it adds |
 | --- | --- | --- |
 | `ext-pi-subagents` | `pi-subagents` | subagents |
-| `ext-pi-background-tasks` | `pi-background-tasks` | background bash |
-| `ext-juicesharp-rpiv-ask-user-question` | `@juicesharp/rpiv-ask-user-question` | AskUserQuestion |
-| `ext-narumitw-pi-goal` | `@narumitw/pi-goal` | `/goal`, pushing rather than vetoing |
-| `ext-juicesharp-rpiv-todo` | `@juicesharp/rpiv-todo` | todos |
 | `ext-gotgenes-pi-permission-system` | `@gotgenes/pi-permission-system` | deterministic permissions |
-| `ext-narumitw-pi-btw` | `@narumitw/pi-btw` | side questions off the main thread |
-| `ext-czottmann-pi-automode` | `@czottmann/pi-automode` | the auto-mode classifier, with permission-chain and shared-statusline patches; its npm version is pinned in `extensions.json` |
+| `ext-czottmann-pi-automode` | `@czottmann/pi-automode` | the auto-mode classifier, with permission-chain, shared-statusline and search-redaction patches; its npm version is pinned in `extensions.json` |
+| `ext-pi-intercom` | `pi-intercom` | messaging between sessions |
+| `ext-pi-lens` | `pi-lens` | LSP and linter feedback, its tools deferred behind its loader |
+| `ext-pi-web-access` | `pi-web-access` | web search and fetch |
 
-Two more are first-party, built from `packages/extensions/` in this repo rather
-than from a pin. They carry no lockfile because they have no runtime
-dependency: both import from `@earendil-works/*` with `import type` only, which
-TypeScript erases.
+`ext-narumitw-pi-usage` is the exception to npm pinning: it is built from a
+pi-extensions commit until the ChatGPT companion-usage change reaches npm (see
+`packages/extensions/narumitw-pi-usage.nix`).
+
+Four more are first-party, built from `packages/extensions/` in this repo
+rather than from a pin:
 
 | Attribute | Source | What it adds |
 | --- | --- | --- |
+| `ext-pi-custom` | `packages/extensions/pi-custom` | Claude Code-style tool cards, /ui, /context, @ references and FFF search; the prompt stash and chords; background tasks, todos, structured questions, /goal and /btw |
 | `ext-pi-notify` | `packages/extensions/pi-notify` | Desktop notifications on prompts, settle, and long tool calls |
 | `ext-pi-voice` | `packages/extensions/pi-voice` | Push-to-talk dictation into the editor |
+| `ext-pi-foreign-skills` | `packages/extensions/pi-foreign-skills` | Skills from other agents' directories |
 
-Their tests run under `nix flake check` as `pi-notify` and `pi-voice`. Each
-check runs the suite twice over one tree: `bun test`, with
-`PI_CODING_AGENT_SRC` pointed at the pi source `packages.coding-agent` builds
-from, and then `tsc --strict` against pi 0.85.1's published `.d.ts`. A pi bump
-that moves the extension API fails there rather than at load.
+pi-custom vendors one dependency, FFF's native file index, through a
+`bun.lock`; the others have none. Their tests run under `nix flake check` under
+their own names. pi-custom's check runs `bun test` and `tsc --strict` against
+the pi this flake builds; the others typecheck against pi 0.85.1's published
+`.d.ts`. A pi bump that moves the extension API fails there rather than at load.
 
 Auto mode used to be a third. It is now the pinned `@czottmann/pi-automode`,
 which speaks Claude Code's own `autoMode` schema and ships the deterministic

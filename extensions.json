@@ -12,55 +12,10 @@
       "prompts"
     ]
   },
-  "pi-background-tasks": {
-    "version": "2.6.9",
-    "url": "https://registry.npmjs.org/pi-background-tasks/-/pi-background-tasks-2.6.9.tgz",
-    "hash": "sha512-5dma6xvO7jeAimRaCNCzfe5y+b4bVBYPxnJ/0RnGS+mj6B6SzgA4FcORKuAtZaoGvC29dlyof3NtX7/QD4Ywew==",
-    "bundled": false,
-    "entrypoints": [],
-    "skills": [],
-    "prompts": []
-  },
-  "@juicesharp/rpiv-ask-user-question": {
-    "version": "2.12.0",
-    "url": "https://registry.npmjs.org/@juicesharp/rpiv-ask-user-question/-/rpiv-ask-user-question-2.12.0.tgz",
-    "hash": "sha512-DilWc7u25SwnK6ytuAWOTerP0AmOEfK4HXpgS1oEzkgv9d5g5T+PbLG+zcLn18M3B/J3poMG14iydG5O6iBsnw==",
-    "bundled": false,
-    "entrypoints": [],
-    "skills": [],
-    "prompts": []
-  },
-  "@narumitw/pi-goal": {
-    "version": "0.54.8",
-    "url": "https://registry.npmjs.org/@narumitw/pi-goal/-/pi-goal-0.54.8.tgz",
-    "hash": "sha512-ba165WkOdBEQNYgjTa2MHgRtOh/hTLveObPzdoE29FOrfktymcBlayEHoXd9Jjw44VQ8bX7cq6V57zp0rJLVgQ==",
-    "bundled": false,
-    "entrypoints": [],
-    "skills": [],
-    "prompts": []
-  },
-  "@juicesharp/rpiv-todo": {
-    "version": "2.12.0",
-    "url": "https://registry.npmjs.org/@juicesharp/rpiv-todo/-/rpiv-todo-2.12.0.tgz",
-    "hash": "sha512-bTILerGqMGrWMUkahHzXTuYa4iPkRX/LTl12HPppcCdPg7pGwrC1K7/ZtPfp7Xi4cXzqEoyZpeUM6IA8y5gtEQ==",
-    "bundled": false,
-    "entrypoints": [],
-    "skills": [],
-    "prompts": []
-  },
   "@gotgenes/pi-permission-system": {
     "version": "39.0.4",
     "url": "https://registry.npmjs.org/@gotgenes/pi-permission-system/-/pi-permission-system-39.0.4.tgz",
     "hash": "sha512-GOTdx8eVfilNhK5jJzCmmf3PnB/eYOb5ZUChiROsIQJFx3nL0jvD6+slYAMnqVbJOpphur2YqA92AEu/pkHLhA==",
-    "bundled": false,
-    "entrypoints": [],
-    "skills": [],
-    "prompts": []
-  },
-  "@narumitw/pi-btw": {
-    "version": "0.61.1",
-    "url": "https://registry.npmjs.org/@narumitw/pi-btw/-/pi-btw-0.61.1.tgz",
-    "hash": "sha512-s1AsDNnF4eEeQGByoI+m0Y7gewTkR3KlsnhToLvVJTQqlZWHtIBUlkrODtSan2rBKcYH2GdxlNx9G7WC6N0LvA==",
     "bundled": false,
     "entrypoints": [],
     "skills": [],

@@ -28,23 +28,17 @@ let
   expectedNames = [
     "ext-czottmann-pi-automode"
     "ext-gotgenes-pi-permission-system"
-    "ext-juicesharp-rpiv-ask-user-question"
-    "ext-juicesharp-rpiv-todo"
-    "ext-narumitw-pi-btw"
-    "ext-narumitw-pi-goal"
     "ext-narumitw-pi-usage"
-    "ext-pi-background-tasks"
-    # extras, foreign-skills, notify, ui and voice are first-party, from
-    # packages/extensions/<name>: no pin, and only ui vendors a lockfile. They
-    # are listed in sorted order with the rest rather than grouped, because the
-    # assertion compares against `builtins.attrNames`, which sorts.
-    "ext-pi-extras"
+    # custom, foreign-skills, notify and voice are first-party, from
+    # packages/extensions/<name>: no pin, and only custom vendors a lockfile.
+    # They are listed in sorted order with the rest rather than grouped,
+    # because the assertion compares against `builtins.attrNames`, which sorts.
+    "ext-pi-custom"
     "ext-pi-foreign-skills"
     "ext-pi-intercom"
     "ext-pi-lens"
     "ext-pi-notify"
     "ext-pi-subagents"
-    "ext-pi-ui"
     "ext-pi-voice"
     "ext-pi-web-access"
   ];
@@ -74,9 +68,9 @@ let
     # An empty entrypoints list means "hand pi the package root and let it read
     # the pi manifest", which is the normal path for every real pin.
     assert exts.ext-pi-subagents.passthru.piEntrypoint == [ "${exts.ext-pi-subagents}" ];
-    assert exts.ext-pi-background-tasks.passthru.piPrompts == [ ];
+    assert exts.ext-pi-web-access.passthru.piPrompts == [ ];
     assert exts.ext-pi-subagents.passthru.piPrompts == [ "${exts.ext-pi-subagents}/prompts" ];
-    assert exts.ext-pi-background-tasks.passthru.piSkills == [ ];
+    assert exts.ext-pi-web-access.passthru.piSkills == [ ];
     assert exts.ext-pi-subagents.passthru.settings == { };
     assert exts.ext-pi-subagents.passthru.promptFragment == null;
     # A first-party extension names its entrypoint explicitly instead, because
@@ -128,24 +122,13 @@ pkgs.runCommand "pi-nix-extensions-tests" { nativeBuildInputs = [ pkgs.jq ]; } '
   }
 
   check ${exts.ext-pi-subagents} deps
-  check ${exts.ext-pi-background-tasks} deps
-  check ${exts.ext-juicesharp-rpiv-ask-user-question} deps
-  check ${exts.ext-narumitw-pi-goal} deps
-  check ${exts.ext-juicesharp-rpiv-todo} deps
   check ${exts.ext-gotgenes-pi-permission-system} deps
-  check ${exts.ext-narumitw-pi-btw} deps
   check ${exts.ext-pi-intercom} nodeps
   check ${exts.ext-czottmann-pi-automode} deps
 
   # Skills and prompts advertised through the passthru must be real directories.
   test -d ${exts.ext-pi-subagents}/skills
   test -d ${exts.ext-pi-subagents}/prompts
-
-  # The two peers that must survive the --omit=peer install. Absent these, both
-  # extensions load and then throw on their first `import { Type } from
-  # "typebox"`, which is a failure that only shows up at runtime.
-  test -d ${exts.ext-pi-background-tasks}/node_modules/typebox
-  test -d ${exts.ext-narumitw-pi-goal}/node_modules/typebox
 
   # pi-intercom is the bundled pin; a node_modules here would mean the bundled
   # branch quietly grew a bun install.

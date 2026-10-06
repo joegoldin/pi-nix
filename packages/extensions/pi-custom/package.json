@@ -1,0 +1,22 @@
+{
+	"name": "pi-custom",
+	"version": "0.1.0",
+	"type": "module",
+	"description": "This setup's own pi features: Claude Code-style tool cards, /ui, /context, @ references, FFF search, the prompt stash and chords, background tasks, todos, questions, /goal and /btw.",
+	"keywords": [
+		"pi-package",
+		"pi-extension",
+		"tui"
+	],
+	"pi": {
+		"extensions": [
+			"./src/index.ts"
+		]
+	},
+	"dependencies": {
+		"@ff-labs/fff-bun": "0.11.0"
+	},
+	"scripts": {
+		"test": "bun test"
+	}
+}
