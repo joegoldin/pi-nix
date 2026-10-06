@@ -25,8 +25,9 @@ completer.
   its own and the line counts it (`(1 failed)`). Thinking time is measured from
   pi's stream, so it only appears for runs seen live. "Group tool runs" in `/ui`
   turns this off.
-- **Hover.** The card or run line under the mouse pointer is highlighted, a
-  shade apart from the panel.
+- **Hover.** Under the mouse pointer, the grey text a click acts on brightens to
+  the text colour: a card's `… +N lines` line, or a run's line. No background,
+  as in Claude Code; a full-width grey panel means a card or run is open.
 - **Diffs.** Edit and write results as unified or side-by-side diffs, switching
   on terminal width. A write over an existing file is diffed against what it
   replaced; a new file shows `Wrote N lines to <path>` and its opening lines,
@@ -74,9 +75,8 @@ completer.
 
 - **Colours.** The panel is the theme's `toolPendingBg`, the one background
   slot themes keep a neutral grey; the others are tinted for what they mean
-  (selection blue, success green, error red). Themes have no hover slot, so the
-  highlight is that grey mixed 14% toward the theme's text colour: lighter on a
-  dark theme, darker on a light one. pi's system theme gives panels no
+  (selection blue, success green, error red). Hover uses the theme's `text`
+  colour on text that is otherwise `muted` or `dim`. pi's system theme gives panels no
   background when the terminal reports no colours; the panel is then the
   theme's guess at the background mixed 22% toward the text.
 - **Folding rows.** A folded row's card draws nothing, and pi drops a row that

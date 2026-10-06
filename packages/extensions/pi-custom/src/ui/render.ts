@@ -24,7 +24,7 @@ import {
 	type TuiMouseEvent,
 	type TuiMouseEventResult,
 } from "@earendil-works/pi-tui";
-import { CardComponent, type CardLayout, paint, type UiTheme } from "./card.ts";
+import { CardComponent, type CardLayout, type UiTheme } from "./card.ts";
 import type { UiConfig } from "./config.ts";
 import { type GroupState, planRow, type RowPlan, type RunModel, runSummary, type ToolRun } from "./group.ts";
 import type { HoverTracker } from "./hover.ts";
@@ -84,22 +84,19 @@ interface ThemeColoursLike {
 interface Backgrounds {
 	key: string;
 	panel?: string;
-	hover?: string;
 }
 
 // The panel is toolPendingBg, the one background slot themes keep a neutral
 // grey (dark okhsl(229 5% 24%), light okhsl(248 3% 91%)); the other slots carry
 // a meaning in their tint: blue selection, green success, red error, violet
-// custom messages. The theme has no slot for hover, so it is the panel moved
-// toward the text colour: lighter on a dark theme, darker on a light one, so it
-// stands apart from the panel and the terminal background either way.
+// custom messages. Hover paints no background; it brightens grey text to the
+// text colour, as Claude Code's does.
 //
 // pi's system theme leaves every panel on the terminal's default background
 // when the terminal reports no colours. The theme still has a concrete guess
 // for that background, so the panel is then mixed from it the same way, by
 // enough to show: mixing is perceptual, and a step of a tenth from black is
 // still black to the eye.
-const HOVER_MIX = 0.14;
 const PANEL_MIX = 0.22;
 const DEFAULT_BG = "\x1b[49m";
 let backgroundCache: Backgrounds | undefined;
@@ -114,16 +111,10 @@ function backgroundsFor(theme: UiTheme): Omit<Backgrounds, "key"> {
 	const key = `${slot}|${mode}|${base ? JSON.stringify(base) : ""}`;
 	if (backgroundCache?.key === key) return backgroundCache;
 	if (!base || !text || !mode) {
-		backgroundCache = { key, panel: slot === DEFAULT_BG ? undefined : slot, hover: undefined };
+		backgroundCache = { key, panel: slot === DEFAULT_BG ? undefined : slot };
 		return backgroundCache;
 	}
-	const mixed = (amount: number) => backgroundAnsi(mixColors(base, text, amount), mode);
-	const concrete = slot !== DEFAULT_BG;
-	backgroundCache = {
-		key,
-		panel: concrete ? slot : mixed(PANEL_MIX),
-		hover: mixed(concrete ? HOVER_MIX : PANEL_MIX + HOVER_MIX),
-	};
+	backgroundCache = { key, panel: slot !== DEFAULT_BG ? slot : backgroundAnsi(mixColors(base, text, PANEL_MIX), mode) };
 	return backgroundCache;
 }
 
@@ -165,9 +156,8 @@ class LiveCard {
 		const rows: string[] = [];
 		this.run = plan.header;
 		if (plan.header) {
-			const line = truncateToWidth(runSummary(plan.header, this.theme), w, "…");
-			const hovered = this.deps.hover?.isHovered(`run:${plan.header.id}`) && backgrounds.hover;
-			rows.push(hovered ? paint(line, w, hovered) : line);
+			const hovered = this.deps.hover?.isHovered(`run:${plan.header.id}`) ?? false;
+			rows.push(truncateToWidth(runSummary(plan.header, this.theme, hovered), w, "…"));
 		}
 		this.headerRows = rows.length;
 		if (plan.card) rows.push(...this.card(config, plan.inPanel, backgrounds, w));
@@ -195,8 +185,9 @@ class LiveCard {
 			expanded,
 			collapsedLines: config.collapsedLines,
 			expandedLines: config.expandedLines,
-			expandHint: this.theme.fg("muted", `(click or ${this.deps.expandKey()})`),
-			background: hovered ? backgrounds.hover : expanded || inPanel ? backgrounds.panel : undefined,
+			expandHint: this.theme.fg(hovered ? "text" : "muted", `(click or ${this.deps.expandKey()})`),
+			background: expanded || inPanel ? backgrounds.panel : undefined,
+			hovered,
 		};
 		return new CardComponent(model, layout, this.theme).render(width);
 	}

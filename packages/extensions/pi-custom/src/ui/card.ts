@@ -50,8 +50,14 @@ export interface CardLayout {
 	expandedLines: number;
 	/** The hint after a collapsed card's count, already themed: "(click or ctrl+o)" from the live keybinding. */
 	expandHint: string;
-	/** An SGR background opener to paint every row with, edge to edge: the panel or the hover highlight. */
+	/** An SGR background opener to paint every row with, edge to edge: the panel an open card sits on. */
 	background?: string;
+	/**
+	 * The pointer is over the card. Like Claude Code, hover brightens the grey
+	 * "… +N lines" text to the text colour rather than painting a background:
+	 * a background across the card is what an open card looks like.
+	 */
+	hovered?: boolean;
 }
 
 const BULLET = "●";
@@ -124,6 +130,7 @@ function layoutRows(model: CardModel, layout: CardLayout, theme: UiTheme, w: num
 	};
 
 	const rows: string[] = place("", HEAD_INDENT, header(model, theme));
+	const grey = layout.hovered ? "text" : "muted";
 	const body = typeof model.body === "function" ? model.body(Math.max(1, w - BODY_GUTTER)) : (model.body ?? []);
 	const limit = layout.expanded ? layout.expandedLines : layout.collapsedLines;
 	const shown = model.tail ? body.slice(Math.max(0, body.length - limit)) : body.slice(0, limit);
@@ -135,10 +142,10 @@ function layoutRows(model: CardModel, layout: CardLayout, theme: UiTheme, w: num
 		hidden === 0
 			? undefined
 			: !layout.expanded
-				? `${theme.fg("muted", `… +${hidden} ${plural(hidden)}`)} ${layout.expandHint}`
+				? `${theme.fg(grey, `… +${hidden} ${plural(hidden)}`)} ${layout.expandHint}`
 				: capped > 0
-					? theme.fg("muted", `… ${hidden} more ${plural(hidden)} not shown (expanded view limit)`)
-					: theme.fg("muted", `… +${hidden} ${plural(hidden)}`);
+					? theme.fg(grey, `… ${hidden} more ${plural(hidden)} not shown (expanded view limit)`)
+					: theme.fg(grey, `… +${hidden} ${plural(hidden)}`);
 
 	const lines: string[] = [];
 	if (model.summary) lines.push(model.summary);

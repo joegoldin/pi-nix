@@ -7,9 +7,11 @@ import { HoverTracker } from "./hover.ts";
 import { cardRenderers, type RendererDeps, type RenderContextLike } from "./render.ts";
 
 const PANEL = "\x1b[48;5;236m";
-// Enough of pi's Theme for the backgrounds: a panel slot and the colours hover is mixed from.
+// Enough of pi's Theme for the backgrounds: a panel slot and the colours the
+// fallback panel is mixed from. The text colour is marked so hover can be seen.
+const TEXT = "\x1b[97m";
 const theme = {
-	fg: (_s: string, t: string) => t,
+	fg: (s: string, t: string) => (s === "text" ? `${TEXT}${t}\x1b[39m` : t),
 	bold: (t: string) => t,
 	italic: (t: string) => t,
 	getBgAnsi: () => PANEL,
@@ -173,23 +175,25 @@ describe("backgrounds", () => {
 });
 
 describe("hover", () => {
-	it("highlights the card under the pointer in a colour of its own, until the pointer leaves", () => {
+	it("brightens the card's fold line under the pointer, until the pointer leaves", () => {
 		const { hover, row, repaints } = setup({ groupRuns: false });
-		const card = row("a", "ls", "x", { expanded: true });
-		card.render(60);
+		const card = row("a", "seq", Array.from({ length: 20 }, (_, i) => String(i + 1)).join("\n"));
+		const fold = (lines: string[]) => lines.find((l) => strip(l).includes("… +")) ?? "";
+		expect(fold(card.render(60))).not.toContain(TEXT);
 		expect(card.handleMouse(mouse("move", 0))).toEqual({ handled: true, render: true });
 		expect(card.handleMouse(mouse("move", 1))).toEqual({ handled: true, render: false });
 		const lit = card.render(60);
-		expect(lit.every((l) => l.startsWith("\x1b[48;2;"))).toBe(true);
-		expect(lit[0].startsWith(PANEL)).toBe(false);
+		expect(fold(lit)).toContain(TEXT);
+		// A collapsed card gets no background from hover.
+		expect(lit.some((l) => l.includes("\x1b[48"))).toBe(false);
 
 		hover.settle();
 		hover.settle();
 		expect(repaints()).toBe(1);
-		expect(card.render(60)[0].startsWith(PANEL)).toBe(true);
+		expect(fold(card.render(60))).not.toContain(TEXT);
 	});
 
-	it("highlights a run's line apart from its cards", () => {
+	it("brightens a run's line apart from its cards", () => {
 		const { model, groups, hover, row } = setup();
 		model.load([{ type: "message", message: assistant("a") }]);
 		groups.toggle("a", false);
@@ -198,7 +202,8 @@ describe("hover", () => {
 		head.handleMouse(mouse("move", 0));
 		expect(hover.isHovered("run:a")).toBe(true);
 		const lines = head.render(60);
-		expect(lines[0].startsWith("\x1b[48;2;")).toBe(true);
+		expect(lines[0]).toContain(TEXT);
+		expect(lines[0].startsWith("\x1b[48")).toBe(false);
 		expect(lines[1].startsWith(PANEL)).toBe(true);
 		head.handleMouse(mouse("move", 1));
 		expect(hover.isHovered("card:a")).toBe(true);

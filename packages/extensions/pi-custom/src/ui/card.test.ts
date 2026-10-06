@@ -114,6 +114,14 @@ describe("layoutCard", () => {
 		expect(rows.every((r) => r.startsWith(bg) && Bun.stringWidth(r) === 40)).toBe(true);
 	});
 
+	it("brightens the fold line from grey to the text colour on hover, with no background", () => {
+		const slots: UiTheme = { ...plain, fg: (s, t) => `<${s}>${t}` };
+		const fold = (hovered: boolean) => layoutCard(model(), layout({ hovered }), slots, 40).find((r) => r.includes("… +"));
+		expect(fold(false)).toContain("<muted>… +");
+		expect(fold(true)).toContain("<text>… +");
+		expect(fold(true)).not.toContain("\x1b[48");
+	});
+
 	it("gives a width-dependent body the width left after the gutter", () => {
 		let seen = 0;
 		layoutCard(model({ body: (w) => ((seen = w), ["x"]) }), layout(), plain, 50);

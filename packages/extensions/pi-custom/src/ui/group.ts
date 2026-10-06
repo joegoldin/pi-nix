@@ -305,9 +305,11 @@ export function formatDuration(ms: number): string {
 }
 
 /** The run's one line, dim with the numbers bold. No bullet: it is a fold, not a call. */
-export function runSummary(run: ToolRun, theme: UiTheme): string {
-	const dim = (text: string) => theme.fg("dim", text);
-	const num = (text: string) => theme.bold(theme.fg("dim", text));
+/** The run's line; under the pointer it brightens from dim to the text colour. */
+export function runSummary(run: ToolRun, theme: UiTheme, hovered = false): string {
+	const shade = hovered ? "text" : "dim";
+	const dim = (text: string) => theme.fg(shade, text);
+	const num = (text: string) => theme.bold(theme.fg(shade, text));
 	const clauses: Array<[string, string, string]> = [];
 	// Under a second rounds to nothing worth saying.
 	if (!run.thinkingUnknown && Math.round(run.thinkingMs / 1000) > 0) {
