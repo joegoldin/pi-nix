@@ -24,7 +24,7 @@ import {
 	type TuiMouseEvent,
 	type TuiMouseEventResult,
 } from "@earendil-works/pi-tui";
-import { CardComponent, type CardLayout, type UiTheme } from "./card.ts";
+import { brightened, CardComponent, type CardLayout, type UiTheme } from "./card.ts";
 import type { UiConfig } from "./config.ts";
 import { type GroupState, planRow, type RowPlan, type RunModel, runSummary, type ToolRun } from "./group.ts";
 import type { HoverTracker } from "./hover.ts";
@@ -166,6 +166,8 @@ class LiveCard {
 
 	private card(config: UiConfig, inPanel: boolean, backgrounds: Omit<Backgrounds, "key">, width: number): string[] {
 		const record = this.context.state.piUi;
+		const hovered = this.deps.hover?.isHovered(`card:${this.context.toolCallId}`) ?? false;
+		const theme = hovered ? brightened(this.theme) : this.theme;
 		const model = buildCard(
 			{
 				toolName: this.toolName,
@@ -176,19 +178,19 @@ class LiveCard {
 				cwd: this.context.cwd,
 				prior: this.deps.priorContent?.(this.context.toolCallId),
 			},
-			{ theme: this.theme, config, highlight: this.deps.highlight, languageOf: this.deps.languageOf, diff: this.deps.diff },
+			{ theme, config, highlight: this.deps.highlight, languageOf: this.deps.languageOf, diff: this.deps.diff },
 		);
 		const expanded = record?.expanded ?? this.context.expanded;
-		const hovered = this.deps.hover?.isHovered(`card:${this.context.toolCallId}`);
 		const layout: CardLayout = {
 			mode: config.toolMode === "compact" ? "compact" : "on",
 			expanded,
 			collapsedLines: config.collapsedLines,
 			expandedLines: config.expandedLines,
-			expandHint: this.theme.fg(hovered ? "text" : "muted", `(click or ${this.deps.expandKey()})`),
+			expandHint: theme.fg("muted", `(click or ${this.deps.expandKey()})`),
 			background: expanded || inPanel ? backgrounds.panel : undefined,
 			hovered,
 		};
+		// The header keeps its colours; only what is under it lights up.
 		return new CardComponent(model, layout, this.theme).render(width);
 	}
 

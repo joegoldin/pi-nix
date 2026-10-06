@@ -53,9 +53,10 @@ export interface CardLayout {
 	/** An SGR background opener to paint every row with, edge to edge: the panel an open card sits on. */
 	background?: string;
 	/**
-	 * The pointer is over the card. Like Claude Code, hover brightens the grey
-	 * "… +N lines" text to the text colour rather than painting a background:
-	 * a background across the card is what an open card looks like.
+	 * The pointer is over the card: everything under the header brightens, in
+	 * bold. The caller also hands in a theme whose greys are the text colour;
+	 * bold is what lifts the rows whose colours are their own, such as
+	 * highlighted code. A background is kept for what is open.
 	 */
 	hovered?: boolean;
 }
@@ -130,7 +131,8 @@ function layoutRows(model: CardModel, layout: CardLayout, theme: UiTheme, w: num
 	};
 
 	const rows: string[] = place("", HEAD_INDENT, header(model, theme));
-	const grey = layout.hovered ? "text" : "muted";
+	// Under the pointer, everything below the header brightens; the header keeps its colours.
+	const lit = layout.hovered ? brightened(theme) : theme;
 	const body = typeof model.body === "function" ? model.body(Math.max(1, w - BODY_GUTTER)) : (model.body ?? []);
 	const limit = layout.expanded ? layout.expandedLines : layout.collapsedLines;
 	const shown = model.tail ? body.slice(Math.max(0, body.length - limit)) : body.slice(0, limit);
@@ -142,10 +144,10 @@ function layoutRows(model: CardModel, layout: CardLayout, theme: UiTheme, w: num
 		hidden === 0
 			? undefined
 			: !layout.expanded
-				? `${theme.fg(grey, `… +${hidden} ${plural(hidden)}`)} ${layout.expandHint}`
+				? `${lit.fg("muted", `… +${hidden} ${plural(hidden)}`)} ${layout.expandHint}`
 				: capped > 0
-					? theme.fg(grey, `… ${hidden} more ${plural(hidden)} not shown (expanded view limit)`)
-					: theme.fg(grey, `… +${hidden} ${plural(hidden)}`);
+					? lit.fg("muted", `… ${hidden} more ${plural(hidden)} not shown (expanded view limit)`)
+					: lit.fg("muted", `… +${hidden} ${plural(hidden)}`);
 
 	const lines: string[] = [];
 	if (model.summary) lines.push(model.summary);
@@ -154,9 +156,28 @@ function layoutRows(model: CardModel, layout: CardLayout, theme: UiTheme, w: num
 	if (more && !model.tail) lines.push(more);
 
 	lines.forEach((line, i) => {
-		rows.push(...place(i === 0 ? theme.fg("muted", ELBOW_PREFIX) : BODY_PREFIX, BODY_PREFIX, line));
+		rows.push(...place(i === 0 ? lit.fg("muted", ELBOW_PREFIX) : BODY_PREFIX, BODY_PREFIX, layout.hovered ? embolden(line) : line));
 	});
 	return rows;
+}
+
+// The greys a hovered card lifts to the text colour.
+const GREYS = new Set(["muted", "dim", "toolOutput"]);
+
+/** The theme with its greys turned up, for what sits under a hovered card's header. */
+export function brightened(theme: UiTheme): UiTheme {
+	return Object.assign(Object.create(theme) as UiTheme, {
+		fg: (slot: string, text: string) => theme.fg(GREYS.has(slot) ? "text" : slot, text),
+	});
+}
+
+// Resets that would end bold part way along a line: a full reset, and the
+// normal-intensity code that also closes dim text.
+const BOLD_RESET = /\x1b\[(?:0?|22)m/g;
+
+/** Bold the whole line, surviving the resets inside it. */
+export function embolden(line: string): string {
+	return `\x1b[1m${line.replace(BOLD_RESET, (reset) => reset + "\x1b[1m")}\x1b[22m`;
 }
 
 /** The pi Component wrapper. It re-lays out on every render because width is only known then. */

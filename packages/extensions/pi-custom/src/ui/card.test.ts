@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { BODY_GUTTER, type CardLayout, type CardModel, header, layoutCard, paint, type UiTheme } from "./card.ts";
+import { BODY_GUTTER, type CardLayout, type CardModel, embolden, header, layoutCard, paint, type UiTheme } from "./card.ts";
 
 const plain: UiTheme = { fg: (_s, t) => t, bold: (t) => t, italic: (t) => t };
 
@@ -114,18 +114,26 @@ describe("layoutCard", () => {
 		expect(rows.every((r) => r.startsWith(bg) && Bun.stringWidth(r) === 40)).toBe(true);
 	});
 
-	it("brightens the fold line from grey to the text colour on hover, with no background", () => {
-		const slots: UiTheme = { ...plain, fg: (s, t) => `<${s}>${t}` };
-		const fold = (hovered: boolean) => layoutCard(model(), layout({ hovered }), slots, 40).find((r) => r.includes("… +"));
-		expect(fold(false)).toContain("<muted>… +");
-		expect(fold(true)).toContain("<text>… +");
-		expect(fold(true)).not.toContain("\x1b[48");
+	it("brightens every row under the header on hover, with no background", () => {
+		const rows = (hovered: boolean) => layoutCard(model(), layout({ hovered }), plain, 40);
+		const [head, ...body] = rows(true);
+		expect(head).toBe(rows(false)[0]);
+		expect(body.length).toBeGreaterThan(1);
+		expect(body.every((r) => r.includes("\x1b[1m"))).toBe(true);
+		expect(rows(false).some((r) => r.includes("\x1b[1m"))).toBe(false);
+		expect(rows(true).some((r) => r.includes("\x1b[48"))).toBe(false);
 	});
 
 	it("gives a width-dependent body the width left after the gutter", () => {
 		let seen = 0;
 		layoutCard(model({ body: (w) => ((seen = w), ["x"]) }), layout(), plain, 50);
 		expect(seen).toBe(50 - BODY_GUTTER);
+	});
+});
+
+describe("embolden", () => {
+	it("keeps the line bold past the resets inside it, dim's included", () => {
+		expect(embolden("a\x1b[2mb\x1b[22mc")).toBe("\x1b[1ma\x1b[2mb\x1b[22m\x1b[1mc\x1b[22m");
 	});
 });
 
