@@ -13,6 +13,7 @@ There is no footer here; the status line belongs to another extension.
 | ctrl+g l | Open the stash list (restore, copy, delete, clear) |
 | ctrl+g c / x | Copy or cut the prompt to the system clipboard |
 | alt+i | Insert a literal tab |
+| Esc (with messages queued) | Interrupt and send the queued messages now; your draft stays in the editor |
 | ctrl+? | Show these keys |
 
 While a ctrl+g chord is half-typed, a hint above the editor names the second
@@ -50,3 +51,4 @@ keys.
 | `clipboard.ts` | Clipboard command resolution |
 | `gitenv.ts` | Git editor overrides |
 | `title.ts` | The working tab title |
+| `steer.ts` | Esc with messages queued: interrupt and send them |

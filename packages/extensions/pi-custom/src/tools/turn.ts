@@ -18,6 +18,7 @@ interface MessageLike {
 	role?: string;
 	customType?: string;
 	stopReason?: string;
+	errorMessage?: string;
 }
 
 export function registerRunSummary(pi: ExtensionAPI, config: () => UiConfig, runningShells: () => number): void {
@@ -35,7 +36,8 @@ export function registerRunSummary(pi: ExtensionAPI, config: () => UiConfig, run
 		if (began === undefined || !ctx.hasUI) return;
 		const last = [...(event.messages as MessageLike[])].reverse().find((m) => m.role === "assistant");
 		// An interrupted run was ended by you, at the keyboard; it needs no reminder.
-		if (last?.stopReason === "aborted") return;
+		// pi records an Esc either as "aborted" or as an error saying so.
+		if (last?.stopReason === "aborted" || (last?.stopReason === "error" && /\baborted\b/i.test(last.errorMessage ?? ""))) return;
 		const settings = config();
 		const doneAt = Date.now();
 		if (!settings.turnSummary || doneAt - began < settings.turnSummaryMinSeconds * 1000) return;

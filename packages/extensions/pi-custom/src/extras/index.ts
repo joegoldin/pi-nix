@@ -27,6 +27,7 @@ import { type StashTheme, createStashComponent } from "./overlay.ts";
 import { legacyStashPath, type StashIO, StashStore, stashPath } from "./stash.ts";
 import { type HintStage, renderHint } from "./hint.ts";
 import { renderShortcuts } from "./shortcuts.ts";
+import { registerSteerNow } from "./steer.ts";
 import { TitleSpinner, baseTitle } from "./title.ts";
 
 /** The slice of pi's ExtensionContext this extension touches. Every member the
@@ -547,6 +548,7 @@ function fileIO(path: string, legacy: string): StashIO {
 }
 
 export default function (pi: ExtrasHost) {
+	registerSteerNow(pi as never);
 	const env = process.env as Record<string, string | undefined>;
 	registerHandlers(pi, {
 		env,
