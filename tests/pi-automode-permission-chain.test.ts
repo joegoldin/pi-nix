@@ -261,14 +261,29 @@ test("real upstream gate denies compound Bash before a permission-system allow",
   expect(h.state().blockedActions).toBe(1);
 });
 
-test("real upstream gate protects denied subtrees from recursive grep and find", async () => {
+// pi-automode-search-redaction.patch: a recursive search whose scope can
+// reach a denied path runs, and what it found there is withheld from the
+// result. Blocking it instead failed every search once "*.env" was denied.
+test("real upstream gate withholds denied subtrees from recursive grep and find results", async () => {
   const h = await realHost(() => ({ deniedPaths: ["/tmp/project/private/*"] }));
+  const outputs = {
+    grep: "src/a.ts:1: needle\nprivate/key.txt:3: needle\nprivate/key.txt-4- context",
+    find: "src/a.ts\nprivate/key.txt",
+  };
   for (const toolName of ["grep", "find"]) {
-    const result = await h.emit("tool_call", {
+    const call = await h.emit("tool_call", {
       toolName, toolCallId: toolName, input: { path: ".", pattern: "*" },
     });
-    expect(result?.block).toBe(true);
-    expect(result.reason).toContain("Search scope");
+    expect(call?.block).toBeUndefined();
+    const result = await h.emit("tool_result", {
+      toolName, toolCallId: toolName,
+      content: [{ type: "text", text: outputs[toolName] }],
+    });
+    const text = result.content[0].text;
+    expect(text).toContain("src/a.ts");
+    expect(text).not.toContain("private/key.txt");
+    expect(text).toMatch(/\[\d+ result lines under paths denied by policy were withheld\]/);
+    expect(result.structuredContent).toBeUndefined();
   }
   expect(h.classifierCalls()).toBe(0);
 });
