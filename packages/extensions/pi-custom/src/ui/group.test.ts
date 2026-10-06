@@ -1,10 +1,27 @@
 import { describe, expect, it } from "bun:test";
 import type { UiTheme } from "./card.ts";
-import { type EntryLike, formatDuration, GroupState, LiveFeed, type MessageLike, planRow, RunModel, runSummary, type ToolRun } from "./group.ts";
+import {
+	type EntryLike,
+	foldsCall,
+	formatDuration,
+	GroupState,
+	LiveFeed,
+	type MessageLike,
+	planRow,
+	RunModel,
+	runSummary,
+	thoughtLines,
+	type ToolRun,
+} from "./group.ts";
 
 const plain: UiTheme = { fg: (_s, t) => t, bold: (t) => t, italic: (t) => t };
 
-const call = (id: string, name = "bash") => ({ type: "toolCall", id, name, arguments: {} });
+const call = (id: string, name = "bash", args: object = name === "bash" ? { command: "ls" } : { path: "a.ts" }) => ({
+	type: "toolCall",
+	id,
+	name,
+	arguments: args,
+});
 const text = (t: string) => ({ type: "text", text: t });
 const thinking = (t = "hm") => ({ type: "thinking", thinking: t });
 const assistant = (...content: object[]): MessageLike => ({ role: "assistant", content, stopReason: "toolUse" });
@@ -34,6 +51,28 @@ describe("runs from a session branch", () => {
 		);
 		expect(ids(model.runOf("a"))).toEqual(["a", "b"]);
 		expect(ids(model.runOf("c"))).toEqual(["c"]);
+	});
+
+	it("breaks a run on a shell command that does something, and leaves it out", () => {
+		const model = loaded(assistant(call("a"), call("m", "bash", { command: "mkdir -p x && echo hi > x/f" }), call("b", "bash", { command: "git log" })));
+		expect(model.runOf("m")).toBeUndefined();
+		expect(ids(model.runOf("a"))).toEqual(["a"]);
+		expect(ids(model.runOf("b"))).toEqual(["b"]);
+	});
+
+	it("keeps each call's arguments and the thinking that led to it", () => {
+		const model = loaded(
+			assistant(thinking("**Looking around**"), call("a")),
+			assistant(thinking("**Reading config**"), thinking("more"), call("b", "read", { path: "c.json" })),
+		);
+		const run = model.runOf("a") as ToolRun;
+		expect(run.calls.map((c) => c.thinking)).toEqual([["**Looking around**"], ["**Reading config**", "more"]]);
+		expect(run.calls[1].args).toEqual({ path: "c.json" });
+	});
+
+	it("drops thinking that led to prose", () => {
+		const model = loaded(assistant(thinking("why"), text("Here."), call("a")));
+		expect(model.runOf("a")?.calls[0].thinking).toEqual([]);
 	});
 
 	it("breaks a run on a call that does not group, and leaves that call out", () => {
@@ -76,6 +115,11 @@ describe("runs from a session branch", () => {
 		expect(model.runOf("a")?.calls.map((c) => c.failed)).toEqual([false, true]);
 	});
 
+	it("counts the calls of an aborted message as failed, as pi draws them", () => {
+		const model = loaded(assistant(call("a")), { role: "assistant", content: [call("b")], stopReason: "aborted" });
+		expect(model.runOf("b")?.calls.map((c) => c.failed)).toEqual([false, true]);
+	});
+
 	it("claims no thinking time it did not measure", () => {
 		const run = loaded(assistant(thinking(), call("a"))).runOf("a");
 		expect(run?.thinkingUnknown).toBe(true);
@@ -116,6 +160,24 @@ describe("runs followed live", () => {
 		feed.end(assistant(call("a")));
 		model.agentEnd();
 		expect(model.isOpen(model.runOf("a") as ToolRun)).toBe(false);
+	});
+
+	it("adds a call as soon as its arguments are complete", () => {
+		const { model, feed } = live();
+		feed.begin();
+		const parts = [call("a")];
+		feed.update({ type: "toolcall_start", contentIndex: 0 }, parts);
+		expect(model.runOf("a")).toBeUndefined();
+		feed.update({ type: "toolcall_end", contentIndex: 0 }, parts);
+		expect(ids(model.runOf("a"))).toEqual(["a"]);
+	});
+
+	it("takes the arguments a call starts with", () => {
+		const { model, feed } = live();
+		feed.begin();
+		feed.end(assistant(call("a")));
+		model.started("a", { command: "ls -la" });
+		expect(model.runOf("a")?.calls[0].args).toEqual({ command: "ls -la" });
 	});
 
 	it("adds a call once the part after it starts, before its message ends", () => {
@@ -165,12 +227,68 @@ describe("runs followed live", () => {
 	});
 });
 
+describe("thinking left to the run", () => {
+	it("hides a message's thinking when every call in it folds and it has no prose", () => {
+		const model = loaded(assistant(thinking(), call("a"), call("b", "read")));
+		expect(model.hidesThinking(assistant(thinking(), call("a"), call("b", "read")))).toBe(true);
+	});
+
+	it("keeps thinking before prose, before a call that stands alone, or with nothing to hide", () => {
+		const withText = assistant(thinking(), text("Found it."), call("a"));
+		const withEdit = assistant(thinking(), call("a"), call("e", "edit"));
+		const noThinking = assistant(call("a"));
+		const model = loaded(withText, withEdit, noThinking);
+		expect(model.hidesThinking(withText)).toBe(false);
+		expect(model.hidesThinking(withEdit)).toBe(false);
+		expect(model.hidesThinking(noThinking)).toBe(false);
+		expect(model.hidesThinking(assistant(thinking()))).toBe(false);
+	});
+
+	it("holds thinking back while the agent works, until something says it belongs to no run", () => {
+		const model = new RunModel();
+		model.agentStart();
+		// Thinking alone so far, then a call still streaming in.
+		expect(model.hidesThinking(assistant(thinking()))).toBe(true);
+		expect(model.hidesThinking(assistant(thinking(), call("a")))).toBe(true);
+		expect(model.hidesThinking(assistant(thinking(), call("w", "write")))).toBe(false);
+		model.addMessage(assistant(thinking(), call("m", "bash", { command: "make" })));
+		expect(model.hidesThinking(assistant(thinking(), call("m", "bash", { command: "make" })))).toBe(false);
+		model.agentEnd();
+		expect(model.hidesThinking(assistant(thinking()))).toBe(false);
+	});
+});
+
+describe("foldsCall", () => {
+	it("folds the read-only tools always and bash only when it inspects", () => {
+		expect(foldsCall("read", {})).toBe(true);
+		expect(foldsCall("grep", {})).toBe(true);
+		expect(foldsCall("bash", { command: "rg foo | head" })).toBe(true);
+		expect(foldsCall("bash", { command: "npm install" })).toBe(false);
+		expect(foldsCall("bash", {})).toBe(false);
+		expect(foldsCall("edit", {})).toBe(false);
+	});
+});
+
+describe("thoughtLines", () => {
+	it("strips the bold from title-only thinking and keeps the rest as written", () => {
+		expect(thoughtLines("**Checking close cleanup**\n\n**Reading tests**")).toEqual(["Checking close cleanup", "Reading tests"]);
+		expect(thoughtLines("The **config** is wrong.")).toEqual(["The **config** is wrong."]);
+	});
+});
+
 describe("runSummary", () => {
 	const run = (calls: Array<[string, boolean?]>, thinkingMs = 0): ToolRun => ({
 		id: "0",
-		calls: calls.map(([toolName, failed], i) => ({ id: String(i), toolName, failed: failed ?? false })),
+		calls: calls.map(([toolName, failed], i) => ({ id: String(i), toolName, failed: failed ?? false, args: {}, thinking: [] })),
 		thinkingMs,
 		thinkingUnknown: false,
+	});
+
+	it("is in the present tense while the run is open", () => {
+		expect(runSummary(run([["bash"], ["read"], ["bash"], ["bash"]], 12_000), plain, false, true)).toBe(
+			"Thinking for 12s, running 3 shell commands, reading 1 file…",
+		);
+		expect(runSummary(run([["ls"]]), plain, false, true)).toBe("Listing 1 directory…");
 	});
 
 	it("names each kind of call with its count, in a fixed order", () => {
@@ -201,33 +319,45 @@ describe("runSummary", () => {
 });
 
 describe("planRow", () => {
-	const model = loaded(assistant(call("a"), call("b"), call("c")), result("a"), result("b", true), result("c"));
-	const plan = (id: string, open: boolean) => planRow(model, id, () => open);
+	const model = loaded(assistant(thinking("**Look**"), call("a"), call("b"), call("c")), result("a"), result("b", true), result("c"));
+	const plan = (id: string, open: boolean) => planRow(model, id, "bash", () => open);
 
 	it("folds a closed run into its first row, keeping a failed call visible", () => {
-		expect(plan("a", false)).toEqual({ header: model.runOf("a"), card: false, inPanel: false });
-		expect(plan("b", false)).toEqual({ header: undefined, card: true, inPanel: false });
-		expect(plan("c", false)).toEqual({ header: undefined, card: false, inPanel: false });
+		expect(plan("a", false)).toEqual({ header: model.runOf("a"), live: false, card: false, inPanel: false, thinking: undefined });
+		expect(plan("b", false)).toEqual({ header: undefined, live: false, card: true, inPanel: false, thinking: undefined });
+		expect(plan("c", false)).toEqual({ header: undefined, live: false, card: false, inPanel: false, thinking: undefined });
 	});
 
-	it("puts every card of an expanded run on the panel, under the run's line", () => {
-		expect(plan("a", true)).toEqual({ header: model.runOf("a"), card: true, inPanel: true });
-		expect(plan("c", true)).toEqual({ header: undefined, card: true, inPanel: true });
+	it("puts every card of an expanded run on the panel, under the run's line, with its thinking", () => {
+		expect(plan("a", true)).toEqual({ header: model.runOf("a"), live: false, card: true, inPanel: true, thinking: ["**Look**"] });
+		expect(plan("c", true)).toEqual({ header: undefined, live: false, card: true, inPanel: true, thinking: [] });
 	});
 
-	it("leaves an open run and calls outside any run as plain cards", () => {
+	it("folds an open run too, its line live", () => {
 		const live = new RunModel();
 		live.agentStart();
-		live.addMessage(assistant(call("x")));
-		expect(planRow(live, "x", () => false)).toEqual({ card: true, inPanel: false });
-		expect(planRow(live, "nope", () => false)).toEqual({ card: true, inPanel: false });
+		live.addMessage(assistant(call("x"), call("y")));
+		expect(planRow(live, "x", "bash", () => false)).toMatchObject({ header: live.runOf("x"), live: true, card: false });
+		expect(planRow(live, "y", "bash", () => false)).toMatchObject({ header: undefined, card: false });
+	});
+
+	it("draws nothing for a call still streaming in that may join a run, and a card for one that cannot", () => {
+		const live = new RunModel();
+		live.agentStart();
+		expect(planRow(live, "p", "bash", () => false)).toEqual({ card: false, inPanel: false });
+		expect(planRow(live, "e", "edit", () => false)).toEqual({ card: true, inPanel: false });
+		live.addMessage(assistant(call("p", "bash", { command: "rm x" })));
+		expect(planRow(live, "p", "bash", () => false)).toEqual({ card: true, inPanel: false });
+		// Once the agent stops, nothing is still streaming.
+		live.agentEnd();
+		expect(planRow(live, "nope", "bash", () => false)).toEqual({ card: true, inPanel: false });
 	});
 });
 
 describe("GroupState", () => {
 	const run = (id: string, ...ids: string[]) => ({
 		id,
-		calls: [id, ...ids].map((c) => ({ id: c, toolName: "bash", failed: false })),
+		calls: [id, ...ids].map((c) => ({ id: c, toolName: "bash", failed: false, args: {}, thinking: [] })),
 		thinkingMs: 0,
 		thinkingUnknown: false,
 	});

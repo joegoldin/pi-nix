@@ -45,6 +45,9 @@ import { createResolver } from "./render.ts";
 import { applySetting, settingItems } from "./settings.ts";
 
 const REFERENCE_TYPE = "pi-custom:reference";
+// Where pi looks for whether to leave out an assistant message's thinking; the
+// patch that reads it is in pi-patches.nix.
+const HIDE_THINKING = Symbol.for("pi-custom.hideThinking");
 // A write over a file larger than this shows the new content, not a diff: a
 // diff of a file that size is not something to read in a transcript.
 const PRIOR_MAX_BYTES = 2 * 1024 * 1024;
@@ -142,9 +145,21 @@ export default function piUi(pi: ExtensionAPI): void {
 		if (message.role === "assistant") feed.end(message);
 		else runs.addMessage(message);
 	});
+	pi.on("tool_execution_start", (event) => {
+		if (!event.parentToolCallId) runs.started(event.toolCallId, event.args);
+	});
 	pi.on("tool_execution_end", (event) => {
 		if (!event.parentToolCallId) runs.setFailed(event.toolCallId, event.isError);
 	});
+
+	/**
+	 * A folded run's thinking is part of the run: pi leaves it out of the
+	 * assistant message, and an opened run draws it on its panel. Only while
+	 * runs are drawn: with grouping or cards off, pi's thinking is all there is.
+	 */
+	function hideThinking(message: MessageLike): boolean {
+		return config.groupRuns && config.toolMode !== "off" && runs.hidesThinking(message);
+	}
 
 	/**
 	 * Watch stdin for pointer reports to know when the pointer leaves every card
@@ -326,6 +341,7 @@ export default function piUi(pi: ExtensionAPI): void {
 		loadRuns(ctx);
 		if (config.fffSearch) index.open(ctx.cwd, getAgentDir());
 		if (ctx.mode !== "tui") return;
+		(globalThis as Record<symbol, unknown>)[HIDE_THINKING] = hideThinking;
 		applyLive(ctx);
 		watchPointer();
 		// The completer wraps whatever is installed; installing it again on the
@@ -347,6 +363,10 @@ export default function piUi(pi: ExtensionAPI): void {
 	});
 
 	pi.on("session_shutdown", () => {
+		// Left behind, pi would keep asking a model nothing feeds any more.
+		if ((globalThis as Record<symbol, unknown>)[HIDE_THINKING] === hideThinking) {
+			delete (globalThis as Record<symbol, unknown>)[HIDE_THINKING];
+		}
 		priorContent.clear();
 		stopWatchingPointer?.();
 		stopWatchingPointer = undefined;

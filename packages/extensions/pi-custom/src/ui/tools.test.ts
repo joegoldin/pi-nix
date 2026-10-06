@@ -3,6 +3,7 @@ import type { UiTheme } from "./card.ts";
 import { DEFAULTS } from "./config.ts";
 import {
 	buildCard,
+	callActivity,
 	type CardDeps,
 	type CardInput,
 	displayPath,
@@ -209,5 +210,15 @@ describe("intercom card", () => {
 		expect(card.target).toBe("list");
 		expect(card.summary).toBe("2 peers (3 connected)");
 		expect(card.body).toEqual(["Current session:", "• me"]);
+	});
+});
+
+describe("callActivity", () => {
+	it("says what a call is doing in a few words", () => {
+		expect(callActivity("bash", { command: "rg -n foo\n  src" }, "/repo")).toBe("$ rg -n foo src");
+		expect(callActivity("read", { path: "/repo/src/a.ts" }, "/repo")).toBe("src/a.ts");
+		expect(callActivity("ls", {}, "/repo")).toBe(".");
+		expect(callActivity("grep", { pattern: "TODO", path: "src" }, "/repo")).toBe('"TODO" in src');
+		expect(callActivity("find", { pattern: "*.ts" }, "/repo")).toBe('"*.ts"');
 	});
 });

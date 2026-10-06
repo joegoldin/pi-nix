@@ -22,6 +22,8 @@ let
         cat > $out/lib/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/assistant-message.js <<'JS'
         const hidden = this.thinkingVisibilityOverrides.get(runIndex) ?? this.hideThinkingBlock;
         this.contentContainer.addChild(new MouseRegion(thinkingComponent, (event) => {
+        this.contentContainer.clear();
+        const lines = super.render(width);
         JS
       '';
 

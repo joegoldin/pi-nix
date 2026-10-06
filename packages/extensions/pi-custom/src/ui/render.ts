@@ -11,7 +11,8 @@
 //
 // The call slot is also where a row folds into its run (group.ts): the run's
 // first row draws the run's line, the rest draw nothing, and pi drops a row
-// that draws nothing entirely. pi hands mouse events to the call slot before
+// that draws nothing entirely. An opened run's rows draw the thinking that led
+// to each call above its card. pi hands mouse events to the call slot before
 // its own click-to-expand, so the run's line takes clicks for the run and
 // every row reports the pointer for the hover highlight.
 
@@ -23,12 +24,21 @@ import {
 	truncateToWidth,
 	type TuiMouseEvent,
 	type TuiMouseEventResult,
+	wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
-import { brightened, CardComponent, type CardLayout, type UiTheme } from "./card.ts";
+import { brightened, CardComponent, type CardLayout, ELBOW_PREFIX, paint, type UiTheme } from "./card.ts";
 import type { UiConfig } from "./config.ts";
-import { type GroupState, planRow, type RowPlan, type RunModel, runSummary, type ToolRun } from "./group.ts";
+import {
+	type GroupState,
+	planRow,
+	type RowPlan,
+	type RunModel,
+	runSummary,
+	thoughtLines,
+	type ToolRun,
+} from "./group.ts";
 import type { HoverTracker } from "./hover.ts";
-import { BUILT_IN_TOOLS, buildCard, type CardDeps, type ToolResultLike } from "./tools.ts";
+import { BUILT_IN_TOOLS, buildCard, type CardDeps, callActivity, type ToolResultLike } from "./tools.ts";
 
 /** What renderResult leaves for the card. Lives in pi's per-row renderer state. */
 interface RowRecord {
@@ -119,6 +129,7 @@ function backgroundsFor(theme: UiTheme): Omit<Backgrounds, "key"> {
 }
 
 const STANDALONE: RowPlan = { card: true, inPanel: false };
+const THOUGHT = "∴ ";
 
 /** Nothing to paint; the result's content is drawn by the call slot. */
 const EMPTY = { render: () => [] as string[], invalidate() {} };
@@ -149,7 +160,7 @@ class LiveCard {
 		const runs = this.runs(config);
 		if (this.context.invalidate) this.deps.noteRepaint?.(this.repaint);
 		const plan = runs
-			? planRow(runs.model, this.context.toolCallId, (run) => runs.groups.isShown(run, runs.toolsExpanded()))
+			? planRow(runs.model, this.context.toolCallId, this.toolName, (run) => runs.groups.isShown(run, runs.toolsExpanded()))
 			: STANDALONE;
 		const backgrounds = backgroundsFor(this.theme);
 
@@ -157,11 +168,33 @@ class LiveCard {
 		this.run = plan.header;
 		if (plan.header) {
 			const hovered = this.deps.hover?.isHovered(`run:${plan.header.id}`) ?? false;
-			rows.push(truncateToWidth(runSummary(plan.header, this.theme, hovered), w, "…"));
+			rows.push(truncateToWidth(runSummary(plan.header, this.theme, hovered, plan.live), w, "…"));
+			// While the run is open and folded, what its latest call is doing; an
+			// opened run's cards already say it.
+			const latest = plan.header.calls.at(-1);
+			if (plan.live && !plan.inPanel && latest) {
+				const shade = hovered ? "text" : "dim";
+				rows.push(truncateToWidth(this.theme.fg(shade, `${ELBOW_PREFIX}${callActivity(latest.toolName, latest.args, this.context.cwd)}`), w, "…"));
+			}
 		}
 		this.headerRows = rows.length;
+		if (plan.thinking?.length) rows.push(...this.thoughts(plan.thinking, backgrounds, w));
 		if (plan.card) rows.push(...this.card(config, plan.inPanel, backgrounds, w));
 		return rows;
+	}
+
+	/** The thinking that led to the call, dim and italic on the panel, as pi would have drawn it above. */
+	private thoughts(thinking: string[], backgrounds: Omit<Backgrounds, "key">, width: number): string[] {
+		const rows: string[] = [];
+		// Each title, or each paragraph of fuller thinking, is a line of its own;
+		// what wraps hangs under the text, not the mark.
+		for (const line of thinking.flatMap(thoughtLines)) {
+			for (const [i, part] of wrapTextWithAnsi(line, Math.max(1, width - THOUGHT.length)).entries()) {
+				rows.push(this.theme.italic(this.theme.fg("dim", `${i === 0 ? THOUGHT : " ".repeat(THOUGHT.length)}${part}`)));
+			}
+		}
+		const panel = backgrounds.panel;
+		return panel ? rows.map((row) => paint(row, width, panel)) : rows;
 	}
 
 	private card(config: UiConfig, inPanel: boolean, backgrounds: Omit<Backgrounds, "key">, width: number): string[] {

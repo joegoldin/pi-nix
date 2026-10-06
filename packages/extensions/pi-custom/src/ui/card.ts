@@ -65,8 +65,9 @@ const BULLET = "●";
 const ELBOW = "⎿";
 const HEAD_INDENT = "  ";
 // The elbow row and the rows under it share a gutter, so body text lines up
-// with the summary rather than with the elbow.
-const ELBOW_PREFIX = `${HEAD_INDENT}${ELBOW}  `;
+// with the summary rather than with the elbow. A live run's second row hangs
+// off the same elbow.
+export const ELBOW_PREFIX = `${HEAD_INDENT}${ELBOW}  `;
 const BODY_PREFIX = " ".repeat(visibleWidth(ELBOW_PREFIX));
 /** The gutter width body rows sit behind, for renderers that size their own columns. */
 export const BODY_GUTTER = visibleWidth(BODY_PREFIX);

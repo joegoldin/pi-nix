@@ -60,7 +60,7 @@ function setup(config: Partial<UiConfig> = {}) {
 
 const assistant = (...ids: string[]): MessageLike => ({
 	role: "assistant",
-	content: ids.map((id) => ({ type: "toolCall", id, name: "bash", arguments: {} })),
+	content: ids.map((id) => ({ type: "toolCall", id, name: "bash", arguments: { command: `ls ${id}` } })),
 	stopReason: "toolUse",
 });
 
@@ -124,12 +124,95 @@ describe("a minimized run", () => {
 	});
 });
 
-describe("standalone cards", () => {
-	it("draw normally while their run is open", () => {
+describe("an open run", () => {
+	it("is one live line, with what its latest call is doing under it", () => {
 		const { model, row } = setup();
 		model.agentStart();
+		model.addMessage(assistant("a", "b"));
+		expect(row("a", "ls a", "x").render(60).map(strip)).toEqual(["Running 2 shell commands…", "  ⎿  $ ls b"]);
+		expect(row("b", "ls b", "y").render(60)).toEqual([]);
+	});
+
+	it("drops the activity row once opened, its cards saying it", () => {
+		const { model, groups, row } = setup();
+		model.agentStart();
 		model.addMessage(assistant("a"));
-		expect(strip(row("a", "ls", "x").render(60)[0])).toBe("● Bash(ls)");
+		groups.toggle(model.runOf("a")!, false);
+		const lines = row("a", "ls a", "x").render(60).map(strip);
+		expect(lines[0]).toBe("Running 1 shell command…");
+		expect(lines[1].trim()).toBe("● Bash(ls a)");
+	});
+
+	it("takes a click on its activity row as on its line", () => {
+		const { model, groups, row } = setup();
+		model.agentStart();
+		model.addMessage(assistant("a"));
+		const head = row("a", "ls a", "x");
+		head.render(60);
+		expect(head.handleMouse(mouse("click", 1))).toEqual({ handled: true });
+		expect(groups.isShown(model.runOf("a")!, false)).toBe(true);
+	});
+
+	it("draws nothing for a call whose command is still streaming in", () => {
+		const { model, row } = setup();
+		model.agentStart();
+		expect(row("p", "rm", "").render(60)).toEqual([]);
+	});
+});
+
+describe("an opened run's thinking", () => {
+	it("sits on the panel above the call it led to, titles without their bold", () => {
+		const { model, groups, row } = setup();
+		model.load([
+			{
+				type: "message",
+				message: {
+					role: "assistant",
+					content: [{ type: "thinking", thinking: "**Checking close cleanup**\n\n**Listing**" }, { type: "toolCall", id: "a", name: "bash", arguments: { command: "ls" } }],
+					stopReason: "toolUse",
+				},
+			},
+		]);
+		groups.toggle(model.runOf("a")!, false);
+		const lines = row("a", "ls", "x").render(60);
+		expect(lines.map(strip).map((l) => l.trimEnd()).slice(0, 4)).toEqual(["Ran 1 shell command", "∴ Checking close cleanup", "∴ Listing", "● Bash(ls)"]);
+		expect(lines[1].startsWith(PANEL)).toBe(true);
+	});
+
+	it("stays off the screen while the run is folded", () => {
+		const { model, row } = setup();
+		model.load([
+			{
+				type: "message",
+				message: {
+					role: "assistant",
+					content: [{ type: "thinking", thinking: "**Looking**" }, { type: "toolCall", id: "a", name: "bash", arguments: { command: "ls" } }],
+					stopReason: "toolUse",
+				},
+			},
+		]);
+		expect(row("a", "ls", "x").render(60).map(strip)).toEqual(["Ran 1 shell command"]);
+	});
+});
+
+describe("standalone cards", () => {
+	it("draw for a shell command that does something, and break the run", () => {
+		const { model, row } = setup();
+		model.load([
+			{
+				type: "message",
+				message: {
+					role: "assistant",
+					content: [
+						{ type: "toolCall", id: "a", name: "bash", arguments: { command: "ls" } },
+						{ type: "toolCall", id: "m", name: "bash", arguments: { command: "mkdir -p x && echo hi > x/f" } },
+					],
+					stopReason: "toolUse",
+				},
+			},
+		]);
+		expect(model.runOf("m")).toBeUndefined();
+		expect(strip(row("m", "mkdir -p x && echo hi > x/f", "").render(60)[0])).toBe("● Bash(mkdir -p x && echo hi > x/f)");
 	});
 
 	it("draw normally with grouping off", () => {

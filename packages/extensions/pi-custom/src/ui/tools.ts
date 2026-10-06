@@ -345,6 +345,24 @@ function grepCard(input: CardInput, deps: CardDeps): CardModel {
 }
 
 /** `mcp__github__search_issues` reads better as `github · search_issues`. */
+/** What a call is doing, in a few words, for a run's live line: the command, the path, the pattern. */
+export function callActivity(toolName: string, args: Record<string, unknown>, cwd: string): string {
+	const path = str(args.path);
+	switch (toolName) {
+		case "bash":
+			return `$ ${oneLine(str(args.command) ?? "", Infinity)}`;
+		case "read":
+			return displayPath(path ?? "", cwd);
+		case "ls":
+			return displayPath(path ?? ".", cwd);
+		case "grep":
+		case "find":
+			return `${JSON.stringify(str(args.pattern) ?? "")}${path ? ` in ${displayPath(path, cwd)}` : ""}`;
+		default:
+			return toolName;
+	}
+}
+
 export function toolTitle(name: string): string {
 	const mcp = /^mcp__(.+?)__(.+)$/.exec(name);
 	return mcp ? `${mcp[1]} · ${mcp[2]}` : name;
