@@ -20,6 +20,16 @@ let
   ];
 in
 {
+  # The diagnostics widget draws its " pi-lens" header whenever it tracks a
+  # file or an LSP server, even when there is nothing to put after it: no
+  # languages, no findings, no files worth a row. That leaves a lone "pi-lens"
+  # line above the footer. Draw nothing until there is something to say.
+  quietEmptyWidget = ''
+    substituteInPlace dist/index.js --replace-fail \
+      ${lib.escapeShellArg "  lines.push(fitLine(header, w));\n  if (totalSuppressed > 0) {"} \
+      ${lib.escapeShellArg "  if (!langStr && !lspChip && !summary && totalSuppressed === 0 && recencySorted.length === 0)\n    return [];\n  lines.push(fitLine(header, w));\n  if (totalSuppressed > 0) {"}
+  '';
+
   lazyCoreTools = lib.concatMapStrings (name: ''
     substituteInPlace dist/index.js --replace-fail \
       ${lib.escapeShellArg "        piName: \"${name}\","} \

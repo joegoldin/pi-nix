@@ -69,7 +69,11 @@ let
         ;
       bunLock = ./pi-lens/bun.lock;
       bunNix = ./pi-lens/bun.nix;
-      patchPhaseExtra = (bunPkgs.callPackage ./pi-lens-patches.nix { }).lazyCoreTools;
+      patchPhaseExtra =
+        let
+          patches = bunPkgs.callPackage ./pi-lens-patches.nix { };
+        in
+        patches.lazyCoreTools + patches.quietEmptyWidget;
     };
     ext-czottmann-pi-automode = bunPkgs.callPackage ./czottmann-pi-automode.nix {
       inherit mkPiExtension;

@@ -11,6 +11,7 @@
 # until then `nix run .#update-extensions` must not see it, or it would pin the
 # older release over this.
 {
+  callPackage,
   fetchFromGitHub,
   mkPiExtension,
 }:
@@ -30,5 +31,6 @@ mkPiExtension {
   bunLock = ./narumitw-pi-usage/bun.lock;
   bunNix = ./narumitw-pi-usage/bun.nix;
   entrypoints = [ "src/index.ts" ];
+  patchPhaseExtra = (callPackage ./narumitw-pi-usage-patches.nix { }).reportEvent;
   meta.homepage = "https://github.com/narumiruna/pi-extensions/tree/${rev}/packages/pi-usage";
 }
