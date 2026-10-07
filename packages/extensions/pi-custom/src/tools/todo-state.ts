@@ -5,6 +5,8 @@
 // this list, because the state travels in each todo result's details as
 // { tasks, nextId }.
 
+import { wrapTextWithAnsi } from "@earendil-works/pi-tui";
+
 export type TodoStatus = "pending" | "in_progress" | "completed" | "deleted";
 export type TodoAction = "create" | "update" | "list" | "get" | "delete" | "clear";
 
@@ -238,7 +240,16 @@ const GLYPH: Record<Exclude<TodoStatus, "deleted">, [string, string]> = {
  * tasks first when it runs out of rows. `hidden` holds completed ids from an
  * earlier turn, which fade out once the next turn starts.
  */
-export function widgetLines(state: TodoState, hidden: Set<number>, maxLines: number, theme: WidgetTheme, showAll = false): string[] {
+// With a width, each task wraps under its subject instead of running off the
+// edge to be cut.
+export function widgetLines(
+	state: TodoState,
+	hidden: Set<number>,
+	maxLines: number,
+	theme: WidgetTheme,
+	showAll = false,
+	width?: number,
+): string[] {
 	const visible = state.tasks.filter((t) => t.status !== "deleted" && !hidden.has(t.id));
 	if (visible.length === 0) return [];
 	const done = state.tasks.filter((t) => t.status === "completed").length;
@@ -262,10 +273,16 @@ export function widgetLines(state: TodoState, hidden: Set<number>, maxLines: num
 				: t.status === "completed"
 					? theme.fg("muted", theme.strikethrough ? theme.strikethrough(subject) : subject)
 					: theme.fg("text", subject);
-		let line = `${theme.fg("dim", last ? "└─" : "├─")} ${theme.fg(slot, glyph)} ${showIds ? theme.fg("dim", `#${t.id} `) : ""}${body}`;
-		if (t.status === "in_progress" && t.activeForm) line += theme.fg("muted", ` (${sanitize(t.activeForm)})`);
-		if (t.blockedBy?.length) line += theme.fg("muted", ` ⛓ ${t.blockedBy.map((b) => `#${b}`).join(",")}`);
-		lines.push(line);
+		let text = `${showIds ? theme.fg("dim", `#${t.id} `) : ""}${body}`;
+		if (t.status === "in_progress" && t.activeForm) text += theme.fg("muted", ` (${sanitize(t.activeForm)})`);
+		if (t.blockedBy?.length) text += theme.fg("muted", ` ⛓ ${t.blockedBy.map((b) => `#${b}`).join(",")}`);
+		const prefix = `${theme.fg("dim", last ? "└─" : "├─")} ${theme.fg(slot, glyph)} `;
+		if (width === undefined) {
+			lines.push(prefix + text);
+			return;
+		}
+		const indent = `${last ? " " : theme.fg("dim", "│")}    `;
+		wrapTextWithAnsi(text, Math.max(1, width - 5)).forEach((part, j) => lines.push((j === 0 ? prefix : indent) + part));
 	});
 	if (rows.length < visible.length) {
 		const rest = visible.filter((t) => !rows.includes(t));

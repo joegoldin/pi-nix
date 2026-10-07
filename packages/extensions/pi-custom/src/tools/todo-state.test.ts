@@ -140,6 +140,17 @@ describe("the list above the editor", () => {
 		expect(lines.join("\n")).not.toContain("done");
 	});
 
+	it("wraps each task under its subject when given a width", () => {
+		const s = run({ action: "create", subject: "one two three four" }, { action: "create", subject: "five six seven" }).state;
+		expect(widgetLines(s, new Set(), 12, plain, false, 15)).toEqual([
+			"● Todos (0/2)",
+			"├─ ○ one two",
+			"│    three four",
+			"└─ ○ five six",
+			"     seven",
+		]);
+	});
+
 	it("disappears when everything left is hidden", () => {
 		const s = run({ action: "create", subject: "a" }).state;
 		expect(widgetLines(s, new Set([1]), 12, plain)).toEqual([]);

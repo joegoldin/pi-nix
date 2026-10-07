@@ -20,7 +20,9 @@ async subagent runs only.
 
 The `todo` tool creates, updates, lists and deletes tasks with status,
 dependencies (`blockedBy`) and owners. The list is drawn above the editor
-(ctrl+shift+t folds it) and `/todos` prints it. State travels in each todo
+(ctrl+shift+t folds it) and `/todos` prints it. Long tasks are cut at the
+edge; clicking the list shows every task in full, wrapped, and clicking again
+puts it back. State travels in each todo
 result, so it follows branches and compaction with nothing written to disk.
 
 Replaces rpiv-todo.

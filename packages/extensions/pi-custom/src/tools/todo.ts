@@ -7,7 +7,7 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
-import { Text, truncateToWidth } from "@earendil-works/pi-tui";
+import { Text, type TuiMouseEvent, type TuiMouseEventResult, truncateToWidth } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { reduce, replay, type Todo, type TodoParams, type TodoState, widgetLines } from "./todo-state.ts";
 
@@ -39,6 +39,8 @@ export function registerTodo(pi: ExtensionAPI): void {
 	const fading = new Set<number>();
 	const hidden = new Set<number>();
 	let collapsed = false;
+	// A click on the list shows every task in full, wrapped; another puts it back.
+	let wrapped = false;
 	let ctxRef: ExtensionContext | undefined;
 	let requestRender: (() => void) | undefined;
 
@@ -72,8 +74,16 @@ export function registerTodo(pi: ExtensionAPI): void {
 									widgetLines(state, hidden, MAX_WIDGET_LINES, theme as never)[0] ?? "",
 									theme.fg("dim", "└─ ctrl+shift+t to expand"),
 								]
-							: widgetLines(state, hidden, MAX_WIDGET_LINES, theme as never, ctxRef?.ui.getToolsExpanded() ?? false);
+							: wrapped
+								? widgetLines(state, hidden, MAX_WIDGET_LINES, theme as never, true, width)
+								: widgetLines(state, hidden, MAX_WIDGET_LINES, theme as never, ctxRef?.ui.getToolsExpanded() ?? false);
 						return [...lines, ""].map((l) => truncateToWidth(l, width, "…"));
+					},
+					handleMouse: (event: TuiMouseEvent): TuiMouseEventResult | undefined => {
+						if (event.type !== "click" || event.button !== "left") return undefined;
+						if (collapsed) collapsed = false;
+						else wrapped = !wrapped;
+						return { handled: true, render: true };
 					},
 					invalidate() {},
 				};
