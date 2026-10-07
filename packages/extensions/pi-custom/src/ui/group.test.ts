@@ -271,8 +271,16 @@ describe("foldsCall", () => {
 
 describe("thoughtLines", () => {
 	it("strips the bold from title-only thinking and keeps the rest as written", () => {
-		expect(thoughtLines("**Checking close cleanup**\n\n**Reading tests**")).toEqual(["Checking close cleanup", "Reading tests"]);
-		expect(thoughtLines("The **config** is wrong.")).toEqual(["The **config** is wrong."]);
+		expect(thoughtLines(["**Checking close cleanup**\n\n**Reading tests**"])).toEqual(["Checking close cleanup", "Reading tests"]);
+		expect(thoughtLines(["**Checking**", "**Reading**"])).toEqual(["Checking", "Reading"]);
+		expect(thoughtLines(["The **config** is wrong."])).toEqual(["The **config** is wrong."]);
+	});
+
+	it("keeps a blank row between paragraphs of fuller thinking", () => {
+		expect(thoughtLines(["First idea.\n\nSecond idea."])).toEqual(["First idea.", "", "Second idea."]);
+		expect(thoughtLines(["**Checking**", "It reads the config."])).toEqual(["Checking", "", "It reads the config."]);
+		expect(thoughtLines(["One line\nand its next.\n\n\n\nAnother."])).toEqual(["One line", "and its next.", "", "Another."]);
+		expect(thoughtLines(["", "  "])).toEqual([]);
 	});
 });
 

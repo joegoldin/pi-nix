@@ -456,11 +456,30 @@ export function runSummary(run: ToolRun, theme: UiTheme, hovered = false, live =
 	return live ? line + dim("…") : line;
 }
 
-/** Title-only thinking ("**Checking config**") as its titles; anything else as written. */
-export function thoughtLines(thinking: string): string[] {
-	return thinking
-		.split("\n")
-		.map((line) => line.trim())
-		.filter(Boolean)
-		.map((line) => line.replace(/^\*\*([^*]+)\*\*$/, "$1"));
+const TITLE = /^\*\*([^*]+)\*\*$/;
+
+/**
+ * The thinking that led to a call, as rows: title-only thinking ("**Checking
+ * config**") as its titles, one to a row, a list; fuller thinking as its
+ * paragraphs with a blank row ("") between, as prose reads.
+ */
+export function thoughtLines(thinking: string[]): string[] {
+	const blocks = thinking
+		.map((text) => {
+			const lines = text.split("\n").map((line) => line.trim());
+			const filled = lines.filter(Boolean);
+			if (filled.length > 0 && filled.every((line) => TITLE.test(line))) return { titles: true, lines: filled.map((line) => line.replace(TITLE, "$1")) };
+			// One blank row for each run of blank lines, none at the ends.
+			const prose = lines.filter((line, i) => line || lines[i - 1]);
+			while (prose.at(-1) === "") prose.pop();
+			return { titles: false, lines: prose };
+		})
+		.filter((block) => block.lines.length > 0);
+	const rows: string[] = [];
+	blocks.forEach((block, i) => {
+		const previous = blocks[i - 1];
+		if (previous && !(previous.titles && block.titles)) rows.push("");
+		rows.push(...block.lines);
+	});
+	return rows;
 }

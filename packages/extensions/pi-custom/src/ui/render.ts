@@ -188,11 +188,17 @@ class LiveCard {
 		const rows: string[] = [];
 		// Each title, or each paragraph of fuller thinking, is a line of its own;
 		// what wraps hangs under the text, not the mark.
-		for (const line of thinking.flatMap(thoughtLines)) {
+		for (const line of thoughtLines(thinking)) {
+			if (!line) {
+				rows.push("");
+				continue;
+			}
 			for (const [i, part] of wrapTextWithAnsi(line, Math.max(1, width - THOUGHT.length)).entries()) {
 				rows.push(this.theme.italic(this.theme.fg("dim", `${i === 0 ? THOUGHT : " ".repeat(THOUGHT.length)}${part}`)));
 			}
 		}
+		// A blank row keeps the thinking from reading as part of the card's header.
+		rows.push("");
 		const panel = backgrounds.panel;
 		return panel ? rows.map((row) => paint(row, width, panel)) : rows;
 	}

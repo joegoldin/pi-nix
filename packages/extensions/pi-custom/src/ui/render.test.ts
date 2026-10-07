@@ -175,8 +175,9 @@ describe("an opened run's thinking", () => {
 		]);
 		groups.toggle(model.runOf("a")!, false);
 		const lines = row("a", "ls", "x").render(60);
-		expect(lines.map(strip).map((l) => l.trimEnd()).slice(0, 4)).toEqual(["Ran 1 shell command", "∴ Checking close cleanup", "∴ Listing", "● Bash(ls)"]);
+		expect(lines.map(strip).map((l) => l.trimEnd()).slice(0, 5)).toEqual(["Ran 1 shell command", "∴ Checking close cleanup", "∴ Listing", "", "● Bash(ls)"]);
 		expect(lines[1].startsWith(PANEL)).toBe(true);
+		expect(lines[3].startsWith(PANEL)).toBe(true);
 	});
 
 	it("stays off the screen while the run is folded", () => {
