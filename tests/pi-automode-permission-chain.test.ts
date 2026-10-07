@@ -351,17 +351,85 @@ test("an interruption to steer while the classifier decides blocks without recor
     try {
       expect(await h.emit("tool_call", event)).toBeUndefined();
       const verdict = await h.service.links.get("pi-automode")(details, {}, log);
-      expect(verdict.kind).toBe("deny");
       expect(h.classifierCalls()).toBe(1);
-      return { reason: verdict.reason, blocked: h.state()?.blockedActions ?? 0 };
+      return { kind: verdict.kind, reason: verdict.reason, blocked: h.state()?.blockedActions ?? 0 };
     } finally {
       delete globalThis[STEERING];
     }
   };
   const steered = await interrupted(true);
+  expect(steered.kind).toBe("interrupted");
   expect(steered.reason).toContain("This was not a denial");
   expect(steered.blocked).toBe(0);
   const cancelled = await interrupted(false);
+  expect(cancelled.kind).toBe("deny");
   expect(cancelled.reason).toContain("auto mode fails closed");
   expect(cancelled.blocked).toBe(1);
+});
+
+// pi-permission-system-interrupt.patch: the permission system records the
+// link's `interrupted` verdict as an interruption everywhere it would have
+// recorded a denial: review log, decision event, forwarded decider, and the
+// reason the agent reads.
+const { composeAuthorizerChain } = await import(
+  `${process.env.PERMISSION_PACKAGE}/src/authority/authorizer-chain.ts`
+);
+const { PermissionPrompter } = await import(
+  `${process.env.PERMISSION_PACKAGE}/src/authority/permission-prompter.ts`
+);
+const { resolutionFor } = await import(
+  `${process.env.PERMISSION_PACKAGE}/src/authority/decision-resolution.ts`
+);
+const { asDecisionSource, wasInterrupted } = await import(
+  `${process.env.PERMISSION_PACKAGE}/src/authority/decision-source.ts`
+);
+const { asPromptPayload } = await import(
+  `${process.env.PERMISSION_PACKAGE}/src/presentation/prompt-payload.ts`
+);
+const { renderRefusal } = await import(
+  `${process.env.PERMISSION_PACKAGE}/src/presentation/agent-renderer.ts`
+);
+
+test("the permission system records an interrupted verdict as an interruption, not a denial", async () => {
+  const payload = asPromptPayload({
+    kind: "bash",
+    request: {
+      requester: { agentName: null, forwarded: false, sessionId: null },
+      surface: "bash", toolName: "bash", invokedToolName: null, value: "git status",
+      matchedPattern: null, matchedSpelling: null, commandContext: null, executedUnit: null,
+    },
+    evidence: [],
+    annotations: [],
+  });
+  expect(payload).toBeDefined();
+  const reviews = [];
+  const prompter = new PermissionPrompter({ logger: { review: (event, entry) => reviews.push({ event, ...entry }), debug() {} } });
+  const decide = (verdict) => prompter.prompt(
+    composeAuthorizerChain(
+      [{ name: "pi-automode", authorize: async () => verdict }],
+      { authorize: async () => { throw new Error("an interruption must not reach the prompt"); } },
+      {},
+      log,
+    ),
+    { requestId: "r1", source: "tool_call", agentName: null, payload, toolCallId: "c1", toolName: "bash" },
+  );
+
+  const decision = await decide({ kind: "interrupted", reason: "steering" });
+  expect(decision.approved).toBe(false);
+  expect(decision.decidedBy).toEqual({ kind: "authorizer", name: "pi-automode", verdict: "interrupted", reason: "steering" });
+  expect(reviews.at(-1).event).toBe("permission_request.interrupted");
+  expect(reviews.at(-1).resolution).toBe("interrupted");
+  expect(resolutionFor(decision.decidedBy, { approved: false, forSession: false })).toBe("interrupted");
+  // A forwarded response keeps the verdict, so the requesting session records it too.
+  const forwarded = asDecisionSource({ kind: "forwarded", responderSessionId: null, decision: decision.decidedBy });
+  expect(wasInterrupted(forwarded)).toBe(true);
+  const reason = renderRefusal(payload, decision.decidedBy, null);
+  expect(reason).toContain("The user interrupted the turn");
+  expect(reason).toContain("Nothing was denied");
+  expect(reason).not.toContain("authorizer denied");
+
+  const denied = await decide({ kind: "deny", reason: "no" });
+  expect(reviews.at(-1).event).toBe("permission_request.denied");
+  expect(resolutionFor(denied.decidedBy, { approved: false, forSession: false })).toBe("authorizer_denied");
+  expect(renderRefusal(payload, denied.decidedBy, denied.denialReason ?? null)).toContain("authorizer denied");
 });

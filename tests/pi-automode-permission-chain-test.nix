@@ -15,6 +15,7 @@ pkgs.runCommand "pi-automode-permission-chain-test"
     export AUTOMODE_PACKAGE="$PWD/automode"
     cp -R ${packages.ext-gotgenes-pi-permission-system} permissions
     chmod -R u+w permissions
+    ln -s ${packages.coding-agent}/lib/node_modules/@earendil-works permissions/node_modules/@earendil-works
     # Bun needs the suffix that Pi's TypeScript loader resolves implicitly.
     substituteInPlace permissions/package.json \
       --replace-fail '"#src/*": "./src/*"' '"#src/*": "./src/*.ts"'
