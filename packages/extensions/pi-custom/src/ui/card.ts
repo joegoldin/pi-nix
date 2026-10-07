@@ -127,8 +127,9 @@ function layoutRows(model: CardModel, layout: CardLayout, theme: UiTheme, w: num
 
 	// One logical line as rows: clipped to one row, or wrapped with the rest
 	// under the same gutter.
+	// Rows wrap rather than clip, open or folded, as Claude Code's do: a cut
+	// line hides the part of a command or path that tells it apart.
 	const place = (first: string, rest: string, line: string): string[] => {
-		if (!layout.expanded) return [fit(first + line, w)];
 		const gutter = Math.max(visibleWidth(first), visibleWidth(rest));
 		return wrapTextWithAnsi(line, Math.max(1, w - gutter)).map((part, i) => fit((i === 0 ? first : rest) + part, w));
 	};

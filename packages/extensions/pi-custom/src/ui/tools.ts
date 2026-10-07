@@ -76,6 +76,12 @@ export function displayPath(path: string, cwd: string): string {
 	return rel && !rel.startsWith("..") && !isAbsolute(rel) ? rel : path;
 }
 
+/** A command's first line, marked "…" when more lines follow: what a folded card shows of it. */
+function firstLine(text: string): string {
+	const [first = "", ...rest] = text.trim().split("\n");
+	return rest.some((line) => line.trim()) ? `${first.trimEnd()}…` : first.trimEnd();
+}
+
 function oneLine(text: string, max = 200): string {
 	const flat = text.replace(/\s+/g, " ").trim();
 	return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
@@ -163,7 +169,7 @@ function bashCard(input: CardInput, deps: CardDeps): CardModel {
 	const timeout = num(input.args.timeout);
 	const model: CardModel = {
 		title: "Bash",
-		target: oneLine(command),
+		target: firstLine(command),
 		fullTarget: command.trim(),
 		detail: timeout !== undefined ? `timeout ${timeout}s` : undefined,
 		state: stateOf(input),

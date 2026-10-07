@@ -99,8 +99,11 @@ describe("bash", () => {
 		expect(buildCard(done("bash", { command: "true" }, ""), deps).summary).toBe("(no output)");
 	});
 
-	it("flattens a multi-line command into the header", () => {
-		expect(buildCard(done("bash", { command: "a &&\n  b" }, ""), deps).target).toBe("a && b");
+	it("folds a multi-line command to its first line, marked as continuing, and keeps it all for the open card", () => {
+		const card = buildCard(done("bash", { command: "a &&\n  b" }, ""), deps);
+		expect(card.target).toBe("a &&…");
+		expect(card.fullTarget).toBe("a &&\n  b");
+		expect(buildCard(done("bash", { command: "ls -la" }, ""), deps).target).toBe("ls -la");
 	});
 });
 

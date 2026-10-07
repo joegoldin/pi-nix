@@ -86,10 +86,13 @@ describe("layoutCard", () => {
 		expect(layoutCard(model(), layout({ mode: "compact", expanded: true }), plain, 80).length).toBeGreaterThan(1);
 	});
 
-	it("clips rows to the width when collapsed", () => {
-		const rows = layoutCard(model({ target: "x".repeat(200), body: ["y".repeat(200)] }), layout(), plain, 30);
-		expect(rows).toHaveLength(3);
+	it("wraps long rows when collapsed too, so nothing is cut off", () => {
+		const rows = layoutCard(model({ target: "x".repeat(60), body: ["y".repeat(60)] }), layout(), plain, 30);
+		expect(rows.length).toBeGreaterThan(3);
 		expect(rows.every((r) => Bun.stringWidth(r) <= 30)).toBe(true);
+		expect(rows.join("")).not.toContain("…");
+		// The header still closes its parenthesis.
+		expect(rows.some((r) => r.trimEnd().endsWith(")"))).toBe(true);
 	});
 
 	it("wraps long rows when expanded, continuing under the same gutter", () => {
