@@ -115,6 +115,19 @@ function plural(n: number): string {
 	return n === 1 ? "line" : "lines";
 }
 
+/**
+ * Whether opening the card shows anything it does not show folded: hidden rows,
+ * or a header cut short. One that would not stays folded, as a click on it
+ * would change nothing but the panel behind it.
+ */
+export function opens(model: CardModel, layout: CardLayout, theme: UiTheme, width: number): boolean {
+	const w = Math.max(1, width);
+	const plain = { ...layout, hovered: false, background: undefined };
+	const folded = layoutRows(model, { ...plain, expanded: false }, theme, w);
+	const open = layoutRows(model, { ...plain, expanded: true }, theme, w);
+	return folded.length !== open.length || folded.some((row, i) => row !== open[i]);
+}
+
 function layoutRows(model: CardModel, layout: CardLayout, theme: UiTheme, w: number): string[] {
 	if (layout.mode === "compact" && !layout.expanded) {
 		// Without a summary, the body's most telling line stands in: the last

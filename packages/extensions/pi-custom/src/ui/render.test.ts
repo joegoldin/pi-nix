@@ -20,6 +20,8 @@ const theme = {
 } satisfies UiTheme;
 
 const strip = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "");
+/** Output long enough to fold behind a card's `… +N lines`. */
+const LONG = Array.from({ length: 20 }, (_, i) => String(i + 1)).join("\n");
 
 function setup(config: Partial<UiConfig> = {}) {
 	const model = new RunModel();
@@ -118,7 +120,7 @@ describe("a minimized run", () => {
 		const { model, groups, row } = setup();
 		model.load([{ type: "message", message: assistant("a") }]);
 		groups.toggle(model.runOf("a")!, false);
-		const head = row("a", "ls", "x");
+		const head = row("a", "ls", LONG);
 		head.render(60);
 		expect(head.handleMouse(mouse("click", 1))).toBeUndefined();
 	});
@@ -230,8 +232,22 @@ describe("standalone cards", () => {
 
 	it("sit on the panel when expanded, and on nothing when collapsed", () => {
 		const { row } = setup({ groupRuns: false });
-		expect(row("a", "ls", "x", { expanded: true }).render(60).every((l) => l.startsWith(PANEL))).toBe(true);
-		expect(row("b", "ls", "x").render(60).some((l) => l.startsWith("\x1b[48"))).toBe(false);
+		expect(row("a", "ls", LONG, { expanded: true }).render(60).every((l) => l.startsWith(PANEL))).toBe(true);
+		expect(row("b", "ls", LONG).render(60).some((l) => l.startsWith("\x1b[48"))).toBe(false);
+	});
+
+	it("stay folded when open would show nothing more, and keep the click from pi", () => {
+		const { row } = setup({ groupRuns: false });
+		const card = row("a", "ls", "x", { expanded: true });
+		expect(card.render(60).some((l) => l.startsWith("\x1b[48"))).toBe(false);
+		expect(card.handleMouse(mouse("click", 1))).toEqual({ handled: true });
+	});
+
+	it("open when only the header would say more", () => {
+		const { row } = setup({ groupRuns: false });
+		const card = row("a", "echo a\necho b", "a\nb");
+		card.render(60);
+		expect(card.handleMouse(mouse("click", 1))).toBeUndefined();
 	});
 
 	it("keep compact mode to one line", () => {
@@ -251,17 +267,17 @@ describe("backgrounds", () => {
 			expandKey: () => "ctrl+o",
 		});
 		const context: RenderContextLike = { args: { command: "ls" }, toolCallId: "z", state: {}, cwd: "/", expanded: true, isPartial: false, isError: false };
-		r.renderResult?.({ content: [{ type: "text", text: "x" }] }, { expanded: true, isPartial: false }, systemTheme, context);
+		r.renderResult?.({ content: [{ type: "text", text: LONG }] }, { expanded: true, isPartial: false }, systemTheme, context);
 		const lines = (r.renderCall?.(context.args, systemTheme, context) as { render(w: number): string[] }).render(40);
 		expect(lines.every((l) => l.startsWith("\x1b[48;2;"))).toBe(true);
-		expect(row("a", "ls", "x", { expanded: true }).render(40)[0].startsWith(PANEL)).toBe(true);
+		expect(row("a", "ls", LONG, { expanded: true }).render(40)[0].startsWith(PANEL)).toBe(true);
 	});
 });
 
 describe("hover", () => {
 	it("brightens the card's fold line under the pointer, until the pointer leaves", () => {
 		const { hover, row, repaints } = setup({ groupRuns: false });
-		const card = row("a", "seq", Array.from({ length: 20 }, (_, i) => String(i + 1)).join("\n"));
+		const card = row("a", "seq", LONG);
 		const fold = (lines: string[]) => lines.find((l) => strip(l).includes("… +")) ?? "";
 		expect(fold(card.render(60))).not.toContain(TEXT);
 		expect(card.handleMouse(mouse("move", 0))).toEqual({ handled: true, render: true });
@@ -281,7 +297,7 @@ describe("hover", () => {
 		const { model, groups, hover, row } = setup();
 		model.load([{ type: "message", message: assistant("a") }]);
 		groups.toggle(model.runOf("a")!, false);
-		const head = row("a", "ls", "x");
+		const head = row("a", "ls", LONG);
 		head.render(60);
 		head.handleMouse(mouse("move", 0));
 		expect(hover.isHovered("run:a")).toBe(true);

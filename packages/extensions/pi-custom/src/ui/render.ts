@@ -26,7 +26,7 @@ import {
 	type TuiMouseEventResult,
 	wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
-import { brightened, CardComponent, type CardLayout, ELBOW_PREFIX, paint, type UiTheme } from "./card.ts";
+import { brightened, CardComponent, type CardLayout, ELBOW_PREFIX, opens, paint, type UiTheme } from "./card.ts";
 import type { UiConfig } from "./config.ts";
 import {
 	type GroupState,
@@ -138,6 +138,8 @@ class LiveCard {
 	/** Rows the run's line takes at the top, which take clicks for the run rather than the card. */
 	private headerRows = 0;
 	private run: ToolRun | undefined;
+	/** Whether the card, as last drawn, has anything more to show open. */
+	private opens = true;
 
 	constructor(
 		private toolName: string,
@@ -205,38 +207,45 @@ class LiveCard {
 
 	private card(config: UiConfig, inPanel: boolean, backgrounds: Omit<Backgrounds, "key">, width: number): string[] {
 		const record = this.context.state.piUi;
-		const hovered = this.deps.hover?.isHovered(`card:${this.context.toolCallId}`) ?? false;
-		const theme = hovered ? brightened(this.theme) : this.theme;
-		const model = buildCard(
-			{
-				toolName: this.toolName,
-				args: (this.context.args ?? {}) as Record<string, unknown>,
-				result: record?.result,
-				isPartial: record?.isPartial ?? true,
-				isError: record?.isError ?? false,
-				cwd: this.context.cwd,
-				prior: this.deps.priorContent?.(this.context.toolCallId),
-			},
-			{ theme, config, highlight: this.deps.highlight, languageOf: this.deps.languageOf, diff: this.deps.diff },
-		);
-		const expanded = record?.expanded ?? this.context.expanded;
+		const build = (theme: UiTheme) =>
+			buildCard(
+				{
+					toolName: this.toolName,
+					args: (this.context.args ?? {}) as Record<string, unknown>,
+					result: record?.result,
+					isPartial: record?.isPartial ?? true,
+					isError: record?.isError ?? false,
+					cwd: this.context.cwd,
+					prior: this.deps.priorContent?.(this.context.toolCallId),
+				},
+				{ theme, config, highlight: this.deps.highlight, languageOf: this.deps.languageOf, diff: this.deps.diff },
+			);
+		const plain = build(this.theme);
 		const layout: CardLayout = {
 			mode: config.toolMode === "compact" ? "compact" : "on",
-			expanded,
+			expanded: record?.expanded ?? this.context.expanded,
 			collapsedLines: config.collapsedLines,
 			expandedLines: config.expandedLines,
-			expandHint: theme.fg("muted", `(click or ${this.deps.expandKey()})`),
-			background: expanded || inPanel ? backgrounds.panel : undefined,
-			hovered,
+			// Set below: it shows only beside hidden rows, which a card with
+			// nothing more to show has none of.
+			expandHint: "",
 		};
+		// A card with nothing more to show stays folded: no panel, no lighting
+		// up under the pointer, and a click on it is not passed on.
+		this.opens = opens(plain, layout, this.theme, width);
+		layout.expanded &&= this.opens;
+		layout.background = layout.expanded || inPanel ? backgrounds.panel : undefined;
+		layout.hovered = this.opens && (this.deps.hover?.isHovered(`card:${this.context.toolCallId}`) ?? false);
+		const theme = layout.hovered ? brightened(this.theme) : this.theme;
+		layout.expandHint = theme.fg("muted", `(click or ${this.deps.expandKey()})`);
 		// The header keeps its colours; only what is under it lights up.
-		return new CardComponent(model, layout, this.theme).render(width);
+		return new CardComponent(layout.hovered ? build(theme) : plain, layout, this.theme).render(width);
 	}
 
 	/**
 	 * The pointer over this row claims the hover; a click on the run's line
 	 * opens or folds the run. A click on the card itself is left to pi, which
-	 * expands that one row.
+	 * expands that one row, unless the card has nothing more to show.
 	 */
 	handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
 		const onHeader = event.y < this.headerRows && this.run !== undefined;
@@ -249,6 +258,8 @@ class LiveCard {
 			runs.groups.toggle(this.run, runs.toolsExpanded());
 			return { handled: true };
 		}
+		// pi would open the card, to show what it already shows.
+		if (event.type === "click" && event.button === "left" && !onHeader && !this.opens) return { handled: true };
 		return undefined;
 	}
 
