@@ -29,6 +29,8 @@ export interface CardModel {
 	title: string;
 	/** What it acted on, shown in parentheses after the title. */
 	target?: string;
+	/** The target in full, line breaks and all, for an expanded card, where target is a clipped one-liner. */
+	fullTarget?: string;
 	/** Qualifiers after the target, dimmed: "offset 10, limit 40". */
 	detail?: string;
 	state: CardState;
@@ -131,7 +133,13 @@ function layoutRows(model: CardModel, layout: CardLayout, theme: UiTheme, w: num
 		return wrapTextWithAnsi(line, Math.max(1, w - gutter)).map((part, i) => fit((i === 0 ? first : rest) + part, w));
 	};
 
-	const rows: string[] = place("", HEAD_INDENT, header(model, theme));
+	// Open, the header says all of it: a long or multi-line command is the
+	// thing most worth reading in full, and the collapsed one-liner cut it off.
+	const rows: string[] = place(
+		"",
+		HEAD_INDENT,
+		header(layout.expanded && model.fullTarget !== undefined ? { ...model, target: model.fullTarget } : model, theme),
+	);
 	// Under the pointer, everything below the header brightens; the header keeps its colours.
 	const lit = layout.hovered ? brightened(theme) : theme;
 	const body = typeof model.body === "function" ? model.body(Math.max(1, w - BODY_GUTTER)) : (model.body ?? []);

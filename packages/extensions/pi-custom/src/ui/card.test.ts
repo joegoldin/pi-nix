@@ -124,6 +124,15 @@ describe("layoutCard", () => {
 		expect(rows(true).some((r) => r.includes("\x1b[48"))).toBe(false);
 	});
 
+	it("shows the full target, line breaks included, only when expanded", () => {
+		const long = model({ target: "a b…", fullTarget: "a b c d e f\nsecond line" });
+		const collapsed = layoutCard(long, layout(), plain, 60);
+		expect(collapsed[0]).toBe("● Read(a b…)");
+		const open = layoutCard(long, layout({ expanded: true }), plain, 60);
+		expect(open[0]).toBe("● Read(a b c d e f");
+		expect(open[1]).toBe("  second line)");
+	});
+
 	it("gives a width-dependent body the width left after the gutter", () => {
 		let seen = 0;
 		layoutCard(model({ body: (w) => ((seen = w), ["x"]) }), layout(), plain, 50);

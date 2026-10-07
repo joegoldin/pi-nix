@@ -164,6 +164,7 @@ function bashCard(input: CardInput, deps: CardDeps): CardModel {
 	const model: CardModel = {
 		title: "Bash",
 		target: oneLine(command),
+		fullTarget: command.trim(),
 		detail: timeout !== undefined ? `timeout ${timeout}s` : undefined,
 		state: stateOf(input),
 		tail: true,
