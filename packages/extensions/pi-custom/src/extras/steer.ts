@@ -11,9 +11,20 @@
 // aborted, and the editor holds exactly the restored queue in front of the
 // draft that was there when Esc was pressed. Anything else leaves the editor
 // as pi left it.
+//
+// For as long as that Esc's abort is settling, globalThis[STEERING] is true, so
+// auto mode (pi-nix's pi-automode-interrupt.patch) can tell an interruption to
+// give guidance from a plain Esc, which cancels: a check it was making on the
+// call is not recorded or reported as a denial.
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { matchesKey } from "@earendil-works/pi-tui";
+
+export const STEERING = Symbol.for("pi-custom.steering");
+
+function steering(on: boolean): void {
+	(globalThis as Record<symbol, unknown>)[STEERING] = on;
+}
 
 /** The queued text pi put in front of the draft, or undefined when the editor is not in that shape. */
 export function restoredQueue(after: string, draft: string): string | undefined {
@@ -44,12 +55,14 @@ export function registerSteerNow(pi: ExtensionAPI): void {
 		unsubscribe?.();
 		unsubscribe = undefined;
 		draft = undefined;
+		steering(false);
 		if (!ctx.hasUI || typeof ctx.ui.onTerminalInput !== "function") return;
 		// Observes, never consumes: pi's own Esc still does the aborting.
 		unsubscribe = ctx.ui.onTerminalInput((data) => {
 			if (matchesKey(data, "escape") && !ctx.isIdle() && ctx.hasPendingMessages()) {
 				draft = ctx.ui.getEditorText();
 				aborted = false;
+				steering(true);
 			}
 			return undefined;
 		});
@@ -66,6 +79,7 @@ export function registerSteerNow(pi: ExtensionAPI): void {
 		const wasAborted = aborted;
 		draft = undefined;
 		aborted = false;
+		steering(false);
 		if (before === undefined || !wasAborted) return;
 		const queued = restoredQueue(ctx.ui.getEditorText(), before);
 		if (queued === undefined) return;
@@ -77,5 +91,6 @@ export function registerSteerNow(pi: ExtensionAPI): void {
 		unsubscribe?.();
 		unsubscribe = undefined;
 		draft = undefined;
+		steering(false);
 	});
 }

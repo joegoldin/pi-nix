@@ -1,0 +1,93 @@
+--- a/extensions/auto-mode/extension.ts
++++ b/extensions/auto-mode/extension.ts
+@@ -377,6 +377,47 @@
+       };
+     }
+ 
++    // Esc with messages queued interrupts the turn to send them: the user
++    // stepping in with guidance, not a verdict on the action. pi-custom marks
++    // that abort on globalThis while it settles; a plain Esc is a cancel and
++    // keeps upstream's handling. Interrupted, the tool still does not run, but
++    // nothing is counted, listed or announced as a denial, and the reason says
++    // what happened rather than that the action was refused.
++    function steering(ctx: ExtensionContext): boolean {
++      return Boolean(ctx.signal?.aborted) &&
++        (globalThis as Record<symbol, unknown>)[Symbol.for("pi-custom.steering")] === true;
++    }
++
++    function interrupted(
++      ctx: ExtensionContext,
++      kind: DecisionKind,
++      toolName: string,
++      summary: string,
++      logCtx: LogCtx,
++    ): { block: true; reason: string } {
++      if (logCtx.logger.enabled) {
++        logCtx.logger.append({
++          type: "decision",
++          ts: new Date().toISOString(),
++          decisionId: logCtx.decisionId,
++          sessionId: ctx.sessionManager.getSessionId?.(),
++          cwd: ctx.cwd,
++          tool: toolName,
++          summary,
++          kind,
++          outcome: "interrupted",
++          reason: "Interrupted by the user",
++          classifierModel: logCtx.classifierModel,
++          reasoning: logCtx.reasoning,
++        });
++      }
++      return {
++        block: true,
++        reason:
++          "[pi-automode] The user interrupted the turn to give guidance before auto mode decided, so the tool did not run. This was not a denial: the action was neither approved nor refused. Follow what the user says next.",
++      };
++    }
++
+     function allow(
+       ctx: ExtensionContext,
+       kind: DecisionKind,
+@@ -524,6 +565,9 @@
+         reasoning: classifierReasoningForConfig(cfg.classifierReasoningLevel),
+       };
+ 
++      if (steering(ctx)) {
++        return interrupted(ctx, "setup", event.toolName, summary, logCtx);
++      }
+       if (ctx.signal?.aborted) {
+         if (!deterministicOnly) state.checkedActions += 1;
+         return block(ctx, {
+@@ -622,6 +666,9 @@
+           `Rule: ${pattern.raw}\n\nAction:\n${summary}\n\nAllow this action to continue to auto-mode classification?`,
+           { signal: ctx.signal },
+         );
++        if (!allowed && steering(ctx)) {
++          return interrupted(ctx, "permissions.ask", event.toolName, summary, logCtx);
++        }
+         if (!allowed) {
+           const matchedCommand = matchedCommandSummary(
+             matchingBashCommandText(pattern, bashAnalysis),
+@@ -822,6 +869,11 @@
+         );
+       }
+ 
++      // An aborted classifier request fails closed as a block; when the abort
++      // was an interruption to send queued messages, it is that instead.
++      if (steering(ctx)) {
++        return interrupted(ctx, "classifier", event.toolName, summary, logCtx);
++      }
+       state.classifierDenied += 1;
+       return block(ctx, {
+         timestamp: Date.now(),
+--- a/extensions/auto-mode/log.ts
++++ b/extensions/auto-mode/log.ts
+@@ -20,7 +20,7 @@
+   tool: string;
+   summary: string;
+   kind: DecisionKind;
+-  outcome: "allow" | "block";
++  outcome: "allow" | "block" | "interrupted";
+   reason: string;
+   classifierModel?: string;
+   reasoning: ClassifierReasoningLog;

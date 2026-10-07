@@ -202,7 +202,7 @@ const { parseToolPattern } = await import(
   `${process.env.AUTOMODE_PACKAGE}/extensions/auto-mode/permissions.ts`
 );
 
-async function realHost(configForTrust) {
+async function realHost(configForTrust, classifyAction) {
   const handlers = new Map();
   const commands = new Map();
   let state;
@@ -232,8 +232,9 @@ async function realHost(configForTrust) {
   };
   withPermissionChain(createPiAutomode({
     loadConfig: (_cwd, trusted) => ({ ...config, ...configForTrust(trusted) }),
-    classifyAction: async () => {
+    classifyAction: async (...args) => {
       classifierCalls++;
+      if (classifyAction) return classifyAction(...args);
       throw new Error("deterministic pre-pass must not call the classifier");
     },
   }), { global: globals, readActivation: () => ({ active: true }) })(pi);
@@ -246,7 +247,7 @@ async function realHost(configForTrust) {
     return result;
   };
   await emit("session_start");
-  return { emit, commands, ctx, classifierCalls: () => classifierCalls, state: () => state };
+  return { emit, commands, ctx, service: s, classifierCalls: () => classifierCalls, state: () => state };
 }
 
 test("real upstream gate denies compound Bash before a permission-system allow", async () => {
@@ -305,4 +306,62 @@ test("real pre-pass leaves an allowed action for the permission system without c
   const h = await realHost(() => ({}));
   expect(await h.emit("tool_call", event)).toBeUndefined();
   expect(h.classifierCalls()).toBe(0);
+});
+
+// pi-automode-interrupt.patch: Esc with messages queued interrupts the turn to
+// send them, and pi-custom marks that abort on globalThis while it settles. A
+// check auto mode was making then still stops the tool, but is not counted or
+// reported as a denial. A plain Esc is a cancel, handled as upstream does.
+const STEERING = Symbol.for("pi-custom.steering");
+
+test("an interruption to steer, before the check, blocks without recording a denial", async () => {
+  const h = await realHost(() => ({}));
+  h.ctx.signal = AbortSignal.abort();
+  globalThis[STEERING] = true;
+  try {
+    const result = await h.emit("tool_call", event);
+    expect(result?.block).toBe(true);
+    expect(result.reason).toContain("This was not a denial");
+    expect(h.state()?.blockedActions ?? 0).toBe(0);
+    expect(h.state()?.recentDenials ?? []).toEqual([]);
+  } finally {
+    delete globalThis[STEERING];
+  }
+});
+
+test("a plain Esc still cancels as a block", async () => {
+  const h = await realHost(() => ({}));
+  h.ctx.signal = AbortSignal.abort();
+  const result = await h.emit("tool_call", event);
+  expect(result?.block).toBe(true);
+  expect(result.reason).toContain("Cancelled");
+  expect(h.state().blockedActions).toBe(1);
+});
+
+test("an interruption to steer while the classifier decides blocks without recording a denial", async () => {
+  const failed = { decision: "block", tier: "none", reason: "Fast classifier failed; auto mode fails closed: The operation was aborted." };
+  const interrupted = async (steer) => {
+    const controller = new AbortController();
+    const h = await realHost(() => ({ allowInsideWorkingDirectory: false }), async () => {
+      controller.abort();
+      return failed;
+    });
+    h.ctx.signal = controller.signal;
+    if (steer) globalThis[STEERING] = true;
+    try {
+      expect(await h.emit("tool_call", event)).toBeUndefined();
+      const verdict = await h.service.links.get("pi-automode")(details, {}, log);
+      expect(verdict.kind).toBe("deny");
+      expect(h.classifierCalls()).toBe(1);
+      return { reason: verdict.reason, blocked: h.state()?.blockedActions ?? 0 };
+    } finally {
+      delete globalThis[STEERING];
+    }
+  };
+  const steered = await interrupted(true);
+  expect(steered.reason).toContain("This was not a denial");
+  expect(steered.blocked).toBe(0);
+  const cancelled = await interrupted(false);
+  expect(cancelled.reason).toContain("auto mode fails closed");
+  expect(cancelled.blocked).toBe(1);
 });

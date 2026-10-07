@@ -24,5 +24,6 @@ mkPiExtension {
     ${patch}/bin/patch -p1 < ${./pi-automode-session-service.patch}
     ${patch}/bin/patch -p1 < ${./pi-automode-deterministic-gate.patch}
     ${patch}/bin/patch -p1 < ${./pi-automode-search-redaction.patch}
+    ${patch}/bin/patch -p1 < ${./pi-automode-interrupt.patch}
   '';
 }
