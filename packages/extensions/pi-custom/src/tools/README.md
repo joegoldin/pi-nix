@@ -59,7 +59,7 @@ Replaces pi-btw.
 ## Run summary (`turn.ts`, `turn-text.ts`)
 
 After a run of at least `turnSummaryMinSeconds` (5 by default, in `/ui`), a dim
-line marks where it ended: `✓ 57s · done 11:11 AM · 1 shell still running`, with
-✗ when the run ended on an error. Interrupted runs get none. It is written once
+line marks where it ended: `✻ Worked for 57s · done 11:11 AM · 1 shell still
+running`, or `✗ Failed after 57s · …` when the run ended on an error. Interrupted runs get none. It is written once
 pi settles, stays in the transcript, and is filtered out of every model request.
-Modelled on the line Claude Code prints after a turn, without its verbs.
+Claude Code's line after a turn, with its plain verb and not the rotating ones.

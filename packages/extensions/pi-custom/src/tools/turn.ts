@@ -59,8 +59,9 @@ export function registerRunSummary(pi: ExtensionAPI, config: () => UiConfig, run
 	pi.registerMessageRenderer(TYPE, (message, _options, theme) => {
 		const details = message.details as RunSummary | undefined;
 		const text = details ? summaryText(details) : String(message.content);
+		// Dim throughout, as Claude Code's is; only a failure's mark is coloured.
 		const [mark, ...rest] = text.split(" ");
-		const markColour = details?.failed ? "error" : "success";
+		const markColour = details?.failed ? "error" : "dim";
 		return { render: () => [`${theme.fg(markColour as never, mark ?? "")} ${theme.fg("dim", rest.join(" "))}`], invalidate() {} };
 	});
 }

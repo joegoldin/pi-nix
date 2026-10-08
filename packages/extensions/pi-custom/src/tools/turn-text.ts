@@ -1,8 +1,8 @@
-// The line written after a run: "✓ 57s · done 11:11 AM · 1 shell still
-// running". Pure, so the wording and the time format are testable.
+// The line written after a run: "✻ Worked for 57s · done 11:11 AM · 1 shell
+// still running". Pure, so the wording and the time format are testable.
 //
-// Modelled on the summary Claude Code prints when a turn ends, without its
-// rotating verbs: how long, when it finished, and what is still going in the
+// Claude Code's line when a turn ends, with its plain verb only, not the
+// rotating ones: how long, when it finished, and what is still going in the
 // background, which is the part that answers "is it actually done?".
 
 export interface RunSummary {
@@ -32,7 +32,7 @@ export function clock(at: number, locale?: string, timeZone?: string): string {
 }
 
 export function summaryText(s: RunSummary, locale?: string, timeZone?: string): string {
-	const parts = [`${s.failed ? "✗" : "✓"} ${duration(s.elapsedMs)}`, `done ${clock(s.doneAt, locale, timeZone)}`];
+	const parts = [s.failed ? `✗ Failed after ${duration(s.elapsedMs)}` : `✻ Worked for ${duration(s.elapsedMs)}`, `done ${clock(s.doneAt, locale, timeZone)}`];
 	if (s.shells > 0) parts.push(`${s.shells} ${s.shells === 1 ? "shell" : "shells"} still running`);
 	return parts.join(" · ");
 }
