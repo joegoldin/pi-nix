@@ -13,8 +13,9 @@
 //     ⎿  $ rg -n foo src
 //
 // The cards never show on their own, so nothing appears only to fold away.
-// The thinking that led to a run's calls is part of the run too: pi is told
-// not to draw it (pi-patches.nix), and an opened run shows it on the panel.
+// The thinking that led to a run's calls is part of the run too, once its call
+// has joined: pi is told not to draw it (pi-patches.nix), and an opened run
+// shows it on the panel.
 //
 // Pure: the model is fed messages (a session branch on load, stream events
 // live) and answers what each tool row should draw. render.ts asks it; index.ts
@@ -230,20 +231,27 @@ export class RunModel {
 	}
 
 	/**
-	 * Whether pi should leave out an assistant message's thinking because the
-	 * run it led to has it: a message with no prose whose every call is in a
-	 * run. While the agent works, calls not yet known and a message that has
-	 * produced only thinking so far count as joining one, so thinking is held
-	 * back rather than drawn and then taken away; it appears once prose or a
-	 * call that stands alone says it belongs to no run.
+	 * The thinking blocks pi should leave out of an assistant message because a
+	 * run has them, as content indices. Thinking goes where addPart puts it: to
+	 * the next call, when that call is in a run. Thinking before prose or a call
+	 * that stands alone stays with pi, and so does thinking whose call has not
+	 * come yet: it streams as pi draws it, and folds into the run the moment its
+	 * call joins one. One message can hold both kinds.
 	 */
-	hidesThinking(message: MessageLike): boolean {
-		const parts = partsOf(message);
-		if (!parts.some((p) => p.type === "thinking" && p.thinking?.trim())) return false;
-		if (parts.some((p) => p.type === "text" && p.text?.trim())) return false;
-		const calls = parts.filter((p) => p.type === "toolCall");
-		if (calls.length === 0) return this.running;
-		return calls.every((p) => p.id !== undefined && (this.byCall.has(p.id) || this.isPending(p.id, p.name ?? "")));
+	hiddenThinking(message: MessageLike): number[] {
+		const hidden: number[] = [];
+		let pending: number[] = [];
+		partsOf(message).forEach((part, i) => {
+			if (part.type === "thinking") {
+				if (part.thinking?.trim()) pending.push(i);
+			} else if (part.type === "text") {
+				if (part.text?.trim()) pending = [];
+			} else if (part.type === "toolCall") {
+				if (part.id !== undefined && this.byCall.has(part.id)) hidden.push(...pending);
+				pending = [];
+			}
+		});
+		return hidden;
 	}
 
 	private callOf(toolCallId: string): RunCall | undefined {

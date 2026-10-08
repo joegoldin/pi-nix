@@ -157,8 +157,8 @@ export default function piUi(pi: ExtensionAPI): void {
 	 * assistant message, and an opened run draws it on its panel. Only while
 	 * runs are drawn: with grouping or cards off, pi's thinking is all there is.
 	 */
-	function hideThinking(message: MessageLike): boolean {
-		return config.groupRuns && config.toolMode !== "off" && runs.hidesThinking(message);
+	function hideThinking(message: MessageLike): number[] {
+		return config.groupRuns && config.toolMode !== "off" ? runs.hiddenThinking(message) : [];
 	}
 
 	/**

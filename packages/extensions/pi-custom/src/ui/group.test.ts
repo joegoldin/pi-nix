@@ -228,33 +228,38 @@ describe("runs followed live", () => {
 });
 
 describe("thinking left to the run", () => {
-	it("hides a message's thinking when every call in it folds and it has no prose", () => {
-		const model = loaded(assistant(thinking(), call("a"), call("b", "read")));
-		expect(model.hidesThinking(assistant(thinking(), call("a"), call("b", "read")))).toBe(true);
+	it("hides the thinking that led into a run", () => {
+		const message = assistant(thinking(), call("a"), call("b", "read"));
+		expect(loaded(message).hiddenThinking(message)).toEqual([0]);
 	});
 
 	it("keeps thinking before prose, before a call that stands alone, or with nothing to hide", () => {
 		const withText = assistant(thinking(), text("Found it."), call("a"));
-		const withEdit = assistant(thinking(), call("a"), call("e", "edit"));
+		const withEdit = assistant(thinking(), call("e", "edit"));
 		const noThinking = assistant(call("a"));
 		const model = loaded(withText, withEdit, noThinking);
-		expect(model.hidesThinking(withText)).toBe(false);
-		expect(model.hidesThinking(withEdit)).toBe(false);
-		expect(model.hidesThinking(noThinking)).toBe(false);
-		expect(model.hidesThinking(assistant(thinking()))).toBe(false);
+		expect(model.hiddenThinking(withText)).toEqual([]);
+		expect(model.hiddenThinking(withEdit)).toEqual([]);
+		expect(model.hiddenThinking(noThinking)).toEqual([]);
+		expect(model.hiddenThinking(assistant(thinking()))).toEqual([]);
 	});
 
-	it("holds thinking back while the agent works, until something says it belongs to no run", () => {
+	it("hides only the run's thinking when the message also has a call that stands alone", () => {
+		// The run's calls, then a bg_logs-like call drawn on its own: the
+		// thinking is the run's, and is drawn once, there.
+		const mixed = assistant(thinking(), call("a"), call("b", "read"), thinking(), call("e", "edit"));
+		expect(loaded(mixed).hiddenThinking(mixed)).toEqual([0]);
+		const runFirst = assistant(thinking(), call("a"), call("e", "edit"));
+		expect(loaded(runFirst).hiddenThinking(runFirst)).toEqual([0]);
+	});
+
+	it("leaves thinking to stream until its call joins a run", () => {
 		const model = new RunModel();
 		model.agentStart();
-		// Thinking alone so far, then a call still streaming in.
-		expect(model.hidesThinking(assistant(thinking()))).toBe(true);
-		expect(model.hidesThinking(assistant(thinking(), call("a")))).toBe(true);
-		expect(model.hidesThinking(assistant(thinking(), call("w", "write")))).toBe(false);
-		model.addMessage(assistant(thinking(), call("m", "bash", { command: "make" })));
-		expect(model.hidesThinking(assistant(thinking(), call("m", "bash", { command: "make" })))).toBe(false);
-		model.agentEnd();
-		expect(model.hidesThinking(assistant(thinking()))).toBe(false);
+		expect(model.hiddenThinking(assistant(thinking()))).toEqual([]);
+		expect(model.hiddenThinking(assistant(thinking(), call("a")))).toEqual([]);
+		model.addMessage(assistant(thinking(), call("a")));
+		expect(model.hiddenThinking(assistant(thinking(), call("a")))).toEqual([0]);
 	});
 });
 

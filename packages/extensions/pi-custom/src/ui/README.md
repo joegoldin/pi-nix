@@ -31,9 +31,12 @@ completer.
   ```
 
   When it closes the same line reads `Thought for 19s, ran 3 shell commands,
-  read 1 file`. The thinking that led to the calls is part of the run: pi does
-  not draw it, and opening the run shows it, `∴ ` and dim, above the call it led
-  to. Thinking before prose stays where pi draws it. Clicking the line, open or
+  read 1 file`. The thinking that led to the calls is part of the run: it
+  streams where pi draws it while it is being written, folds into the run the
+  moment its call joins one, and opening the run shows it, `∴ ` and dim, above
+  the call it led to. Thinking before prose or a call drawn on its own stays
+  where pi draws it, so no thinking shows twice. Thinking that is nothing but
+  step titles (GPT-6's) is drawn as tight `∴ ` lines wherever it is. Clicking the line, open or
   closed (or ctrl+o, which opens every run), shows the cards on the panel under
   it; clicking it again folds them. A card you expanded keeps its run open. A
   failed call is never folded away: it shows on its own and the line counts it
@@ -111,12 +114,11 @@ completer.
   counts as doing something.
 - **Thinking.** pi draws thinking inside its own assistant message, which an
   extension cannot reach, so pi is patched (`coding-agent/pi-patches.nix`) to
-  ask a function on `globalThis[Symbol.for("pi-custom.hideThinking")]` whether
-  to leave a message's thinking out. pi-custom answers yes for a message with
-  no prose whose every call is in a run; while the agent works, also for one
-  with only thinking so far or calls still streaming in, so thinking is held
-  back rather than drawn and taken away. pi asks again on every paint, as the
-  answer changes when a call joins a run. Rewriting the message to drop
+  ask a function on `globalThis[Symbol.for("pi-custom.hideThinking")]` which
+  of a message's thinking blocks to leave out. pi-custom answers with the
+  blocks that led to a call in a run, by content index, since one message can
+  hold thinking for a run and thinking for a call drawn on its own. pi asks
+  again on every paint, as the answer changes when a call joins a run. Rewriting the message to drop
   thinking was ruled out: the stored message is what the model is sent back,
   signatures and all.
 - **Hover.** pi sends a move to the component under the pointer only, so a card
