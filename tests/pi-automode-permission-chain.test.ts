@@ -433,3 +433,35 @@ test("the permission system records an interrupted verdict as an interruption, n
   expect(resolutionFor(denied.decidedBy, { approved: false, forSession: false })).toBe("authorizer_denied");
   expect(renderRefusal(payload, denied.decidedBy, denied.denialReason ?? null)).toContain("authorizer denied");
 });
+
+test("the session audit counts an interrupted call apart from blocks", async () => {
+  const { createFailClosedToolCall } = await import(
+    `${process.env.PERMISSION_PACKAGE}/src/handlers/tool-call-boundary.ts`
+  );
+  const { DecisionAudit } = await import(
+    `${process.env.PERMISSION_PACKAGE}/src/logging/decision-audit.ts`
+  );
+  const audit = new DecisionAudit();
+  const outcomes = [
+    { action: "allow" },
+    { action: "block", reason: "refused" },
+    { action: "block", reason: "stopped", interrupted: true },
+  ];
+  const traces = [];
+  const toolCall = createFailClosedToolCall(
+    async () => outcomes.shift(),
+    { writeReviewLog() {}, emitDecision() {} },
+    audit,
+    { debug: (event, details) => traces.push(details) },
+  );
+  expect(await toolCall({ toolName: "bash" }, {})).toEqual({});
+  expect(await toolCall({ toolName: "bash" }, {})).toEqual({ block: true, reason: "refused" });
+  // Interrupted, the call is still blocked.
+  expect(await toolCall({ toolName: "bash" }, {})).toEqual({ block: true, reason: "stopped" });
+  expect(traces.map((t) => t.action)).toEqual(["allow", "block", "interrupted"]);
+  const summaries = [];
+  const warnings = [];
+  audit.writeSummary({ debug: (event, counts) => summaries.push(counts), warn: (m) => warnings.push(m) });
+  expect(summaries).toEqual([{ toolCalls: 3, allowed: 1, blocked: 1, interrupted: 1, errors: 0 }]);
+  expect(warnings).toEqual([]);
+});

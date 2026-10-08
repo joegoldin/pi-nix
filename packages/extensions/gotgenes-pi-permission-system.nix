@@ -9,8 +9,8 @@
 # silently reverting it (see gotgenes-pi-permission-system-patches.nix). And
 # pi-permission-system-interrupt.patch gives a chain link an `interrupted`
 # verdict, so a call the user stopped the turn on to give guidance (Esc with
-# messages queued, which auto mode reports) is logged, broadcast and rendered
-# as an interruption rather than as a denial.
+# messages queued, which auto mode reports) is logged, broadcast, rendered and
+# counted as an interruption rather than as a denial.
 {
   patch,
   mkPiExtension,

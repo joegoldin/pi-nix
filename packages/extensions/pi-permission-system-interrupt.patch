@@ -153,6 +153,140 @@
          denialReason: decision.denialReason,
          decidedBy: decision.decidedBy,
          sessionGrantWidth: recordedGrantWidth(decision),
+--- a/src/handlers/gates/runner.ts
++++ b/src/handlers/gates/runner.ts
+@@ -1,6 +1,9 @@
+ import type { AskEscalator } from "#src/authority/authorizer-selection";
+ import { resolutionFor } from "#src/authority/decision-resolution";
+-import type { DecisionSource } from "#src/authority/decision-source";
++import {
++  type DecisionSource,
++  wasInterrupted,
++} from "#src/authority/decision-source";
+ import type { PermissionPromptDecision } from "#src/authority/permission-dialog";
+ import type { DecisionReporter } from "#src/logging/decision-reporter";
+ import { createPermissionRequestId } from "#src/permission-request-id";
+@@ -246,7 +249,9 @@
+     }
+ 
+     if (gateResult.action === "block") {
+-      return { action: "block", reason: gateResult.reason };
++      return wasInterrupted(gateResult.decidedBy)
++        ? { action: "block", reason: gateResult.reason, interrupted: true }
++        : { action: "block", reason: gateResult.reason };
+     }
+ 
+     return { action: "allow" };
+--- a/src/handlers/gates/types.ts
++++ b/src/handlers/gates/types.ts
+@@ -1,7 +1,14 @@
+-/** Outcome of a single permission gate evaluation. */
++/**
++ * Outcome of a single permission gate evaluation.
++ *
++ * `interrupted` (pi-nix patch) marks a block nobody ruled on: the user stopped
++ * the turn to give guidance before the deciding link did. The call is blocked
++ * all the same; the mark is what lets the session audit count it apart from a
++ * refusal.
++ */
+ export type GateOutcome =
+   | { action: "allow" }
+-  | { action: "block"; reason: string };
++  | { action: "block"; reason: string; interrupted?: true };
+ 
+ /** Pre-validated context shared across all gates. */
+ export interface ToolCallContext {
+--- a/src/handlers/tool-call-boundary.ts
++++ b/src/handlers/tool-call-boundary.ts
+@@ -44,10 +44,14 @@
+   return async (event, ctx) => {
+     try {
+       const outcome = await gate(event, ctx);
+-      audit.recordDecision(outcome.action);
++      const recorded =
++        outcome.action === "block" && outcome.interrupted
++          ? "interrupted"
++          : outcome.action;
++      audit.recordDecision(recorded);
+       tracer.debug("permission.decision", {
+         toolName: bestEffortToolName(event),
+-        action: outcome.action,
++        action: recorded,
+         ...(outcome.action === "block" ? { reason: outcome.reason } : {}),
+       });
+       return outcome.action === "block"
+--- a/src/logging/decision-audit.ts
++++ b/src/logging/decision-audit.ts
+@@ -4,8 +4,12 @@
+  * recorder and calls exactly one of `recordDecision` / `recordError` per call.
+  */
+ export interface DecisionRecorder {
+-  /** Record a terminal allow/block decision (also bumps the tool-call count). */
+-  recordDecision(action: "allow" | "block"): void;
++  /**
++   * Record a terminal allow/block decision (also bumps the tool-call count).
++   * `interrupted` (pi-nix patch) is a block the user stopped the turn on
++   * before it was ruled on, counted apart from refusals.
++   */
++  recordDecision(action: "allow" | "block" | "interrupted"): void;
+   /** Record a gate error that blocked fail-closed (also bumps the count). */
+   recordError(): void;
+ }
+@@ -25,7 +29,7 @@
+  * In-process, per-session decision counters.
+  *
+  * The boundary produces exactly one terminal decision per tool call, so
+- * `toolCalls` must always equal `allowed + blocked + errors`. `writeSummary`
++ * `toolCalls` must always equal `allowed + blocked + interrupted + errors`. `writeSummary`
+  * emits the counters on `session_shutdown` and flags any mismatch as a cheap
+  * structural self-check — a mismatch means a code path re-opened a silent
+  * (never-recorded) exit.
+@@ -34,12 +38,15 @@
+   private toolCalls = 0;
+   private allowed = 0;
+   private blocked = 0;
++  private interrupted = 0;
+   private errors = 0;
+ 
+-  recordDecision(action: "allow" | "block"): void {
++  recordDecision(action: "allow" | "block" | "interrupted"): void {
+     this.toolCalls++;
+     if (action === "allow") {
+       this.allowed++;
++    } else if (action === "interrupted") {
++      this.interrupted++;
+     } else {
+       this.blocked++;
+     }
+@@ -52,7 +59,7 @@
+ 
+   /**
+    * Emit one `permission.session_summary` debug line with the counters. When
+-   * `toolCalls !== allowed + blocked + errors`, also emit a warning — the
++   * `toolCalls !== allowed + blocked + interrupted + errors`, also emit a warning — the
+    * invariant violation means a tool call resolved without a recorded terminal
+    * decision (a re-opened silent path).
+    */
+@@ -61,13 +68,17 @@
+       toolCalls: this.toolCalls,
+       allowed: this.allowed,
+       blocked: this.blocked,
++      interrupted: this.interrupted,
+       errors: this.errors,
+     };
+     logger.debug("permission.session_summary", counts);
+-    if (this.toolCalls !== this.allowed + this.blocked + this.errors) {
++    if (
++      this.toolCalls !==
++      this.allowed + this.blocked + this.interrupted + this.errors
++    ) {
+       logger.warn(
+         `[pi-permission-system] decision audit invariant violated: ${this.toolCalls} tool calls != ` +
+-          `${this.allowed} allowed + ${this.blocked} blocked + ${this.errors} errors. ` +
++          `${this.allowed} allowed + ${this.blocked} blocked + ${this.interrupted} interrupted + ${this.errors} errors. ` +
+           "A tool call resolved without a recorded terminal decision.",
+       );
+     }
 --- a/src/presentation/agent-renderer.ts
 +++ b/src/presentation/agent-renderer.ts
 @@ -74,6 +74,9 @@
