@@ -168,6 +168,46 @@ let
 
         touch $out
       '';
+
+  # pi-permissions is typechecked the same way, against the pi this flake
+  # builds overlaid with its own dependencies. Its vendored engines' own suites
+  # run in the permissions-upstream check; bun test runs the tests written for
+  # this package.
+  piPermissionsTest =
+    let
+      piModules = "${self.packages.${system}.coding-agent-bun}/lib/node_modules";
+      piPermissions = self.packages.${system}.ext-pi-permissions;
+    in
+    pkgs.runCommand "pi-nix-pi-permissions-tests"
+      {
+        src = ../packages/extensions/pi-permissions;
+        nativeBuildInputs = [
+          pkgs.bun
+          pkgs.typescript
+        ];
+      }
+      ''
+        set -euo pipefail
+        cp -R "$src" work
+        chmod -R u+w work
+        cd work
+
+        export HOME="$TMPDIR"
+        mkdir node_modules
+        for d in ${piModules}/*; do ln -s "$d" node_modules/; done
+        for d in ${piPermissions}/node_modules/*; do
+          name=$(basename "$d")
+          [ "$name" = .bin ] && continue
+          rm -rf "node_modules/$name"
+          ln -s "$d" "node_modules/$name"
+        done
+
+        bun test
+        cp ${piCustomTsconfig} tsconfig.json
+        tsc -p tsconfig.json
+
+        touch $out
+      '';
 in
 lib.mapAttrs mkTest {
   pi-notify = ../packages/extensions/pi-notify;
@@ -176,4 +216,5 @@ lib.mapAttrs mkTest {
 }
 // {
   pi-custom = piCustomTest;
+  pi-permissions = piPermissionsTest;
 }

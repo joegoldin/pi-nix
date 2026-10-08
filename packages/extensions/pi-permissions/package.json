@@ -1,0 +1,25 @@
+{
+	"name": "pi-permissions",
+	"version": "0.1.0",
+	"type": "module",
+	"description": "Permissions and auto mode for pi in one extension: policy rules, a classifier that asks before it blocks, and a menu to approve what was denied.",
+	"keywords": [
+		"pi-package",
+		"pi-extension",
+		"permissions"
+	],
+	"pi": {
+		"extensions": [
+			"./src/index.ts"
+		]
+	},
+	"dependencies": {
+		"tree-sitter-bash": "0.25.1",
+		"unbash": "4.0.10",
+		"web-tree-sitter": "0.26.9",
+		"zod": "4.4.3"
+	},
+	"scripts": {
+		"test": "bun test"
+	}
+}

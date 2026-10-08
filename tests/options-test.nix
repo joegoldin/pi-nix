@@ -35,7 +35,7 @@ let
       # below cannot pass by accident.
       coding-agent-bun = piStub;
       inherit (self.packages.${system})
-        ext-czottmann-pi-automode
+        ext-pi-permissions
         ext-pi-notify
         ext-pi-voice
         ext-pi-foreign-skills
@@ -241,21 +241,41 @@ let
     };
   };
 
-  # Both gates answer `tool_call` and pi returns on the first one that blocks,
-  # so the composition is not ordering, it is the permission system's authorizer
+  # The default auto-mode package, pi-permissions, carries the permission
+  # system too. The fixtures below pair a package carrying auto mode alone with
+  # a permission system loaded through extensionPackages, the arrangement the
+  # two separate packages used and the option still supports. Both gates
+  # answer `tool_call` and pi returns on the first one that blocks, so the
+  # composition is not ordering, it is the permission system's authorizer
   # chain. Enabling them together writes that package's own config file naming
   # the link, because registration without an `authorizerChain` entry decides
   # nothing (F301, and F307 for what it costs when it ships).
   fakePermissionSystem = pkgs.hello.overrideAttrs (_: {
     pname = "pi-ext-gotgenes-pi-permission-system";
   });
+  fakeAutoModeOnly = pkgs.hello.overrideAttrs (_: {
+    pname = "pi-ext-auto-mode-only";
+    passthru.piEntrypoint = [ "/auto-mode-only/extensions/auto-mode.ts" ];
+  });
 
   autoWithPermissionSystem = evalPi {
     pi.coding-agent = {
       autoMode.enable = true;
+      autoMode.package = fakeAutoModeOnly;
       extensionPackages = [ fakePermissionSystem ];
     };
   };
+
+  # pi-permissions already is a permission system; loading a second one beside
+  # it would gate every call twice and collide on tool names.
+  autoBundledWithLegacy = builtins.tryEval (
+    (evalPi {
+      pi.coding-agent = {
+        autoMode.enable = true;
+        extensionPackages = [ fakePermissionSystem ];
+      };
+    }).autoMode.permissionSystem.configFile
+  );
 
   # The bounded-delegation checkpoint's excluded set. Null leaves the package's
   # own literal alone, which means no variable at all rather than a variable
@@ -264,6 +284,7 @@ let
   autoChainNarrowedEnvelope = evalPi {
     pi.coding-agent = {
       autoMode.enable = true;
+      autoMode.package = fakeAutoModeOnly;
       autoMode.permissionSystem.delegationExcludedSurfaces = [ "path" ];
       extensionPackages = [ fakePermissionSystem ];
     };
@@ -274,6 +295,7 @@ let
   autoChainNarrowedNoLink = evalPi {
     pi.coding-agent = {
       autoMode.enable = true;
+      autoMode.package = fakeAutoModeOnly;
       autoMode.permissionSystem.enable = false;
       autoMode.permissionSystem.delegationExcludedSurfaces = [ "path" ];
       extensionPackages = [ fakePermissionSystem ];
@@ -285,6 +307,7 @@ let
   autoChainOff = evalPi {
     pi.coding-agent = {
       autoMode.enable = true;
+      autoMode.package = fakeAutoModeOnly;
       autoMode.permissionSystem.enable = false;
       extensionPackages = [ fakePermissionSystem ];
     };
@@ -296,6 +319,7 @@ let
     (evalPi {
       pi.coding-agent = {
         autoMode.enable = true;
+        autoMode.package = fakeAutoModeOnly;
         autoMode.permissionSystem.settings = {
           permissionReviewLog = true;
           authorizerChain = [ "someone-else" ];
@@ -309,6 +333,7 @@ let
   autoChainOrdered = evalPi {
     pi.coding-agent = {
       autoMode.enable = true;
+      autoMode.package = fakeAutoModeOnly;
       autoMode.permissionSystem.settings = {
         permissionReviewLog = true;
         authorizerChain = [
@@ -463,7 +488,7 @@ assert !(lib.any (lib.hasInfix "pi-automode") (flagValues autoOff.finalArgs "--e
 # filename inside the package stays that package's business.
 assert
   flagValues autoOn.finalArgs "--extension"
-  == selfStub.packages.${system}.ext-czottmann-pi-automode.passthru.piEntrypoint;
+  == selfStub.packages.${system}.ext-pi-permissions.passthru.piEntrypoint;
 # The rules travel as an immutable store file whose contents the launcher
 # exports as PI_AUTOMODE_SETTINGS_JSON, never through settings.json (which
 # pi-automode does not read) and never as a write into the user's home.
@@ -471,6 +496,25 @@ assert (envValue autoOn "PI_AUTOMODE_SETTINGS_JSON").file == "${autoOn.autoMode.
 assert !(autoOn.settings ? autoMode);
 assert !(autoOn.finalConfigFiles ? "automode.json");
 assert builtins.fromJSON (builtins.readFile autoOn.autoMode.configFile) == autoJson;
+# Asking before a classifier block stands is off unless enabled, and its
+# timeout travels with it.
+assert autoJson.autoMode.askOnBlock == {
+  enabled = false;
+  timeoutSeconds = 30;
+};
+assert
+  (evalPi {
+    pi.coding-agent.autoMode = {
+      enable = true;
+      askOnBlock = {
+        enable = true;
+        timeoutSeconds = 45;
+      };
+    };
+  }).autoMode.settings.autoMode.askOnBlock == {
+    enabled = true;
+    timeoutSeconds = 45;
+  };
 # Every rule list reaches the rendered JSON under the key the extension reads,
 # including the two underscore-cased ones the classifier prompt names verbatim,
 # and each one verbatim: what Nix declares is the whole policy for that
@@ -607,10 +651,18 @@ assert
     launcher = builtins.readFile (lib.getExe autoChainOff.package);
   in
   lib.hasInfix "npm/node_modules/@gotgenes/pi-permission-system" launcher;
-# No permission system loaded, nothing to link.
+# pi-permissions carries the permission system, so the link names it: a child
+# finds both halves there.
 assert
   let
     launcher = builtins.readFile (lib.getExe autoOn.package);
+  in
+  lib.hasInfix "npm/node_modules/@gotgenes/pi-permission-system" launcher
+  && lib.hasInfix "-pi-ext-pi-permissions-" launcher;
+# No permission system loaded, nothing to link.
+assert
+  let
+    launcher = builtins.readFile (lib.getExe autoOff.package);
   in
   !(lib.hasInfix "npm/node_modules" launcher);
 
@@ -656,9 +708,18 @@ assert
 # input rather than a projection.
 assert
   builtins.head autoWithPermissionSystem.extensions
-  == builtins.head self.packages.${system}.ext-czottmann-pi-automode.passthru.piEntrypoint;
-# Auto mode alone writes nothing: there is no permission system to configure.
-assert autoOn.autoMode.permissionSystem.configFile == null;
+  == builtins.head fakeAutoModeOnly.passthru.piEntrypoint;
+# pi-permissions alone is both halves, so its permission system gets the same
+# config, link named, with nothing in extensionPackages.
+assert
+  autoOn.autoMode.permissionSystem.configFile == {
+    debugLog = false;
+    permissionReviewLog = true;
+    yoloMode = false;
+    authorizerChain = [ "pi-automode" ];
+  };
+# And a second permission system beside it is refused.
+assert autoBundledWithLegacy.success == false;
 assert autoChainOff.autoMode.permissionSystem.configFile == null;
 # Naming the link is the half that arms it, so a chain without it is refused.
 assert autoChainWithoutTheLink.success == false;

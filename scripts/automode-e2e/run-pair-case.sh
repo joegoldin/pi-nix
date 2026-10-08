@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# One case with BOTH gates loaded: @czottmann/pi-automode (our fork) and
-# @gotgenes/pi-permission-system, against the real pi binary.
+# One case with BOTH gates loaded, against the real pi binary: auto mode and the
+# permission system, now the two halves of pi-permissions (they were
+# @czottmann/pi-automode and @gotgenes/pi-permission-system).
 #
 # run-case.sh proves what auto mode does on its own. This proves what the two
 # do together, which is a different claim and the one that was doubted: that
@@ -24,8 +25,7 @@ SETTINGS_JSON="$1"; shift
 PERM_CONFIG_JSON="$1"; shift
 
 PI="${PI_STORE_PATH:-$(nix build --no-link --print-out-paths "$E2E/../..#coding-agent-bun" | tail -1)}"
-EXT="${EXT_STORE_PATH:-$(nix build --no-link --print-out-paths "$E2E/../..#ext-czottmann-pi-automode" | tail -1)}"
-PERM="${PERM_STORE_PATH:-$(nix build --no-link --print-out-paths "$E2E/../..#ext-gotgenes-pi-permission-system" | tail -1)}"
+EXT="${EXT_STORE_PATH:-$(nix build --no-link --print-out-paths "$E2E/../..#ext-pi-permissions" | tail -1)}"
 
 RUN="$WORKDIR/runs/$NAME"
 rm -rf "$RUN"; mkdir -p "$RUN/home" "$RUN/agent" "$RUN/work"
@@ -94,7 +94,7 @@ timeout 180 env -i \
   PI_CODING_AGENT_DIR="$RUN/agent" \
   PI_AUTOMODE_SETTINGS_JSON="$SETTINGS_JSON" \
   "$PI/bin/pi" --print --model fake/session \
-    --extension "$EXT" --extension "$PERM" \
+    --extension "$EXT" \
     --session-dir "$RUN/sessions" \
     "run the tool" < /dev/null > "$RUN/pi.stdout" 2> "$RUN/pi.stderr"
 echo "pi exit: $?" >> "$RUN/pi.stdout"

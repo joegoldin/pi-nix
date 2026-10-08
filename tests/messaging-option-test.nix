@@ -18,7 +18,7 @@ let
       coding-agent = pkgs.hello;
       coding-agent-bun = pkgs.cowsay;
       inherit (self.packages.${system})
-        ext-czottmann-pi-automode
+        ext-pi-permissions
         ext-pi-notify
         ext-pi-custom
         ;

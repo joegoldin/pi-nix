@@ -1,0 +1,962 @@
+import {
+  existsSync,
+  linkSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, resolve } from "node:path";
+import {
+  DEFAULT_ALLOW,
+  DEFAULT_ALLOW_INSIDE_WORKING_DIRECTORY,
+  DEFAULT_ASK_ON_BLOCK,
+  DEFAULT_CLASSIFIER_TIMEOUT_MS,
+  DEFAULT_CLASSIFY_READ_ONLY_TOOLS,
+  DEFAULT_DENIED_PATHS,
+  DEFAULT_ENVIRONMENT,
+  DEFAULT_FAST_CLASSIFIER_MAX_TOKENS,
+  DEFAULT_HARD_DENY,
+  DEFAULT_LOG_CONFIG,
+  DEFAULT_MAX_TOOL_TRANSCRIPT_TOKENS,
+  DEFAULT_MAX_USER_TRANSCRIPT_TOKENS,
+  DEFAULT_PROTECTED_PATHS,
+  DEFAULT_SOFT_DENY,
+  MAX_CLASSIFIER_TIMEOUT_MS,
+  PI_GLOBAL_SETTINGS,
+  PI_LEGACY_GLOBAL_SETTINGS,
+  PI_PROJECT_LOCAL_SETTINGS,
+  PI_PROJECT_SHARED_SETTINGS,
+} from "./constants.ts";
+import { parseModelSpec } from "./model.ts";
+import {
+  isMalformedToolPattern,
+  MAX_WILDCARD_PATTERN_LENGTH,
+  parseToolPattern,
+} from "./permissions.ts";
+import type {
+  AskOnBlockConfig,
+  AutoModeSettings,
+  ClassifierReasoningLevel,
+  ConfigLoadResult,
+  EffectiveConfig,
+  LoadedSettingsFile,
+  LogConfig,
+  SettingsFile,
+  SettingsSources,
+  ToolPattern,
+} from "./types.ts";
+import { hasOwn, stringArray } from "./utils.ts";
+
+export type GlobalConfigPreparation = {
+  status: "current" | "migrated" | "conflict" | "failed";
+  activePath: string;
+  diagnostic?: string;
+  notification?: string;
+  writeBlockedReason?: string;
+};
+
+export type PrepareGlobalConfigOptions = {
+  currentPath?: string;
+  legacyPath?: string;
+  moveFile?: (source: string, destination: string) => void;
+  unlinkFile?: (path: string) => void;
+};
+
+function sameFileIdentity(firstPath: string, secondPath: string): boolean {
+  try {
+    const first = lstatSync(firstPath);
+    const second = lstatSync(secondPath);
+    return first.dev === second.dev && first.ino === second.ino;
+  } catch {
+    return false;
+  }
+}
+
+function cleanupPublishedDestination(
+  destination: string,
+  unlinkFile: (path: string) => void,
+  originalError: unknown,
+): AggregateError | undefined {
+  try {
+    unlinkFile(destination);
+    return undefined;
+  } catch (cleanupError) {
+    return new AggregateError(
+      [originalError, cleanupError],
+      `Could not clean up interrupted Auto Mode config migration at ${destination}`,
+    );
+  }
+}
+
+function moveFileWithoutOverwrite(
+  source: string,
+  destination: string,
+  unlinkFile: (path: string) => void,
+): void {
+  linkSync(source, destination);
+  try {
+    unlinkFile(source);
+  } catch (error) {
+    throw cleanupPublishedDestination(destination, unlinkFile, error) ?? error;
+  }
+}
+
+function globalConfigFailure(
+  currentPath: string,
+  legacyPath: string,
+  error: unknown,
+  writeBlockedReason?: string,
+): GlobalConfigPreparation {
+  const message =
+    `Could not move Auto Mode config from ${legacyPath} to ${currentPath}: ${
+      error instanceof Error ? error.message : String(error)
+    }. Using the legacy config for this session${
+      writeBlockedReason ? "; global config writes are disabled" : ""
+    }.`;
+  return {
+    status: "failed",
+    activePath: legacyPath,
+    diagnostic: message,
+    notification: message,
+    writeBlockedReason,
+  };
+}
+
+function globalConfigConflict(
+  currentPath: string,
+  legacyPath: string,
+): GlobalConfigPreparation {
+  const message =
+    `Auto Mode config conflict: using ${currentPath}; legacy config ${legacyPath} is ignored and was not changed.`;
+  return {
+    status: "conflict",
+    activePath: currentPath,
+    diagnostic: message,
+    notification: message,
+  };
+}
+
+/** Select one global config path for this runtime and migrate a legacy file when possible. */
+export function prepareGlobalConfig(
+  options: PrepareGlobalConfigOptions = {},
+): GlobalConfigPreparation {
+  const currentPath = options.currentPath ?? PI_GLOBAL_SETTINGS[0];
+  const legacyPath = options.legacyPath ?? PI_LEGACY_GLOBAL_SETTINGS;
+  const currentExists = existsSync(currentPath);
+  const legacyExists = existsSync(legacyPath);
+  const unlinkFile = options.unlinkFile ?? unlinkSync;
+
+  if (currentExists && legacyExists) {
+    if (!sameFileIdentity(currentPath, legacyPath)) {
+      return globalConfigConflict(currentPath, legacyPath);
+    }
+    try {
+      unlinkFile(legacyPath);
+      return {
+        status: "migrated",
+        activePath: currentPath,
+        notification:
+          `Completed interrupted Auto Mode config migration from ${legacyPath} to ${currentPath}.`,
+      };
+    } catch (error) {
+      const cleanupError = cleanupPublishedDestination(
+        currentPath,
+        unlinkFile,
+        error,
+      );
+      return globalConfigFailure(
+        currentPath,
+        legacyPath,
+        cleanupError ?? error,
+        cleanupError?.message,
+      );
+    }
+  }
+  if (currentExists || !legacyExists) {
+    return { status: "current", activePath: currentPath };
+  }
+
+  try {
+    mkdirSync(dirname(currentPath), { recursive: true });
+    const moveFile = options.moveFile ??
+      ((source: string, destination: string) =>
+        moveFileWithoutOverwrite(source, destination, unlinkFile));
+    moveFile(legacyPath, currentPath);
+    return {
+      status: "migrated",
+      activePath: currentPath,
+      notification: `Moved Auto Mode config from ${legacyPath} to ${currentPath}.`,
+    };
+  } catch (error) {
+    if (existsSync(currentPath)) {
+      if (!sameFileIdentity(currentPath, legacyPath)) {
+        return globalConfigConflict(currentPath, legacyPath);
+      }
+      const cleanupError = cleanupPublishedDestination(
+        currentPath,
+        unlinkFile,
+        error,
+      );
+      if (cleanupError) {
+        return globalConfigFailure(
+          currentPath,
+          legacyPath,
+          cleanupError,
+          cleanupError.message,
+        );
+      }
+    }
+    return globalConfigFailure(currentPath, legacyPath, error);
+  }
+}
+
+function readSettingsFile(path: string): LoadedSettingsFile | undefined {
+  if (!existsSync(path)) return undefined;
+  try {
+    const settings = JSON.parse(readFileSync(path, "utf8")) as SettingsFile;
+    return {
+      path,
+      settings,
+      diagnostics: validateSettingsFile(settings, path),
+    };
+  } catch (error) {
+    return {
+      path,
+      diagnostics: [
+        `${path}: invalid JSON (${
+          error instanceof Error ? error.message : String(error)
+        })`,
+      ],
+    };
+  }
+}
+
+function validateStringArraySetting(
+  value: unknown,
+  source: string,
+  key: string,
+  diagnostics: string[],
+): void {
+  if (value === undefined) return;
+  if (!Array.isArray(value)) {
+    diagnostics.push(`${source}: ${key} must be an array of strings`);
+    return;
+  }
+  for (const [index, entry] of value.entries()) {
+    if (typeof entry !== "string" || entry.trim() === "") {
+      diagnostics.push(
+        `${source}: ${key}[${index}] must be a non-empty string`,
+      );
+    }
+  }
+  if (value.length > 0 && !value.includes("$defaults")) {
+    diagnostics.push(
+      `${source}: ${key} omits "$defaults" and replaces the built-in ${key} rules`,
+    );
+  }
+}
+
+/** Validate config shape and emit human-readable diagnostics for `/automode config`. */
+export function validateSettingsFile(
+  settings: SettingsFile,
+  source: string,
+): string[] {
+  const diagnostics: string[] = [];
+  const root = settings as Record<string, unknown>;
+  for (const key of Object.keys(root)) {
+    if (key !== "autoMode" && key !== "permissions") {
+      diagnostics.push(`${source}: unknown top-level key ${key}`);
+    }
+  }
+
+  if (settings.autoMode !== undefined) {
+    if (
+      !settings.autoMode ||
+      typeof settings.autoMode !== "object" ||
+      Array.isArray(settings.autoMode)
+    ) {
+      diagnostics.push(`${source}: autoMode must be an object`);
+    } else {
+      const autoMode = settings.autoMode as Record<string, unknown>;
+      const knownAutoMode = new Set([
+        "enabled",
+        "classifierModel",
+        "classifierReasoningLevel",
+        "classifierTimeoutMs",
+        "classifyReadOnlyTools",
+        "fastClassifierMaxTokens",
+        "allowInsideWorkingDirectory",
+        "deniedPaths",
+        "maxUserTranscriptTokens",
+        "maxToolTranscriptTokens",
+        "environment",
+        "allow",
+        "protectedPaths",
+        "soft_deny",
+        "softDeny",
+        "hard_deny",
+        "hardDeny",
+        "log",
+        "askOnBlock",
+      ]);
+      for (const key of Object.keys(autoMode)) {
+        if (!knownAutoMode.has(key)) {
+          diagnostics.push(`${source}: unknown autoMode key ${key}`);
+        }
+      }
+      if (
+        hasOwn(autoMode, "enabled") && typeof autoMode.enabled !== "boolean"
+      ) {
+        diagnostics.push(`${source}: autoMode.enabled must be a boolean`);
+      }
+      if (
+        hasOwn(autoMode, "classifierModel") &&
+        !isValidClassifierModel(autoMode.classifierModel)
+      ) {
+        diagnostics.push(
+          `${source}: autoMode.classifierModel must be a provider/model string`,
+        );
+      }
+      if (
+        hasOwn(autoMode, "classifierReasoningLevel") &&
+        !isClassifierReasoningLevel(autoMode.classifierReasoningLevel)
+      ) {
+        diagnostics.push(
+          `${source}: autoMode.classifierReasoningLevel must be one of low, medium, high, xhigh, max`,
+        );
+      }
+      if (
+        hasOwn(autoMode, "classifierTimeoutMs") &&
+        (!Number.isInteger(autoMode.classifierTimeoutMs) ||
+          (autoMode.classifierTimeoutMs as number) < 1000 ||
+          (autoMode.classifierTimeoutMs as number) > MAX_CLASSIFIER_TIMEOUT_MS)
+      ) {
+        diagnostics.push(
+          `${source}: autoMode.classifierTimeoutMs must be an integer from 1000 through ${MAX_CLASSIFIER_TIMEOUT_MS}`,
+        );
+      }
+      if (
+        hasOwn(autoMode, "classifyReadOnlyTools") &&
+        typeof autoMode.classifyReadOnlyTools !== "boolean"
+      ) {
+        diagnostics.push(
+          `${source}: autoMode.classifyReadOnlyTools must be a boolean`,
+        );
+      }
+      if (
+        hasOwn(autoMode, "fastClassifierMaxTokens") &&
+        (!Number.isInteger(autoMode.fastClassifierMaxTokens) ||
+          (autoMode.fastClassifierMaxTokens as number) < 16)
+      ) {
+        diagnostics.push(
+          `${source}: autoMode.fastClassifierMaxTokens must be an integer of at least 16`,
+        );
+      }
+      if (
+        hasOwn(autoMode, "allowInsideWorkingDirectory") &&
+        typeof autoMode.allowInsideWorkingDirectory !== "boolean"
+      ) {
+        diagnostics.push(
+          `${source}: autoMode.allowInsideWorkingDirectory must be a boolean`,
+        );
+      }
+      validateDeniedPathsSetting(
+        autoMode.deniedPaths,
+        source,
+        diagnostics,
+      );
+      for (
+        const key of [
+          "maxUserTranscriptTokens",
+          "maxToolTranscriptTokens",
+        ] as const
+      ) {
+        if (
+          hasOwn(autoMode, key) &&
+          (!Number.isInteger(autoMode[key]) || Number(autoMode[key]) < 32)
+        ) {
+          diagnostics.push(
+            `${source}: autoMode.${key} must be an integer of at least 32`,
+          );
+        }
+      }
+      validateStringArraySetting(
+        autoMode.environment,
+        source,
+        "autoMode.environment",
+        diagnostics,
+      );
+      validateStringArraySetting(
+        autoMode.allow,
+        source,
+        "autoMode.allow",
+        diagnostics,
+      );
+      validateStringArraySetting(
+        autoMode.protectedPaths,
+        source,
+        "autoMode.protectedPaths",
+        diagnostics,
+      );
+      validateStringArraySetting(
+        autoMode.soft_deny ?? autoMode.softDeny,
+        source,
+        "autoMode.soft_deny",
+        diagnostics,
+      );
+      validateStringArraySetting(
+        autoMode.hard_deny ?? autoMode.hardDeny,
+        source,
+        "autoMode.hard_deny",
+        diagnostics,
+      );
+      if (hasOwn(autoMode, "log")) {
+        validateLogSetting(autoMode.log, source, diagnostics);
+      }
+      if (hasOwn(autoMode, "askOnBlock")) {
+        validateAskOnBlockSetting(autoMode.askOnBlock, source, diagnostics);
+      }
+    }
+  }
+
+  if (settings.permissions !== undefined) {
+    if (
+      !settings.permissions ||
+      typeof settings.permissions !== "object" ||
+      Array.isArray(settings.permissions)
+    ) {
+      diagnostics.push(`${source}: permissions must be an object`);
+    } else {
+      const permissions = settings.permissions as Record<string, unknown>;
+      for (const key of Object.keys(permissions)) {
+        if (key !== "deny" && key !== "ask" && key !== "allow") {
+          diagnostics.push(`${source}: unknown permissions key ${key}`);
+        }
+      }
+      for (const key of ["deny", "ask", "allow"] as const) {
+        const value = permissions[key];
+        if (value === undefined) continue;
+        if (!Array.isArray(value)) {
+          diagnostics.push(
+            `${source}: permissions.${key} must be an array of tool patterns`,
+          );
+          continue;
+        }
+        for (const [index, entry] of value.entries()) {
+          const pattern = parseToolPattern(entry);
+          if (typeof entry !== "string" || !pattern) {
+            diagnostics.push(
+              `${source}: permissions.${key}[${index}] must be a tool pattern string`,
+            );
+          } else if (entry.length > MAX_WILDCARD_PATTERN_LENGTH) {
+            diagnostics.push(
+              `${source}: permissions.${key}[${index}] must be at most ${MAX_WILDCARD_PATTERN_LENGTH} characters`,
+            );
+          } else if (key === "deny" && isMalformedToolPattern(pattern)) {
+            diagnostics.push(
+              `${source}: permissions.${key}[${index}] must be a tool pattern string`,
+            );
+          }
+        }
+      }
+    }
+  }
+
+  return diagnostics;
+}
+
+type RuleAccumulator = {
+  defaults: string[];
+  includeDefaults: boolean;
+  entries: string[];
+};
+
+function createRuleAccumulator(defaults: string[]): RuleAccumulator {
+  return { defaults, includeDefaults: true, entries: [] };
+}
+
+function applyRuleSetting(
+  accumulator: RuleAccumulator,
+  value: unknown,
+  acceptEntry: (entry: string) => boolean = () => true,
+): void {
+  const entries = stringArray(value);
+  if (!entries) return;
+  // Any entry that stringArray or acceptEntry drops marks the list malformed.
+  // Fail conservative: keep defaults rather than replace them with a partial list.
+  let malformed = Array.isArray(value) && value.length !== entries.length;
+  for (const entry of entries) {
+    if (entry === "$defaults") continue;
+    if (acceptEntry(entry)) {
+      accumulator.entries.push(entry);
+    } else {
+      malformed = true;
+    }
+  }
+  accumulator.includeDefaults = entries.includes("$defaults") || malformed;
+}
+
+function finalizeRuleSetting(accumulator: RuleAccumulator): string[] {
+  const base = accumulator.includeDefaults ? accumulator.defaults : [];
+  return [...new Set([...base, ...accumulator.entries])];
+}
+
+function validateLogSetting(
+  value: unknown,
+  source: string,
+  diagnostics: string[],
+): void {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    diagnostics.push(`${source}: autoMode.log must be an object`);
+    return;
+  }
+  const log = value as Record<string, unknown>;
+  if (hasOwn(log, "enabled") && typeof log.enabled !== "boolean") {
+    diagnostics.push(`${source}: autoMode.log.enabled must be a boolean`);
+  }
+  if (
+    hasOwn(log, "classifierIo") && typeof log.classifierIo !== "boolean"
+  ) {
+    diagnostics.push(`${source}: autoMode.log.classifierIo must be a boolean`);
+  }
+}
+
+function validateAskOnBlockSetting(
+  value: unknown,
+  source: string,
+  diagnostics: string[],
+): void {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    diagnostics.push(`${source}: autoMode.askOnBlock must be an object`);
+    return;
+  }
+  const ask = value as Record<string, unknown>;
+  if (hasOwn(ask, "enabled") && typeof ask.enabled !== "boolean") {
+    diagnostics.push(`${source}: autoMode.askOnBlock.enabled must be a boolean`);
+  }
+  if (hasOwn(ask, "timeoutSeconds") && !validAskTimeout(ask.timeoutSeconds)) {
+    diagnostics.push(
+      `${source}: autoMode.askOnBlock.timeoutSeconds must be an integer from 1 to 3600`,
+    );
+  }
+}
+
+function validAskTimeout(value: unknown): value is number {
+  return Number.isInteger(value) && Number(value) >= 1 && Number(value) <= 3600;
+}
+
+function mergeAskOnBlock(
+  base: AskOnBlockConfig,
+  patch: Partial<AskOnBlockConfig> | undefined,
+): AskOnBlockConfig {
+  if (!patch || typeof patch !== "object") return base;
+  return {
+    enabled: typeof patch.enabled === "boolean" ? patch.enabled : base.enabled,
+    timeoutSeconds: validAskTimeout(patch.timeoutSeconds)
+      ? patch.timeoutSeconds
+      : base.timeoutSeconds,
+  };
+}
+
+function mergeLog(
+  base: LogConfig,
+  patch: Partial<LogConfig> | undefined,
+): LogConfig {
+  if (!patch) return base;
+  return {
+    enabled: typeof patch.enabled === "boolean" ? patch.enabled : base.enabled,
+    classifierIo: typeof patch.classifierIo === "boolean" ? patch.classifierIo : base.classifierIo,
+  };
+}
+
+/**
+ * Validate `deniedPaths`: an array of non-empty path patterns. Unlike the
+ * `$defaults` rule lists there is no built-in default list, so `$defaults` is
+ * a no-op (accepted for consistency with the other rule lists) and omitting
+ * it is not a diagnostic.
+ */
+function validateDeniedPathsSetting(
+  value: unknown,
+  source: string,
+  diagnostics: string[],
+): void {
+  if (value === undefined) return;
+  if (!Array.isArray(value)) {
+    diagnostics.push(`${source}: deniedPaths must be an array of strings`);
+    return;
+  }
+  for (const [index, entry] of value.entries()) {
+    if (entry === "$defaults") continue;
+    if (typeof entry !== "string" || entry.trim() === "") {
+      diagnostics.push(
+        `${source}: deniedPaths[${index}] must be a non-empty path pattern`,
+      );
+      continue;
+    }
+    if (entry.length > MAX_WILDCARD_PATTERN_LENGTH) {
+      diagnostics.push(
+        `${source}: deniedPaths[${index}] must be at most ${MAX_WILDCARD_PATTERN_LENGTH} characters`,
+      );
+      continue;
+    }
+    if (!DENIED_PATH_PATTERN_PREFIX.test(entry)) {
+      diagnostics.push(
+        `${source}: deniedPaths[${index}] "${entry}" can never match a resolved absolute path; start it with *, ~, $HOME, \${HOME}, or / (e.g. "**/${entry}")`,
+      );
+    }
+  }
+}
+
+/**
+ * A pattern can only match a resolved absolute path when it starts with a
+ * form that anchors it: a leading `/`, a home expansion (`~`, `$HOME`,
+ * `${HOME}`), or a `*` wildcard that absorbs the leading slash. Anything else
+ * (e.g. `config.json` or `src/secret.txt`) matches only against the bare
+ * relative name, which the matcher never sees.
+ */
+const DENIED_PATH_PATTERN_PREFIX =
+  /^(?:\/|~(?:\/|$)|\$HOME(?:\/|$)|\$\{HOME\}(?:\/|$)|\*)/;
+
+const CLASSIFIER_REASONING_LEVELS = new Set<ClassifierReasoningLevel>([
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+]);
+
+export function isClassifierReasoningLevel(
+  value: unknown,
+): value is ClassifierReasoningLevel {
+  return typeof value === "string" &&
+    CLASSIFIER_REASONING_LEVELS.has(value as ClassifierReasoningLevel);
+}
+
+function isValidClassifierModel(value: unknown): value is string {
+  return typeof value === "string" && parseModelSpec(value) !== undefined;
+}
+
+function validTranscriptBudget(value: unknown): value is number {
+  return Number.isInteger(value) && Number(value) >= 32;
+}
+
+function validFastClassifierBudget(value: unknown): value is number {
+  return Number.isInteger(value) && Number(value) >= 16;
+}
+
+function validClassifierTimeout(value: unknown): value is number {
+  return Number.isInteger(value) &&
+    Number(value) >= 1000 &&
+    Number(value) <= MAX_CLASSIFIER_TIMEOUT_MS;
+}
+
+function applyAutoModeScalars(
+  base: EffectiveConfig,
+  settings: AutoModeSettings | undefined,
+): EffectiveConfig {
+  if (!settings) return base;
+  return {
+    ...base,
+    enabled: typeof settings.enabled === "boolean" ? settings.enabled : base.enabled,
+    classifierModel: isValidClassifierModel(settings.classifierModel)
+      ? settings.classifierModel
+      : base.classifierModel,
+    classifierReasoningLevel: isClassifierReasoningLevel(
+        settings.classifierReasoningLevel,
+      )
+      ? settings.classifierReasoningLevel
+      : base.classifierReasoningLevel,
+    classifyReadOnlyTools: typeof settings.classifyReadOnlyTools === "boolean"
+      ? settings.classifyReadOnlyTools
+      : base.classifyReadOnlyTools,
+    allowInsideWorkingDirectory:
+      typeof settings.allowInsideWorkingDirectory === "boolean"
+        ? settings.allowInsideWorkingDirectory
+        : base.allowInsideWorkingDirectory,
+    fastClassifierMaxTokens: validFastClassifierBudget(
+        settings.fastClassifierMaxTokens,
+      )
+      ? settings.fastClassifierMaxTokens
+      : base.fastClassifierMaxTokens,
+    classifierTimeoutMs: validClassifierTimeout(settings.classifierTimeoutMs)
+      ? settings.classifierTimeoutMs
+      : base.classifierTimeoutMs,
+    maxUserTranscriptTokens: validTranscriptBudget(
+        settings.maxUserTranscriptTokens,
+      )
+      ? settings.maxUserTranscriptTokens
+      : base.maxUserTranscriptTokens,
+    maxToolTranscriptTokens: validTranscriptBudget(
+        settings.maxToolTranscriptTokens,
+      )
+      ? settings.maxToolTranscriptTokens
+      : base.maxToolTranscriptTokens,
+    log: mergeLog(base.log, settings.log),
+    askOnBlock: mergeAskOnBlock(base.askOnBlock, settings.askOnBlock),
+  };
+}
+
+function appendPermissionPatterns(
+  target: ToolPattern[],
+  settings: SettingsFile | undefined,
+  key: "deny" | "ask" | "allow",
+): void {
+  const values = stringArray(settings?.permissions?.[key]);
+  if (!values) return;
+  for (const value of values) {
+    if (value.length > MAX_WILDCARD_PATTERN_LENGTH) continue;
+    const pattern = parseToolPattern(value);
+    if (pattern) target.push(pattern);
+  }
+}
+
+/**
+ * Merge settings with Claude Code-style precedence using Pi-owned config files.
+ *
+ * Important details:
+ * - shared project `.pi/automode.json` contributes `permissions.deny` and
+ *   `permissions.ask` but not `permissions.allow` or `autoMode`, so checked-in
+ *   config can only add permission barriers;
+ * - global, project-local, and inline `autoMode` settings combine additively across scopes;
+ * - omitting `$defaults` in any scope for a rule list means "replace built-ins" for that list.
+ */
+export function buildEffectiveConfigFromSources(
+  sources: SettingsSources = {},
+): EffectiveConfig {
+  let config: EffectiveConfig = {
+    enabled: true,
+    classifyReadOnlyTools: DEFAULT_CLASSIFY_READ_ONLY_TOOLS,
+    allowInsideWorkingDirectory: DEFAULT_ALLOW_INSIDE_WORKING_DIRECTORY,
+    deniedPaths: [...DEFAULT_DENIED_PATHS],
+    fastClassifierMaxTokens: DEFAULT_FAST_CLASSIFIER_MAX_TOKENS,
+    classifierTimeoutMs: DEFAULT_CLASSIFIER_TIMEOUT_MS,
+    maxUserTranscriptTokens: DEFAULT_MAX_USER_TRANSCRIPT_TOKENS,
+    maxToolTranscriptTokens: DEFAULT_MAX_TOOL_TRANSCRIPT_TOKENS,
+    environment: [...DEFAULT_ENVIRONMENT],
+    allow: [...DEFAULT_ALLOW],
+    protectedPaths: [...DEFAULT_PROTECTED_PATHS],
+    softDeny: [...DEFAULT_SOFT_DENY],
+    hardDeny: [...DEFAULT_HARD_DENY],
+    permissionDeny: [],
+    permissionAsk: [],
+    permissionAllow: [],
+    log: { ...DEFAULT_LOG_CONFIG },
+    askOnBlock: { ...DEFAULT_ASK_ON_BLOCK },
+  };
+
+  const globalSettings = sources.globalSettings ?? [];
+  const projectLocalSettings = sources.projectLocalSettings ?? [];
+  const projectSharedSettings = sources.projectSharedSettings ?? [];
+  const inlineSettings = sources.inlineSettings ?? [];
+
+  const configurableSettings = [
+    ...globalSettings,
+    ...projectLocalSettings,
+    ...inlineSettings,
+  ];
+  const environment = createRuleAccumulator(DEFAULT_ENVIRONMENT);
+  const allow = createRuleAccumulator(DEFAULT_ALLOW);
+  const protectedPaths = createRuleAccumulator(DEFAULT_PROTECTED_PATHS);
+  const deniedPaths = createRuleAccumulator(DEFAULT_DENIED_PATHS);
+  const softDeny = createRuleAccumulator(DEFAULT_SOFT_DENY);
+  const hardDeny = createRuleAccumulator(DEFAULT_HARD_DENY);
+
+  for (const settings of configurableSettings) {
+    config = applyAutoModeScalars(config, settings.autoMode);
+    applyRuleSetting(environment, settings.autoMode?.environment);
+    applyRuleSetting(allow, settings.autoMode?.allow);
+    applyRuleSetting(protectedPaths, settings.autoMode?.protectedPaths);
+    applyRuleSetting(
+      deniedPaths,
+      settings.autoMode?.deniedPaths,
+      (entry) => entry.length <= MAX_WILDCARD_PATTERN_LENGTH,
+    );
+    applyRuleSetting(
+      softDeny,
+      settings.autoMode?.soft_deny ?? settings.autoMode?.softDeny,
+    );
+    applyRuleSetting(
+      hardDeny,
+      settings.autoMode?.hard_deny ?? settings.autoMode?.hardDeny,
+    );
+  }
+
+  config = {
+    ...config,
+    environment: finalizeRuleSetting(environment),
+    allow: finalizeRuleSetting(allow),
+    protectedPaths: finalizeRuleSetting(protectedPaths),
+    deniedPaths: finalizeRuleSetting(deniedPaths),
+    softDeny: finalizeRuleSetting(softDeny),
+    hardDeny: finalizeRuleSetting(hardDeny),
+  };
+
+  for (
+    const settings of [
+      ...globalSettings,
+      ...projectSharedSettings,
+      ...projectLocalSettings,
+      ...inlineSettings,
+    ]
+  ) {
+    appendPermissionPatterns(config.permissionDeny, settings, "deny");
+    appendPermissionPatterns(config.permissionAsk, settings, "ask");
+  }
+  for (
+    const settings of [
+      ...globalSettings,
+      ...projectLocalSettings,
+      ...inlineSettings,
+    ]
+  ) {
+    appendPermissionPatterns(config.permissionAllow, settings, "allow");
+  }
+
+  return config;
+}
+
+function loadedSettingsToSettings(
+  files: Array<LoadedSettingsFile | undefined>,
+): SettingsFile[] {
+  return files.flatMap((file) => (file?.settings ? [file.settings] : []));
+}
+
+function loadedSettingsDiagnostics(
+  files: Array<LoadedSettingsFile | undefined>,
+): string[] {
+  return files.flatMap((file) => file?.diagnostics ?? []);
+}
+
+function ignoredSharedAllowDiagnostics(
+  files: Array<LoadedSettingsFile | undefined>,
+): string[] {
+  return files.flatMap((file) => {
+    const permissions = file?.settings?.permissions;
+    if (!file || !permissions || !hasOwn(permissions, "allow")) return [];
+    return [
+      `${file.path}: permissions.allow is ignored in shared project config. Use a user-owned config source instead`,
+    ];
+  });
+}
+
+/** Load config from disk and environment variables, including diagnostics for `/automode config`. Project files require explicit trust. */
+export function loadEffectiveConfigWithDiagnostics(
+  cwd: string,
+  projectTrusted = false,
+  globalSettingsPath = PI_GLOBAL_SETTINGS[0],
+): ConfigLoadResult {
+  const inlineSettings: SettingsFile[] = [];
+  const diagnostics: string[] = [];
+  if (process.env.PI_AUTOMODE_SETTINGS_JSON) {
+    try {
+      const parsed = JSON.parse(
+        process.env.PI_AUTOMODE_SETTINGS_JSON,
+      ) as SettingsFile;
+      inlineSettings.push(parsed);
+      diagnostics.push(
+        ...validateSettingsFile(parsed, "PI_AUTOMODE_SETTINGS_JSON"),
+      );
+    } catch (error) {
+      diagnostics.push(
+        `PI_AUTOMODE_SETTINGS_JSON: invalid JSON (${
+          error instanceof Error ? error.message : String(error)
+        })`,
+      );
+    }
+  }
+
+  const globalFiles = [readSettingsFile(globalSettingsPath)];
+  const projectLocalPaths = PI_PROJECT_LOCAL_SETTINGS.map((file) =>
+    resolve(cwd, file)
+  );
+  const projectSharedPaths = PI_PROJECT_SHARED_SETTINGS.map((file) =>
+    resolve(cwd, file)
+  );
+  const projectLocalFiles = projectTrusted
+    ? projectLocalPaths.map(readSettingsFile)
+    : [];
+  const projectSharedFiles = projectTrusted
+    ? projectSharedPaths.map(readSettingsFile)
+    : [];
+  if (!projectTrusted) {
+    for (
+      const path of [...projectLocalPaths, ...projectSharedPaths].filter(
+        existsSync,
+      )
+    ) {
+      diagnostics.push(`${path}: ignored because project is not trusted`);
+    }
+  }
+  const fileDiagnostics = loadedSettingsDiagnostics([
+    ...globalFiles,
+    ...projectLocalFiles,
+    ...projectSharedFiles,
+  ]);
+  const sharedAllowDiagnostics = ignoredSharedAllowDiagnostics(
+    projectSharedFiles,
+  );
+
+  return {
+    config: buildEffectiveConfigFromSources({
+      globalSettings: loadedSettingsToSettings(globalFiles),
+      projectLocalSettings: loadedSettingsToSettings(projectLocalFiles),
+      projectSharedSettings: loadedSettingsToSettings(projectSharedFiles),
+      inlineSettings,
+    }),
+    diagnostics: [
+      ...fileDiagnostics,
+      ...sharedAllowDiagnostics,
+      ...diagnostics,
+    ],
+  };
+}
+
+/** Load config from disk and environment variables. Exported for tests and diagnostics. */
+export function loadEffectiveConfig(
+  cwd: string,
+  projectTrusted = false,
+  globalSettingsPath = PI_GLOBAL_SETTINGS[0],
+): EffectiveConfig {
+  return loadEffectiveConfigWithDiagnostics(
+    cwd,
+    projectTrusted,
+    globalSettingsPath,
+  ).config;
+}
+
+function readWritableSettingsFile(path: string): SettingsFile {
+  if (!existsSync(path)) return {};
+  const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error(`${path}: root must be a JSON object`);
+  }
+  const settings = parsed as SettingsFile;
+  if (
+    settings.autoMode !== undefined &&
+    (!settings.autoMode ||
+      typeof settings.autoMode !== "object" ||
+      Array.isArray(settings.autoMode))
+  ) {
+    throw new Error(`${path}: autoMode must be a JSON object`);
+  }
+  return settings;
+}
+
+/** Persist the global default classifier model while preserving other settings. */
+export function writeGlobalClassifierModel(
+  classifierModel: string,
+  path = PI_GLOBAL_SETTINGS[0],
+): void {
+  const settings = readWritableSettingsFile(path);
+  const next: SettingsFile = {
+    ...settings,
+    autoMode: {
+      ...settings.autoMode,
+      classifierModel,
+    },
+  };
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, `${JSON.stringify(next, null, 2)}\n`, "utf8");
+}

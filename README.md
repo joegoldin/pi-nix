@@ -118,8 +118,8 @@ This fork adds:
 | `notifications.appName` | str | `pi` | Title, and the `--app-name` the desktop groups by. |
 | `notifications.events` | `[enum]` | all three | `needs_input`, `settled`, `long_running_tool`. |
 | `notifications.longRunningToolSeconds` | int | `30` | Threshold for `long_running_tool`. |
-| `autoMode.enable` | bool | `false` | The `@czottmann/pi-automode` guardrail, patched to chain beside `@gotgenes/pi-permission-system`; see `docs/assumption-a2.md`. |
-| `autoMode.package` | package | `ext-czottmann-pi-automode` | The auto-mode extension derivation. |
+| `autoMode.enable` | bool | `false` | The auto-mode guardrail and the permission system, in pi-permissions; see `docs/assumption-a2.md`. |
+| `autoMode.package` | package | `ext-pi-permissions` | The auto-mode extension derivation. The default carries the permission system too. |
 | `autoMode.allow` | `[str]` | `[ ]` | Exceptions to `soft_deny`, as plain sentences for the classifier. A non-empty list replaces the package's built-ins; add `$defaults` to keep them. |
 | `autoMode.soft_deny` | `[str]` | `[ ]` | Destructive actions that explicit user intent clears. |
 | `autoMode.hard_deny` | `[str]` | `[ ]` | Security boundaries. Intent does not clear these and cannot. |
@@ -296,13 +296,16 @@ stale `~/.pi/agent/automode.json` cannot outrank the declared policy. pi-notify
 takes the same shape for the same reason, as `PI_NOTIFY_CONFIG`: pi's
 `ExtensionContext` exposes no settings reader.
 
-Auto mode and `@gotgenes/pi-permission-system` both gate `tool_call`, and pi
-stops at the first extension that blocks, so on their own they contend rather
-than compose. `autoMode.package` patches the npm release to register on the
-permission system's authorizer chain, which is the seam that package publishes
-for exactly this, and `autoMode.permissionSystem` writes the config entry that
-arms it. Enabled together, the permission system's flat rules resolve what they
-can with no model call and the classifier answers the rest as a chain link.
+Auto mode and the permission system both gate `tool_call`, and pi stops at the
+first extension that blocks, so on their own they contend rather than compose.
+pi-permissions carries both, with auto mode registered as a link on the
+permission system's authorizer chain, the seam that system publishes for
+exactly this; `autoMode.permissionSystem` writes the config entry that arms
+it. The permission system's flat rules resolve what they can with no model call
+and the classifier answers the rest as a chain link. They were two npm packages,
+`@czottmann/pi-automode` and `@gotgenes/pi-permission-system`, joined by patches
+here; pi-permissions vendors both engines (its `ATTRIBUTION.md`) and runs their
+upstream test suites in the `permissions-upstream` check.
 `docs/assumption-a2.md` has the evidence and the one thing the pairing costs.
 
 | Option | Type | Default | What it does |
@@ -331,13 +334,11 @@ Pinned extensions are exposed as `packages.<system>.ext-<slug>`:
 | Attribute | npm package | What it adds |
 | --- | --- | --- |
 | `ext-pi-subagents` | `pi-subagents` | subagents |
-| `ext-gotgenes-pi-permission-system` | `@gotgenes/pi-permission-system` | deterministic permissions |
-| `ext-czottmann-pi-automode` | `@czottmann/pi-automode` | the auto-mode classifier, with permission-chain, shared-statusline and search-redaction patches; its npm version is pinned in `extensions.json` |
 | `ext-pi-lens` | `pi-lens` | LSP and linter feedback, its tools deferred behind its loader |
 | `ext-pi-web-access` | `pi-web-access` | web search and fetch |
 | `ext-narumitw-pi-usage` | `@narumitw/pi-usage` | subscription and API usage, patched to publish its report for the footer |
 
-Four more are first-party, built from `packages/extensions/` in this repo
+Five more are first-party, built from `packages/extensions/` in this repo
 rather than from a pin:
 
 | Attribute | Source | What it adds |
@@ -346,18 +347,24 @@ rather than from a pin:
 | `ext-pi-notify` | `packages/extensions/pi-notify` | Desktop notifications on prompts, settle, and long tool calls |
 | `ext-pi-voice` | `packages/extensions/pi-voice` | Push-to-talk dictation into the editor |
 | `ext-pi-foreign-skills` | `packages/extensions/pi-foreign-skills` | Skills from other agents' directories |
+| `ext-pi-permissions` | `packages/extensions/pi-permissions` | Permissions and auto mode in one extension: policy rules, the classifier as a chain link that asks before it blocks, subagent prompt forwarding |
 
-pi-custom vendors one dependency, FFF's native file index, through a
-`bun.lock`; the others have none. Their tests run under `nix flake check` under
-their own names. pi-custom's check runs `bun test` and `tsc --strict` against
-the pi this flake builds; the others typecheck against pi 0.85.1's published
-`.d.ts`. A pi bump that moves the extension API fails there rather than at load.
+pi-custom and pi-permissions vendor their dependencies through a `bun.lock`:
+FFF's native file index for pi-custom; tree-sitter, zod and unbash for
+pi-permissions' engines. The others have none. Their tests run under
+`nix flake check` under their own names. pi-custom's and pi-permissions' checks
+run `bun test` and `tsc --strict` against the pi this flake builds; the others
+typecheck against pi 0.85.1's published `.d.ts`. A pi bump that moves the
+extension API fails there rather than at load. The `permissions-upstream` check
+runs the vendored engines' own upstream suites (vitest, `node --test`) against
+pi-permissions' copies.
 
-Auto mode used to be a third. It is now the pinned `@czottmann/pi-automode`,
+Auto mode used to be first-party, then the pinned `@czottmann/pi-automode`,
 which speaks Claude Code's own `autoMode` schema and ships the deterministic
-hard-deny list, the path deny list, and the transcript budgets the first-party
-one never had. `docs/assumption-a2.md` records why the first-party one was
-retired and why it cannot run alongside `@gotgenes/pi-permission-system`.
+hard-deny list, the path deny list, and the transcript budgets the first
+first-party one never had. `docs/assumption-a2.md` records why that one was
+retired. It is now one half of pi-permissions, vendored with
+`@gotgenes/pi-permission-system` as the other.
 
 Bump every pin, and pi itself, with one command:
 

@@ -44,17 +44,11 @@ let
     ext-pi-voice = bunPkgs.callPackage ./pi-voice { inherit mkPiExtension; };
     ext-pi-foreign-skills = bunPkgs.callPackage ./pi-foreign-skills { inherit mkPiExtension; };
     ext-pi-custom = bunPkgs.callPackage ./pi-custom { inherit mkPiExtension; };
+    ext-pi-permissions = bunPkgs.callPackage ./pi-permissions { inherit mkPiExtension; };
   };
 
   # These npm packages need integration patches in addition to the generic build.
   patched = {
-    ext-gotgenes-pi-permission-system = bunPkgs.callPackage ./gotgenes-pi-permission-system.nix {
-      inherit mkPiExtension;
-      pin = pins."@gotgenes/pi-permission-system";
-      inherit (bunPkgs.callPackage ./gotgenes-pi-permission-system-patches.nix { })
-        configurableDelegationEnvelope
-        ;
-    };
     ext-narumitw-pi-usage = bunPkgs.callPackage ./narumitw-pi-usage.nix {
       inherit mkPiExtension;
       pin = pins."@narumitw/pi-usage";
@@ -77,10 +71,6 @@ let
           patches = bunPkgs.callPackage ./pi-lens-patches.nix { };
         in
         patches.lazyCoreTools + patches.quietEmptyWidget;
-    };
-    ext-czottmann-pi-automode = bunPkgs.callPackage ./czottmann-pi-automode.nix {
-      inherit mkPiExtension;
-      pin = pins."@czottmann/pi-automode";
     };
   };
 in

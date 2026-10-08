@@ -12,15 +12,6 @@
       "prompts"
     ]
   },
-  "@gotgenes/pi-permission-system": {
-    "version": "40.0.1",
-    "url": "https://registry.npmjs.org/@gotgenes/pi-permission-system/-/pi-permission-system-40.0.1.tgz",
-    "hash": "sha512-Al/hn5vJwVKFUZKaHuYvEQne3O1sIMFkb2pdtbc4NVGidUq6YQwwdK0NJryxtTwC3wTWghBQTIbuBTSXTPfQsw==",
-    "bundled": false,
-    "entrypoints": [],
-    "skills": [],
-    "prompts": []
-  },
   "@narumitw/pi-usage": {
     "version": "0.63.0",
     "url": "https://registry.npmjs.org/@narumitw/pi-usage/-/pi-usage-0.63.0.tgz",
@@ -30,17 +21,6 @@
       "src/index.ts"
     ],
     "skills": [],
-    "prompts": []
-  },
-  "@czottmann/pi-automode": {
-    "version": "1.17.0",
-    "url": "https://registry.npmjs.org/@czottmann/pi-automode/-/pi-automode-1.17.0.tgz",
-    "hash": "sha512-pKTXK6Zcw/jaVlG3JsPLB7mahyrmoOuwn52GnHEM7WiYku4cJtlwrF2IXV60vFFu5BbPteUirKGQubqlcAFPQA==",
-    "bundled": false,
-    "entrypoints": [],
-    "skills": [
-      "skills"
-    ],
     "prompts": []
   },
   "pi-web-access": {

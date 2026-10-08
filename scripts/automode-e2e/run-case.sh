@@ -15,7 +15,7 @@ SETTINGS_JSON="$1"; shift
 # Built here rather than passed in, so a stale path cannot make a green run
 # meaningless.
 PI="${PI_STORE_PATH:-$(nix build --no-link --print-out-paths "$E2E/../..#coding-agent-bun" | tail -1)}"
-EXT="${EXT_STORE_PATH:-$(nix build --no-link --print-out-paths "$E2E/../..#ext-czottmann-pi-automode" | tail -1)}"
+EXT="${EXT_STORE_PATH:-$(nix build --no-link --print-out-paths "$E2E/../..#ext-pi-permissions" | tail -1)}"
 
 RUN="$WORKDIR/runs/$NAME"
 rm -rf "$RUN"; mkdir -p "$RUN/home" "$RUN/agent" "$RUN/work"
@@ -31,6 +31,12 @@ case = {
 open(os.environ["RUN"] + "/case.json", "w").write(json.dumps(case))
 PY
 : > "$RUN/requests.jsonl"
+
+# pi-permissions carries the permission system as well as auto mode. Its policy
+# here allows everything, so auto mode is what decides each case, as when it
+# was a package of its own.
+mkdir -p "$RUN/agent/extensions/pi-permission-system"
+printf '%s\n' '{"permission":{"*":"allow"}}' > "$RUN/agent/extensions/pi-permission-system/config.json"
 
 # Canary: any case whose command deletes it proves the block was real.
 echo "canary" > "$RUN/work/CANARY"

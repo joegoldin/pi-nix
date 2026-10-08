@@ -218,6 +218,10 @@ let
         enabled = autoMode.log.enable;
         inherit (autoMode.log) classifierIo;
       };
+      askOnBlock = {
+        enabled = autoMode.askOnBlock.enable;
+        inherit (autoMode.askOnBlock) timeoutSeconds;
+      };
     }
     // setKeys {
       inherit (autoMode)
@@ -298,7 +302,23 @@ let
     "@gotgenes/pi-permission-system"
   ];
 
-  permissionSystemPresent = lib.any (p: lib.elem (p.pname or "") permissionSystemPnames) extPkgs;
+  permissionSystemLoaded = lib.any (p: lib.elem (p.pname or "") permissionSystemPnames) extPkgs;
+
+  # pi-permissions is auto mode and the permission system in one package, so
+  # loading it for auto mode loads the permission system too.
+  permissionsBundled = autoMode.enable && (autoMode.package.pname or "") == "pi-ext-pi-permissions";
+
+  permissionSystemPresent =
+    if permissionsBundled && permissionSystemLoaded then
+      throw ''
+        pi.coding-agent.autoMode.package is pi-permissions, which carries the
+        permission system, and extensionPackages also loads
+        @gotgenes/pi-permission-system. Two permission systems would gate
+        every tool call twice and fail to load on their shared tool names.
+        Drop the permission-system package from extensionPackages.
+      ''
+    else
+      permissionsBundled || permissionSystemLoaded;
 
   chain = autoMode.permissionSystem;
 
@@ -366,9 +386,13 @@ let
   # Keyed on the package being loaded at all rather than on `chainActive`: a
   # subagent needs to find it whenever it is present, whether or not this
   # config also names it as an authorizer link.
-  permissionSystemPackage = lib.findFirst (
-    p: lib.elem (p.pname or "") permissionSystemPnames
-  ) null extPkgs;
+  # With pi-permissions the link names it: the child loads both halves from it.
+  # Its package.json declares the one entry that registers both.
+  permissionSystemPackage =
+    if permissionsBundled then
+      autoMode.package
+    else
+      lib.findFirst (p: lib.elem (p.pname or "") permissionSystemPnames) null extPkgs;
 
   npmLinks = lib.optionalAttrs (permissionSystemPackage != null) {
     "@gotgenes/pi-permission-system" = permissionSystemPackage;
@@ -1078,13 +1102,20 @@ in
 
       package = lib.mkOption {
         type = lib.types.package;
-        default = self.packages.${system}.ext-czottmann-pi-automode;
-        defaultText = lib.literalExpression "pi-nix's packages.ext-czottmann-pi-automode";
+        default = self.packages.${system}.ext-pi-permissions;
+        defaultText = lib.literalExpression "pi-nix's packages.ext-pi-permissions";
         description = ''
           The auto-mode extension derivation. Its `passthru.piEntrypoint`
           becomes the `--extension` flag; the rest of this option block is
           rendered to JSON and exported as `PI_AUTOMODE_SETTINGS_JSON`, which
           is the package's highest-precedence config source.
+
+          The default, pi-permissions, carries the permission system as well,
+          with auto mode as a link on its authorizer chain, so it needs no
+          separate permission-system package in `extensionPackages`; adding
+          one beside it is refused. A package carrying auto mode alone (the
+          former `@czottmann/pi-automode`) pairs with a permission system
+          loaded through `extensionPackages`, as before.
         '';
       };
 
@@ -1298,6 +1329,31 @@ in
           classifier. Null leaves the package's default of 4000. Assistant
           prose and tool results are never included. Must be at least 32.
         '';
+      };
+
+      askOnBlock = {
+        enable = lib.mkOption {
+          type = lib.types.bool;
+          default = false;
+          description = ''
+            Before a classifier block stands, ask: a prompt names the call and
+            the classifier's reason and offers Allow or Deny, raised on the
+            permission prompt channel so pi-notify sends a notification. Allow
+            runs the call; Deny or Esc refuses it. With no answer within
+            `timeoutSeconds` the block stands, so an unattended run carries
+            on, and the agent is told nobody answered, so a later go-ahead in
+            the conversation can clear it. Only classifier blocks ask:
+            `permissions.deny` and `deniedPaths` stay lines drawn in config.
+            Off by default; a no-UI session never asks. Needs a package that
+            reads it, as pi-permissions does.
+          '';
+        };
+
+        timeoutSeconds = lib.mkOption {
+          type = lib.types.ints.between 1 3600;
+          default = 30;
+          description = "How long the prompt waits for an answer before the block stands.";
+        };
       };
 
       log = {

@@ -26,17 +26,17 @@ let
   };
 
   expectedNames = [
-    "ext-czottmann-pi-automode"
-    "ext-gotgenes-pi-permission-system"
     "ext-narumitw-pi-usage"
-    # custom, foreign-skills, notify and voice are first-party, from
-    # packages/extensions/<name>: no pin, and only custom vendors a lockfile.
+    # custom, foreign-skills, notify, permissions and voice are first-party,
+    # from packages/extensions/<name>: no pin, and only custom and permissions
+    # vendor a lockfile.
     # They are listed in sorted order with the rest rather than grouped,
     # because the assertion compares against `builtins.attrNames`, which sorts.
     "ext-pi-custom"
     "ext-pi-foreign-skills"
     "ext-pi-lens"
     "ext-pi-notify"
+    "ext-pi-permissions"
     "ext-pi-subagents"
     "ext-pi-voice"
     "ext-pi-web-access"
@@ -77,9 +77,7 @@ let
     # grown one.
     assert !(pins ? pi-notify);
     assert !(pins ? pi-voice);
-    # Every pin installs runtime dependencies. Auto mode uses unbash for
-    # command-aware deny rules.
-    assert !pins."@czottmann/pi-automode".bundled;
+    # Every pin installs runtime dependencies.
     assert lib.all (n: !pins.${n}.bundled) (builtins.attrNames pins);
     assert lib.all (n: pinComplete n pins.${n}) (builtins.attrNames pins);
     true;
@@ -108,14 +106,17 @@ pkgs.runCommand "pi-nix-extensions-tests" { nativeBuildInputs = [ pkgs.jq ]; } '
   }
 
   check ${exts.ext-pi-subagents} deps
-  check ${exts.ext-gotgenes-pi-permission-system} deps
-  check ${exts.ext-czottmann-pi-automode} deps
+  check ${exts.ext-pi-permissions} deps
 
   # Skills and prompts advertised through the passthru must be real directories.
   test -d ${exts.ext-pi-subagents}/skills
   test -d ${exts.ext-pi-subagents}/prompts
 
-  test -d ${exts.ext-czottmann-pi-automode}/node_modules/unbash
+  # pi-permissions' engines: auto mode's command analysis, and the permission
+  # system's tree-sitter parser with the WASM grammars it loads at runtime.
+  test -d ${exts.ext-pi-permissions}/node_modules/unbash
+  test -f ${exts.ext-pi-permissions}/node_modules/web-tree-sitter/web-tree-sitter.wasm
+  test -f ${exts.ext-pi-permissions}/node_modules/tree-sitter-bash/tree-sitter-bash.wasm
 
   touch $out
 ''
