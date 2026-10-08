@@ -15,13 +15,15 @@
 
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import autoMode from "./auto/index.ts";
+import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { type AutoModeControls, createPiAutomode } from "./auto/extension.ts";
+import { withPermissionChain } from "./auto/permission-chain.ts";
 import { type Denial, type PermissionRecord, PermissionLedger } from "./denials.ts";
+import { applySetting, buildSettingItems, type PermissionSystemConfigController } from "./engine/config/config-modal.ts";
 import permissionSystem from "./engine/index.ts";
 import { callLabel } from "./ui/call-label.ts";
 import { framedMenu, type MenuTheme, PermissionsMenuView } from "./ui/menu.ts";
-import { type MenuEffect, PermissionsMenu } from "./ui/menu-state.ts";
+import { type MenuEffect, type MenuTab, PermissionsMenu, type SettingRow } from "./ui/menu-state.ts";
 
 // Asked on the session's event bus before registering. A subagent can be
 // handed this package twice, by path: pi-subagents passes its npm link, and
@@ -90,6 +92,15 @@ interface ToolCallEventLike {
 type ToolCallResult = { block?: boolean; reason?: string } | undefined | void;
 type ToolCallHandler = (event: ToolCallEventLike, ctx: ExtensionContext) => ToolCallResult | Promise<ToolCallResult>;
 
+/** The two halves' own commands, which open /permissions on their tab when given no arguments. */
+const MENU_COMMANDS: Record<string, MenuTab> = {
+	automode: "auto",
+	"auto-mode": "auto",
+	"permission-system": "settings",
+};
+
+type CommandHandler = (args: string, ctx: ExtensionCommandContext) => Promise<void> | void;
+
 /** An interruption to steer is neither a refusal nor something to approve later. */
 function wasInterruption(reason: string): boolean {
 	return /interrupted the turn/i.test(reason);
@@ -122,11 +133,27 @@ export default function piPermissions(pi: ExtensionAPI): void {
 			// would be told of a way out it cannot use.
 			return ctx.hasUI && ctx.mode === "tui" ? { ...result, reason: reason + APPROVABLE } : result;
 		};
+	// Late-bound: the commands below are registered before openPermissions exists.
+	let openPermissions: (ctx: ExtensionCommandContext, tab: MenuTab) => Promise<void> = async () => {};
 	const gated = new Proxy(pi, {
 		get(target, property, receiver) {
 			if (property === "on") {
 				return (event: string, handler: unknown) =>
 					target.on(event as never, (event === "tool_call" ? gate(handler as ToolCallHandler) : handler) as never);
+			}
+			if (property === "registerCommand") {
+				return (name: string, command: { handler: CommandHandler; description?: string }) => {
+					const tab = MENU_COMMANDS[name];
+					if (!tab) return target.registerCommand(name, command as never);
+					// With arguments the command does what it always did; on its own it
+					// opens the one menu, on its tab.
+					return target.registerCommand(name, {
+						...command,
+						description: `${command.description ?? ""} (no arguments: /permissions)`.trim(),
+						handler: (args: string, ctx: ExtensionCommandContext) =>
+							args.trim() || ctx.mode !== "tui" ? command.handler(args, ctx) : openPermissions(ctx, tab),
+					} as never);
+				};
 			}
 			const value = Reflect.get(target, property, receiver);
 			return typeof value === "function" ? value.bind(target) : value;
@@ -136,8 +163,10 @@ export default function piPermissions(pi: ExtensionAPI): void {
 	// In the order the two packages were loaded: auto mode's tool_call handler
 	// runs first, so its deterministic denials stop a call before the
 	// permission system prompts for it.
-	autoMode(gated);
-	permissionSystem(gated);
+	let autoControls: AutoModeControls | undefined;
+	let settingsController: PermissionSystemConfigController | undefined;
+	withPermissionChain(createPiAutomode({ onControls: (controls) => (autoControls = controls) }))(gated);
+	permissionSystem(gated, { onSettings: (controller) => (settingsController = controller) });
 
 	let unrequire: (() => void) | undefined;
 	pi.on("session_start", (_event, ctx) => {
@@ -180,26 +209,147 @@ export default function piPermissions(pi: ExtensionAPI): void {
 		return { render: () => [text], invalidate() {} };
 	});
 
-	function carryOut(effect: MenuEffect, ctx: ExtensionContext): void {
+	function autoRows(ctx: ExtensionContext): SettingRow[] {
+		if (!autoControls) return [];
+		const a = autoControls.snapshot(ctx);
+		const ask = a.askOnBlock?.enabled ? `on, ${a.askOnBlock.timeoutSeconds}s` : "off";
+		return [
+			{
+				id: "toggle",
+				label: "Auto mode",
+				value: `${a.enabled ? "on" : "off"}${a.enabledOverride === undefined ? "" : " for this session"}`,
+				description: "The classifier judges every call the rules leave open. Off, for this session, leaves them to the permission system alone.",
+				actionable: true,
+			},
+			{
+				id: "model",
+				label: "Classifier model",
+				value: a.classifierModel ?? "this session's model",
+				description: "The model that judges calls, saved to auto mode's global config. The one pi-nix sets wins over it.",
+				actionable: true,
+			},
+			{
+				id: "ask",
+				label: "Ask before a block",
+				value: ask,
+				description: "Set by pi-nix's autoMode.askOnBlock. Asked only in the terminal UI, never in a headless session.",
+				actionable: false,
+			},
+			{
+				id: "counts",
+				label: "This session",
+				value: `${a.checkedActions} checked · ${a.blockedActions} blocked · classifier ${a.classifierAllowed} allowed, ${a.classifierDenied} denied`,
+				actionable: false,
+			},
+			{ id: "reset", label: "Reset counters", description: "Start this session's counts again.", actionable: true },
+			{ id: "reload", label: "Reload config", description: "Read auto mode's config files again.", actionable: true },
+			{ id: "log", label: "Decision log", value: a.logEnabled ? a.logFile : "off", actionable: false },
+			// The value is cut at the edge; highlighted, the warning reads in full.
+			...a.diagnostics.map((d, i) => ({ id: `warning-${i}`, label: "Config warning", value: d, description: d, warning: true, actionable: false })),
+		];
+	}
+
+	function settingsRows(): SettingRow[] {
+		if (!settingsController) return [];
+		const items = buildSettingItems(settingsController.config.current()).map((item) => ({
+			id: item.id,
+			label: item.label,
+			value: item.currentValue,
+			description: item.description,
+			actionable: true,
+		}));
+		return [
+			...items,
+			{
+				id: "path",
+				label: "Config file",
+				value: settingsController.configPath,
+				description: "pi-nix writes this file each time pi starts, so a change here lasts until then; set it for good in autoMode.permissionSystem.settings.",
+				actionable: false,
+			},
+		];
+	}
+
+	/** Carries out what the menu asks; resolves with "model" when the menu must close for the model picker. */
+	async function carryOut(effect: MenuEffect, ctx: ExtensionCommandContext): Promise<"model" | undefined> {
 		switch (effect.kind) {
 			case "approve":
 				approve(effect.denial, ctx);
-				return;
+				return undefined;
 			case "dismiss":
 				ledger.dismiss(effect.denial.id);
 				persist();
-				return;
+				return undefined;
 			case "revoke":
 				ledger.revoke(effect.grant.key);
 				persist();
-				return;
+				return undefined;
+			case "act":
+				if (effect.tab === "settings" && settingsController) {
+					const current = settingsController.config.current();
+					const item = buildSettingItems(current).find((i) => i.id === effect.row.id);
+					if (item) settingsController.config.save(applySetting(current, item.id, item.currentValue === "on" ? "off" : "on"), ctx);
+					return undefined;
+				}
+				if (!autoControls) return undefined;
+				if (effect.row.id === "model") return "model";
+				if (effect.row.id === "toggle") await autoControls.run(autoControls.snapshot(ctx).enabled ? "off" : "on", ctx);
+				if (effect.row.id === "reset") await autoControls.run("reset", ctx);
+				if (effect.row.id === "reload") await autoControls.run("reload", ctx);
+				return undefined;
 			case "close":
-				return;
+				return undefined;
 		}
 	}
 
+	/** One showing of the menu; resolves with "model" when the model picker is wanted next. */
+	function showMenu(ctx: ExtensionCommandContext, tab: MenuTab): Promise<"model" | undefined> {
+		return ctx.ui.custom<"model" | undefined>((tui, theme, _keybindings, done) => {
+			const menu = new PermissionsMenu(ledger, { auto: () => autoRows(ctx), settings: settingsRows }, tab);
+			const view = new PermissionsMenuView(
+				menu,
+				theme as unknown as MenuTheme,
+				(effect) => {
+					if (effect.kind === "close") {
+						done(undefined);
+						return;
+					}
+					void carryOut(effect, ctx).then((next) => {
+						if (next === "model") done("model");
+						else {
+							menu.settle();
+							tui.requestRender();
+						}
+					});
+				},
+				() => Math.max(8, Math.floor(tui.terminal.rows * 0.6)),
+			);
+			const framed = framedMenu(view, theme as unknown as MenuTheme);
+			return {
+				render: (width: number) => framed.render(width),
+				invalidate: () => framed.invalidate(),
+				handleInput: (data: string) => {
+					framed.handleInput(data);
+					tui.requestRender();
+				},
+			};
+		});
+	}
+
+	openPermissions = async (ctx, tab) => {
+		let next: MenuTab | undefined = tab;
+		while (next) {
+			const wanted = await showMenu(ctx, next);
+			next = undefined;
+			if (wanted === "model" && autoControls) {
+				await autoControls.run("model", ctx);
+				next = "auto";
+			}
+		}
+	};
+
 	pi.registerCommand("permissions", {
-		description: "Approve calls that were blocked, or revoke ones you approved",
+		description: "Permissions in one place: blocked calls, approvals, auto mode and settings",
 		handler: async (args, ctx) => {
 			if (args.trim() === "approve last") {
 				const latest = ledger.open()[0];
@@ -211,27 +361,7 @@ export default function piPermissions(pi: ExtensionAPI): void {
 				ctx.ui.notify("/permissions needs the terminal UI; /permissions approve last works anywhere.", "error");
 				return;
 			}
-			await ctx.ui.custom<void>((tui, theme, _keybindings, done) => {
-				const menu = new PermissionsMenu(ledger);
-				const view = new PermissionsMenuView(
-					menu,
-					theme as unknown as MenuTheme,
-					(effect) => {
-						if (effect.kind === "close") done();
-						else carryOut(effect, ctx);
-					},
-					() => Math.max(8, Math.floor(tui.terminal.rows * 0.6)),
-				);
-				const framed = framedMenu(view, theme as unknown as MenuTheme);
-				return {
-					render: (width: number) => framed.render(width),
-					invalidate: () => framed.invalidate(),
-					handleInput: (data: string) => {
-						framed.handleInput(data);
-						tui.requestRender();
-					},
-				};
-			});
+			await openPermissions(ctx, "denied");
 		},
 	});
 }

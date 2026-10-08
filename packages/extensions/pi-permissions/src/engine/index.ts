@@ -31,7 +31,10 @@ import { SubagentDetection } from "./authority/subagent-detection";
 import { subscribeSubagentLifecycle } from "./authority/subagent-lifecycle-events";
 import { getSubagentSessionRegistry } from "./authority/subagent-registry";
 import { ConfigIssueReporter } from "./config/config-issue-reporter";
-import { registerPermissionSystemCommand } from "./config/config-modal";
+import {
+  type PermissionSystemConfigController,
+  registerPermissionSystemCommand,
+} from "./config/config-modal";
 import { getGlobalConfigPath } from "./config/config-paths";
 import { ConfigStore } from "./config/config-store";
 import { resolveDialogKeys } from "./config/dialog-keys";
@@ -65,7 +68,15 @@ import {
 } from "./handlers";
 import { getPermissionsService, type PermissionsService } from "./service";
 
-export default function piPermissionSystemExtension(pi: ExtensionAPI): void {
+/** pi-permissions: what the /permissions menu is handed from this half. */
+export interface PermissionSystemHooks {
+  onSettings?: (controller: PermissionSystemConfigController) => void;
+}
+
+export default function piPermissionSystemExtension(
+  pi: ExtensionAPI,
+  hooks: PermissionSystemHooks = {},
+): void {
   const agentDir = getAgentDir();
   // getPackageDir() is Pi's own install dir; auto-allow it for read-only tools
   // so the agent can read Pi's bundled docs/examples regardless of layout.
@@ -241,14 +252,18 @@ export default function piPermissionSystemExtension(pi: ExtensionAPI): void {
   configStore.refresh(undefined, false);
 
   const configPath = getGlobalConfigPath(agentDir);
-  registerPermissionSystemCommand(pi, {
-    config: configStore,
-    configPath,
-    getActiveAgentConfigRules: () =>
-      permissionManager.getComposedConfigRules(
-        session.lastKnownActiveAgentName ?? undefined,
-      ),
-  });
+  registerPermissionSystemCommand(
+    pi,
+    {
+      config: configStore,
+      configPath,
+      getActiveAgentConfigRules: () =>
+        permissionManager.getComposedConfigRules(
+          session.lastKnownActiveAgentName ?? undefined,
+        ),
+    },
+    hooks.onSettings,
+  );
 
   // Explicitly annotated to break a type-inference cycle: the selection's
   // `getPermissionQuery` thunk closes over this service, and the service's

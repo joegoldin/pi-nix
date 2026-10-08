@@ -136,6 +136,33 @@ export type PiAutomodeOptions = {
   now?: () => Date;
   /** Override Bash analysis in tests. Runtime code uses unbash. */
   analyzeBash?: typeof analyzeBash;
+  /**
+   * pi-permissions: handed this extension's controls once it is set up, so the
+   * /permissions menu can show and change what /automode does.
+   */
+  onControls?: (controls: AutoModeControls) => void;
+};
+
+/** What the /permissions menu reads and drives (pi-permissions). */
+export type AutoModeSnapshot = {
+  enabled: boolean;
+  /** Set for this session, over the configured value. */
+  enabledOverride?: boolean;
+  classifierModel?: string;
+  askOnBlock?: { enabled: boolean; timeoutSeconds: number };
+  checkedActions: number;
+  blockedActions: number;
+  classifierAllowed: number;
+  classifierDenied: number;
+  logEnabled: boolean;
+  logFile: string;
+  diagnostics: string[];
+};
+
+export type AutoModeControls = {
+  snapshot(ctx: ExtensionContext): AutoModeSnapshot;
+  /** Runs an /automode subcommand: "on", "off", "reload", "reset", "model". */
+  run(args: string, ctx: ExtensionCommandContext): Promise<void>;
 };
 
 type LogCtx = {
@@ -1139,6 +1166,33 @@ export function createPiAutomode(options: PiAutomodeOptions = {}) {
         "error",
       );
     }
+
+    options.onControls?.({
+      snapshot: (ctx) => {
+        const cfg = effectiveConfig();
+        return {
+          enabled: cfg.enabled,
+          enabledOverride: state.enabledOverride,
+          classifierModel: cfg.classifierModel,
+          askOnBlock: cfg.askOnBlock,
+          checkedActions: state.checkedActions,
+          blockedActions: state.blockedActions,
+          classifierAllowed: state.classifierAllowed,
+          classifierDenied: state.classifierDenied,
+          logEnabled: cfg.log.enabled,
+          logFile: resolveLogPath(
+            ctx.sessionManager.getSessionFile?.(),
+            ctx.sessionManager.getSessionDir?.() ?? "",
+            ctx.sessionManager.getSessionId?.() ?? "unknown",
+            ctx.cwd,
+            options.logRoot,
+            now(),
+          ),
+          diagnostics: configDiagnostics,
+        };
+      },
+      run: handleAutomodeCommand,
+    });
 
     pi.registerCommand("automode", {
       description:

@@ -126,3 +126,45 @@ describe("subagents", () => {
 		expect(() => requireInChildren("s1", root)).toThrow("unknown shape");
 	});
 });
+
+describe("one menu", () => {
+	it("opens /permissions from /automode and /permission-system on their own, and keeps their subcommands", async () => {
+		const s = session();
+		piPermissions(s.api());
+		const opened: string[][] = [];
+		const notes: string[] = [];
+		const ctx = {
+			cwd: "/tmp",
+			hasUI: true,
+			mode: "tui",
+			isIdle: () => true,
+			ui: {
+				notify: (message: string) => notes.push(message),
+				setStatus() {},
+				theme: { fg: (_slot: string, text: string) => text },
+				custom: (factory: (...args: unknown[]) => { render(width: number): string[]; handleInput(data: string): void }) =>
+					new Promise((resolve) => {
+						const component = factory(
+							{ requestRender() {}, terminal: { rows: 40 } },
+							{ fg: (_slot: string, text: string) => text, bold: (text: string) => text },
+							{},
+							resolve,
+						);
+						opened.push(component.render(100));
+						component.handleInput("\u001b");
+					}),
+			},
+			sessionManager: { getEntries: () => s.entries, getSessionId: () => "s1", getSessionFile: () => undefined, getSessionDir: () => "/tmp", getBranch: () => [] },
+			isProjectTrusted: () => false,
+		};
+		await s.commands.get("automode")!.handler("", ctx);
+		await s.commands.get("permission-system")!.handler("", ctx);
+		expect(opened).toHaveLength(2);
+		// Each opens on its own tab.
+		expect(opened[0]!.some((l) => l.includes("Classifier model"))).toBe(true);
+		expect(opened[1]!.some((l) => l.includes("YOLO mode"))).toBe(true);
+		await s.commands.get("automode")!.handler("status", ctx);
+		expect(opened).toHaveLength(2);
+		expect(notes.some((n) => n.includes("checked actions:"))).toBe(true);
+	});
+});

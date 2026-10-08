@@ -1,12 +1,13 @@
-// The /permissions menu: what was blocked, to approve or dismiss, and what you
-// have approved, to revoke. Drawn as pi-custom draws /context: framed, in the
-// editor's place, a list with the selected row opened up.
+// The /permissions menu, the one place for permissions: what was blocked, to
+// approve or dismiss; what you approved, to revoke; auto mode; and the
+// permission system's settings. Drawn as pi-custom draws /context and /ui:
+// framed, in the editor's place, the selected row opened up.
 
 import { matchesKey, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import type { Denial, Grant } from "../denials.ts";
 import { callLabel, shortReason } from "./call-label.ts";
 import { Framed, type FrameTheme } from "./frame.ts";
-import { ago, type MenuEffect, type MenuKey, PermissionsMenu } from "./menu-state.ts";
+import { ago, type MenuEffect, type MenuKey, type MenuTab, type PermissionsMenu, type SettingRow } from "./menu-state.ts";
 
 export interface MenuTheme extends FrameTheme {
 	bold(text: string): string;
@@ -37,8 +38,10 @@ export class PermissionsMenuView {
 		if (matchesKey(data, "escape") || data === "q") return "close";
 		if (matchesKey(data, "up") || data === "k") return "up";
 		if (matchesKey(data, "down") || data === "j") return "down";
-		if (matchesKey(data, "tab") || matchesKey(data, "left") || matchesKey(data, "right")) return "tab";
-		if (matchesKey(data, "enter") || data === "a") return "approve";
+		if (matchesKey(data, "tab") || matchesKey(data, "right")) return "next";
+		if (matchesKey(data, "shift+tab") || matchesKey(data, "left")) return "prev";
+		if (matchesKey(data, "enter") || data === " ") return "select";
+		if (data === "a") return "approve";
 		if (data === "x" || data === "d") return "remove";
 		return undefined;
 	}
@@ -47,21 +50,47 @@ export class PermissionsMenuView {
 		const { menu, theme } = this;
 		const denied = menu.denied();
 		const granted = menu.granted();
-		const chip = (text: string, active: boolean) =>
-			active ? (theme.bg ? theme.bg("selectedBg", ` ${text} `) : theme.fg("accent", theme.bold(` ${text} `))) : theme.fg("muted", ` ${text} `);
-		const lines = [`${chip(`Denied (${denied.length})`, menu.tab === "denied")} ${chip(`Allowed (${granted.length})`, menu.tab === "granted")}`, ""];
-		const body = menu.tab === "denied" ? this.deniedRows(denied, width) : this.grantedRows(granted, width);
+		const chip = (text: string, tab: MenuTab) =>
+			menu.tab === tab
+				? theme.bg
+					? theme.bg("selectedBg", ` ${text} `)
+					: theme.fg("accent", theme.bold(` ${text} `))
+				: theme.fg("muted", ` ${text} `);
+		const lines = [
+			[chip(`Denied (${denied.length})`, "denied"), chip(`Allowed (${granted.length})`, "granted"), chip("Auto mode", "auto"), chip("Settings", "settings")].join(" "),
+			"",
+		];
+		const body =
+			menu.tab === "denied"
+				? this.deniedRows(denied, width)
+				: menu.tab === "granted"
+					? this.grantedRows(granted, width)
+					: this.settingRows(menu.rows(), width);
 		lines.push(...this.window(body, Math.max(4, this.height() - 4)));
 		lines.push("");
-		lines.push(
-			theme.fg(
-				"dim",
-				menu.tab === "denied"
-					? "a approve and tell the agent · x dismiss · tab allowed · esc close"
-					: "x revoke · tab denied · esc close",
-			),
-		);
+		lines.push(theme.fg("dim", HINTS[menu.tab]));
 		return lines;
+	}
+
+	/** A settings tab: label, value, and the highlighted row's description under it. */
+	private settingRows(rows: SettingRow[], width: number): { rows: string[]; focus: number } {
+		const { theme, menu } = this;
+		const labelWidth = Math.max(0, ...rows.map((r) => r.label.length)) + 2;
+		const out: string[] = [];
+		let focus = 0;
+		rows.forEach((row, i) => {
+			const here = i === menu.cursor;
+			if (here) focus = out.length;
+			const pointer = here ? theme.fg("accent", "❯ ") : "  ";
+			const label = row.label.padEnd(labelWidth);
+			const value = row.value ?? "";
+			const shownValue = row.warning ? theme.fg("warning", value) : row.actionable ? theme.fg("accent", value) : theme.fg("muted", value);
+			out.push(truncateToWidth(`${pointer}${here ? theme.bold(label) : label}${shownValue}`, width, "…"));
+			if (here && row.description) {
+				for (const part of wrapTextWithAnsi(row.description, Math.max(1, width - 4))) out.push(theme.fg("dim", `    ${part}`));
+			}
+		});
+		return { rows: out, focus };
 	}
 
 	/** Rows per item, the selected item opened up; returns the rows and where the cursor's item starts. */
@@ -119,6 +148,13 @@ export class PermissionsMenuView {
 
 	invalidate(): void {}
 }
+
+const HINTS: Record<MenuTab, string> = {
+	denied: "a approve and tell the agent · x dismiss · tab next · esc close",
+	granted: "x revoke · tab next · esc close",
+	auto: "enter change · tab next · esc close",
+	settings: "enter toggle · tab next · esc close",
+};
 
 export function framedMenu(view: PermissionsMenuView, theme: FrameTheme): Framed {
 	return new Framed(view, "Permissions", theme);

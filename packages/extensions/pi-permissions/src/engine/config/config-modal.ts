@@ -11,7 +11,7 @@ import {
   type PermissionSystemExtensionConfig,
 } from "./extension-config";
 
-interface PermissionSystemConfigController {
+export interface PermissionSystemConfigController {
   config: CommandConfigStore;
   /** Precomputed global config file path. */
   configPath: string;
@@ -85,7 +85,7 @@ function summarizeConfig(
   return `${knobs}${rulesSuffix}`;
 }
 
-function buildSettingItems(
+export function buildSettingItems(
   config: PermissionSystemExtensionConfig,
 ): SettingItem[] {
   return [
@@ -124,7 +124,7 @@ function buildSettingItems(
   ];
 }
 
-function applySetting(
+export function applySetting(
   config: PermissionSystemExtensionConfig,
   id: string,
   value: string,
@@ -249,7 +249,11 @@ function handleArgs(
 export function registerPermissionSystemCommand(
   pi: ExtensionAPI,
   controller: PermissionSystemConfigController,
+  // pi-permissions: the same controller drives the /permissions menu's
+  // settings tab.
+  onController?: (controller: PermissionSystemConfigController) => void,
 ): void {
+  onController?.(controller);
   pi.registerCommand("permission-system", {
     description:
       "Configure pi-permission-system logging and yolo-mode behavior",

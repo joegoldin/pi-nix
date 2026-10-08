@@ -71,12 +71,24 @@ asking before a classifier block stands.
 
 ## Commands
 
-- `/permissions`: what was blocked and what you approved. On **Denied**, `a`
-  approves the selected call and tells the agent, `x` dismisses it; on
-  **Allowed**, `x` revokes. Tab switches, Esc closes.
-  `/permissions approve last` approves the newest block without the menu.
-- `/automode`: auto mode's status, rules, recent denials and classifier model.
-- `/permission-system`: the permission system's settings.
+`/permissions` is the one place for all of it, a menu in four tabs (Tab and
+Shift+Tab, or ←/→, move between them; Esc closes):
+
+- **Denied**: what was blocked, newest first, the selected one with its
+  reason and input. `a` (or Enter) approves it and tells the agent, `x`
+  dismisses it.
+- **Allowed**: what you approved. `x` revokes.
+- **Auto mode**: on or off for this session, the classifier model (opens a
+  picker), the ask-before-block setting, this session's counts with a reset,
+  reload, the decision log, and any config warnings.
+- **Settings**: the permission system's switches (YOLO mode, the review log,
+  debug logging, double-press to confirm) and its config file. pi-nix writes
+  that file when pi starts, so a change here lasts until then.
+
+`/permissions approve last` approves the newest block without the menu.
+`/automode` and `/permission-system` on their own open `/permissions` on
+their tab; with arguments (`/automode off`, `/permission-system show`) they
+do what they always did.
 
 The prompts and the menu are drawn as pi-custom draws its dialogs: framed, in
 the editor's place, `❯` on the highlighted row.
