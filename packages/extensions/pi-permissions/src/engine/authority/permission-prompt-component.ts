@@ -23,6 +23,7 @@ import {
   renderPromptNotification,
 } from "../presentation/prompt-notification";
 import type { PromptPayload } from "../presentation/prompt-payload";
+import { Framed } from "../../ui/frame";
 import { collapsePastedNewlines } from "./bracketed-paste";
 import type { DecisionSource, UserDecisionSurface } from "./decision-source";
 import {
@@ -134,6 +135,7 @@ const FALLBACK_RENDER_WIDTH = 80;
 /** Minimal theme surface the dialog uses; satisfied by the real SDK theme. */
 interface PromptTheme {
   fg(color: string, text: string): string;
+  bold?(text: string): string;
 }
 
 const DEFAULT_SESSION_LABEL = "Yes, for this session";
@@ -170,17 +172,22 @@ export function presentInlinePermissionPrompt(
       if (notification) {
         tui.terminal.write(notification);
       }
-      return new PermissionPromptComponent(
-        theme,
-        config,
+      // pi-permissions: framed, its title on the border, as this setup's
+      // other dialogs are drawn.
+      return new Framed(
+        new PermissionPromptComponent(
+          theme,
+          config,
+          payload,
+          view.budget,
+          (data) => handleToolsExpandAction(data, keybindings, view.ui),
+          () => {
+            tui.requestRender();
+          },
+          done,
+        ),
         title,
-        payload,
-        view.budget,
-        (data) => handleToolsExpandAction(data, keybindings, view.ui),
-        () => {
-          tui.requestRender();
-        },
-        done,
+        theme,
       );
     },
     { overlay: false },
@@ -222,7 +229,6 @@ class PermissionPromptComponent implements Component {
   constructor(
     private readonly theme: PromptTheme,
     private readonly config: PromptModelConfig,
-    private readonly title: string,
     private readonly payload: PromptPayload,
     private readonly budget: RenderBudget,
     private readonly handleAppAction: (data: string) => boolean,
@@ -256,6 +262,10 @@ class PermissionPromptComponent implements Component {
 
   invalidate(): void {
     // No cached rendering state to clear.
+  }
+
+  private bold(text: string): string {
+    return this.theme.bold ? this.theme.bold(text) : text;
   }
 
   render(width: number): string[] {
@@ -306,7 +316,7 @@ class PermissionPromptComponent implements Component {
     } else if (view.elided) {
       keys.push("ctrl+o full request");
     }
-    return this.theme.fg("muted", keys.join(" · "));
+    return this.theme.fg("dim", keys.join(" · "));
   }
 
   handleInput(data: string): void {
@@ -378,15 +388,16 @@ class PermissionPromptComponent implements Component {
     this.requestRender();
   }
 
+  // pi-permissions: the title is on the frame; the highlighted row is marked
+  // with ❯ and bold, as in this setup's other dialogs.
   private renderDecision(width: number): string[] {
     const ask = this.renderAsk(width);
-    const lines = [this.theme.fg("accent", this.title), ...ask.lines, ""];
+    const lines = [...ask.lines, ""];
     for (const action of visibleActions(this.config)) {
       const label = this.labelFor(action);
       const selected = this.state.highlightedAction === action;
-      const marker = selected ? "▶" : " ";
-      const row = `${marker} (${this.boundKey(action)}) ${label}`;
-      lines.push(selected ? this.theme.fg("accent", row) : row);
+      const row = `(${this.boundKey(action)}) ${label}`;
+      lines.push(selected ? `${this.theme.fg("accent", "❯")} ${this.bold(row)}` : `  ${row}`);
     }
     lines.push("");
     lines.push(this.state.hint || this.hint(ask));
@@ -417,7 +428,6 @@ class PermissionPromptComponent implements Component {
 
   private renderReason(width: number): string[] {
     const lines = [
-      this.theme.fg("accent", this.title),
       ...this.renderAsk(width).lines,
       "",
       "Reason (required):",
@@ -428,7 +438,7 @@ class PermissionPromptComponent implements Component {
       lines.push(this.theme.fg("error", this.state.reasonError));
     }
     lines.push("");
-    lines.push(this.theme.fg("muted", "enter submit · esc back"));
+    lines.push(this.theme.fg("dim", "enter submit · esc back"));
     return lines;
   }
 
@@ -440,19 +450,13 @@ class PermissionPromptComponent implements Component {
       { label: subagentLabel, serving: false },
       { label: servingLabel, serving: true },
     ];
-    const lines = [
-      this.theme.fg("accent", this.title),
-      "Apply this session grant to:",
-      "",
-    ];
+    const lines = ["Apply this session grant to:", ""];
     for (const row of rows) {
       const selected = this.state.scopeServing === row.serving;
-      const marker = selected ? "▶" : " ";
-      const text = `${marker} ${row.label}`;
-      lines.push(selected ? this.theme.fg("accent", text) : text);
+      lines.push(selected ? `${this.theme.fg("accent", "❯")} ${this.bold(row.label)}` : `  ${row.label}`);
     }
     lines.push("");
-    lines.push(this.theme.fg("muted", "↑/↓ move · enter confirm · esc back"));
+    lines.push(this.theme.fg("dim", "↑/↓ move · enter confirm · esc back"));
     return lines;
   }
 }

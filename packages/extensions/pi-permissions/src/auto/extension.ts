@@ -32,6 +32,7 @@ import {
   writeGlobalClassifierModel,
 } from "./config.ts";
 import { DETERMINISTIC_ONLY, INTERRUPTED } from "./permission-chain.ts";
+import { askBeforeBlock as askUserBeforeBlock } from "../ui/block-prompt.ts";
 import { deterministicHardDeny } from "./hard-deny.ts";
 import {
   createLogger,
@@ -77,8 +78,6 @@ import type {
 import { safeJson, truncateMiddle } from "./utils.ts";
 
 const INSPECT_TOOL = "automode_inspect";
-const ASK_ALLOW = "Allow";
-const ASK_DENY = "Deny";
 const INSPECTION_ACTIONS = ["status", "config", "defaults", "denials"] as const;
 type InspectionAction = (typeof INSPECTION_ACTIONS)[number];
 
@@ -404,37 +403,28 @@ export function createPiAutomode(options: PiAutomodeOptions = {}) {
     // the block stands, so an unattended run carries on as it would have, and
     // the reason says no one answered, so a later go-ahead from the user can
     // clear it. Raised on the permission prompt channel so a notifier sees it.
+    // pi-permissions: the prompt is ../ui/block-prompt.ts, drawn as this
+    // setup's other dialogs are. Only in the interactive terminal UI: a
+    // headless session (print, JSON, RPC, a subagent) has no one watching to
+    // answer, so the block stands at once, as it did before asking existed.
     async function askBeforeBlock(
       ctx: ExtensionContext,
       cfg: EffectiveConfig,
       toolName: string,
-      summary: string,
+      input: unknown,
       reason: string,
       logCtx: LogCtx,
     ): Promise<"allow" | "deny" | "timeout" | undefined> {
       const ask = cfg.askOnBlock;
-      if (!ask?.enabled || !ctx.hasUI || logCtx.deterministicOnly) return undefined;
+      if (!ask?.enabled || !ctx.hasUI || ctx.mode !== "tui" || logCtx.deterministicOnly) return undefined;
       const requestId = `pi-automode-${logCtx.decisionId}`;
       emitPermissionEvent("permissions:ui_prompt", { requestId, toolName, surface: toolName });
-      const startedAt = Date.now();
-      const timeoutMs = ask.timeoutSeconds * 1000;
-      let choice: string | undefined;
-      try {
-        choice = await ctx.ui.select(
-          `Auto mode would block ${toolName}: ${truncateMiddle(summary, 400)}\n\n${reason}\n\nNo answer in ${ask.timeoutSeconds}s keeps the block.`,
-          [ASK_ALLOW, ASK_DENY],
-          { timeout: timeoutMs, signal: ctx.signal },
-        );
-      } catch {
-        choice = undefined;
-      }
-      // select answers undefined both for Esc and for running out of time;
-      // only the clock tells them apart.
-      const answer = choice === ASK_ALLOW
-        ? "allow"
-        : choice === ASK_DENY || Date.now() - startedAt < timeoutMs - 250
-          ? "deny"
-          : "timeout";
+      const answer = await askUserBeforeBlock(ctx, {
+        toolName,
+        input,
+        reason,
+        timeoutSeconds: ask.timeoutSeconds,
+      });
       emitPermissionEvent("permissions:decision", {
         requestId,
         surface: toolName,
@@ -945,7 +935,7 @@ export function createPiAutomode(options: PiAutomodeOptions = {}) {
       if (steering(ctx)) {
         return interrupted(ctx, "classifier", event.toolName, summary, logCtx);
       }
-      const answer = await askBeforeBlock(ctx, cfg, event.toolName, summary, decision.reason, logCtx);
+      const answer = await askBeforeBlock(ctx, cfg, event.toolName, input, decision.reason, logCtx);
       if (steering(ctx)) {
         return interrupted(ctx, "classifier", event.toolName, summary, logCtx);
       }

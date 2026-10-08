@@ -478,54 +478,80 @@ test("the session audit counts an interrupted call apart from blocks", async () 
 // status slot up to date.
 const statusUi = { notify() {}, setStatus() {}, theme: { fg: (_slot, text) => text } };
 
-// ask-on-block: with askOnBlock on, a classifier block asks first. Allow runs
-// the call; Deny or Esc refuses it; no answer in time keeps the block, and says
-// so, so a later go-ahead can clear it.
+/**
+ * A terminal UI whose `custom` mounts the dialog it is handed and lets the
+ * test press keys in it, as the user would.
+ */
+function terminalUi() {
+  const mounted = [];
+  const ui = {
+    ...statusUi,
+    custom: (factory) =>
+      new Promise((resolve) => {
+        const component = factory({ requestRender() {} }, { fg: (_slot, text) => text, bold: (text) => text }, {}, resolve);
+        mounted.push(component);
+      }),
+  };
+  return { ui, mounted, press: (key) => mounted.at(-1).handleInput(key) };
+}
+
+// ask-on-block: with askOnBlock on, a classifier block asks first, in the
+// terminal UI. Allow runs the call; Deny or Esc refuses it; no answer in time
+// keeps the block, and says so, so a later go-ahead can clear it.
 test("a classifier block asks first, and the answer decides", async () => {
   const blocked = { decision: "block", tier: "soft_deny", reason: "Writes a secret." };
   const run = async (answer, toolCallId) => {
-    const prompts = [];
+    const term = terminalUi();
     const h = await realHost(
       () => ({ allowInsideWorkingDirectory: false, askOnBlock: { enabled: true, timeoutSeconds: 1 } }),
       async () => blocked,
-      { hasUI: true, ui: { ...statusUi, select: async (title, options, opts) => { prompts.push({ title, options, opts }); return answer(opts); } } },
+      { hasUI: true, mode: "tui", ui: term.ui },
     );
     await h.emit("tool_call", { ...event, toolCallId });
-    const verdict = await h.service.links.get("pi-automode")({ ...details, toolCallId }, {}, log);
-    return { h, prompts, verdict };
+    const pending = h.service.links.get("pi-automode")({ ...details, toolCallId }, {}, log);
+    // The dialog mounts once the classifier has answered.
+    while (term.mounted.length === 0) await new Promise((r) => setTimeout(r, 5));
+    if (answer) term.press(answer);
+    return { h, term, verdict: await pending };
   };
 
-  const allowed = await run(async () => "Allow", "ask-allow");
+  const allowed = await run("y", "ask-allow");
   expect(allowed.verdict).toEqual({ kind: "allow" });
-  expect(allowed.prompts).toHaveLength(1);
-  expect(allowed.prompts[0].title).toContain("Writes a secret.");
-  expect(allowed.prompts[0].opts.timeout).toBe(1000);
+  const shown = allowed.term.mounted[0].render(80).join("\n");
+  expect(shown).toContain("Writes a secret.");
+  expect(shown).toContain("No answer in 1s keeps the block");
   expect(allowed.h.emitted.map((e) => e.channel)).toEqual(["permissions:ui_prompt", "permissions:decision"]);
   expect(allowed.h.emitted[0].requestId).toBe(allowed.h.emitted[1].requestId);
   // A second request for the same call does not ask again.
   expect(await allowed.h.service.links.get("pi-automode")({ ...details, toolCallId: "ask-allow" }, {}, log)).toEqual({ kind: "allow" });
-  expect(allowed.prompts).toHaveLength(1);
+  expect(allowed.term.mounted).toHaveLength(1);
 
-  const denied = await run(async () => "Deny", "ask-deny");
+  const denied = await run("n", "ask-deny");
   expect(denied.verdict.kind).toBe("deny");
   expect(denied.verdict.reason).toContain("The user was asked and denied it.");
 
-  const unanswered = await run((opts) => new Promise((resolve) => setTimeout(() => resolve(undefined), opts.timeout)), "ask-timeout");
+  const unanswered = await run(undefined, "ask-timeout");
   expect(unanswered.verdict.kind).toBe("deny");
   expect(unanswered.verdict.reason).toContain("did not answer within 1s");
   expect(unanswered.h.state().blockedActions).toBe(1);
 });
 
-test("a classifier block does not ask with askOnBlock off or no UI", async () => {
+test("a classifier block does not ask with askOnBlock off, no UI, or headless", async () => {
   const blocked = { decision: "block", tier: "soft_deny", reason: "Writes a secret." };
-  let asked = 0;
-  const ui = { ...statusUi, select: async () => { asked++; return "Allow"; } };
-  for (const [askOnBlock, hasUI] of [[{ enabled: false }, true], [{ enabled: true }, false]]) {
-    const h = await realHost(() => ({ allowInsideWorkingDirectory: false, askOnBlock }), async () => blocked, { hasUI, ui });
+  for (const [askOnBlock, ctx] of [
+    [{ enabled: false }, { hasUI: true, mode: "tui" }],
+    [{ enabled: true }, { hasUI: false }],
+    // A headless session with a UI surface (RPC, print, a subagent) has no one
+    // watching to answer.
+    [{ enabled: true }, { hasUI: true, mode: "rpc" }],
+    [{ enabled: true }, { hasUI: true, mode: "print" }],
+  ]) {
+    const term = terminalUi();
+    const h = await realHost(() => ({ allowInsideWorkingDirectory: false, askOnBlock }), async () => blocked, { ...ctx, ui: term.ui });
     await h.emit("tool_call", event);
     expect((await h.service.links.get("pi-automode")(details, {}, log)).kind).toBe("deny");
+    expect(term.mounted).toHaveLength(0);
   }
-  expect(asked).toBe(0);
 });
 
 // listed-hard-deny: the classifier is told only listed hard-deny rules are

@@ -25,10 +25,18 @@ Each tool call passes through, in order:
    call; `ask` goes on.
 3. **The authorizer chain**: auto mode's classifier is a link on it, so an
    `ask` reaches the classifier before it reaches you. With `askOnBlock` on,
-   a classifier block asks you first, with a countdown and a notification;
-   no answer in time keeps the block, and the agent is told nobody answered,
-   so a later go-ahead from you clears it.
+   a classifier block asks you first, in the terminal UI only, with a
+   countdown and a notification: Allow (`y`) runs the call, Deny (`n` or Esc)
+   refuses it, and no answer in time keeps the block, the agent told nobody
+   answered, so a later go-ahead from you clears it. A headless session
+   (print, JSON, RPC, a subagent) never asks; the block stands at once.
 4. **You**, at the permission prompt, for whatever the chain defers.
+
+Whatever either half blocks is recorded with the call's full input. In
+`/permissions` you can approve it afterwards: the exact call, tool and input
+as written, is then allowed for the rest of the session past both halves,
+hard denies included, and the agent is told, so it retries. A block's reason
+tells the agent this when there is a terminal UI to open the menu in.
 
 Only rules listed under `hard_deny` bind the classifier unconditionally; it is
 told so, and its examples take their tier from the listed rules.
@@ -55,14 +63,25 @@ asking before a classifier block stands.
 
 ## Commands
 
+- `/permissions`: what was blocked and what you approved. On **Denied**, `a`
+  approves the selected call and tells the agent, `x` dismisses it; on
+  **Allowed**, `x` revokes. Tab switches, Esc closes.
+  `/permissions approve last` approves the newest block without the menu.
 - `/automode`: auto mode's status, rules, recent denials and classifier model.
 - `/permission-system`: the permission system's settings.
+
+The prompts and the menu are drawn as pi-custom draws its dialogs: framed, in
+the editor's place, `❯` on the highlighted row.
 
 ## Files
 
 | Path | What it is |
 |---|---|
-| `src/index.ts` | The entry: both halves, auto mode first, once per session |
+| `src/index.ts` | The entry: both halves, auto mode first, once per session; the ledger around their tool_call handlers; `/permissions` |
+| `src/denials.ts` | What was blocked and what you approved, persisted in the session (pure) |
+| `src/ui/block-prompt.ts`, `block-prompt-state.ts` | The ask before a classifier block stands, with its countdown |
+| `src/ui/menu.ts`, `menu-state.ts` | The `/permissions` menu |
+| `src/ui/frame.ts`, `call-label.ts` | The dialog frame and how a call is named, after pi-custom's |
 | `src/auto/` | pi-automode v1.17.0 `extensions/auto-mode/`, its entry as `index.ts` ([`LICENSE.md`](src/auto/LICENSE.md)) |
 | `src/engine/` | pi-permission-system v40.0.1 `src/`, `#src/` imports made relative ([`LICENSE`](src/engine/LICENSE)) |
 | `src/chain.test.ts` | The two joined: the chain link, the deterministic pre-pass, interrupt, ask-on-block, search redaction |

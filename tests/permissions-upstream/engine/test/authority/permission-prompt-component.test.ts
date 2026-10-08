@@ -151,8 +151,11 @@ function makeAsk(value = "/repo/secret.txt"): PromptPayload {
 
 const ASK = makeAsk();
 
-/** Title, blank separator, four decision options, blank, hint. */
-const DECISION_CHROME_ROWS = 8;
+/**
+ * pi-permissions: the frame's top and bottom rules (the title is on the top
+ * one), blank separator, four decision options, blank, hint.
+ */
+const DECISION_CHROME_ROWS = 9;
 
 async function runPrompt(
   doublePressToConfirm: boolean,
@@ -175,7 +178,8 @@ async function runPrompt(
 /** The hotkeys of the decision step's option rows, in rendered order. */
 function decisionOptionKeys(captured: { component?: CapturedComponent }) {
   return (captured.component?.render(80) ?? [])
-    .map((line) => /^[ ▶] \((\w)\) /.exec(line)?.[1])
+    // pi-permissions: rows sit inside the frame, the highlighted one marked ❯.
+    .map((line) => /^│ [❯ ] \((\w)\) /.exec(line)?.[1])
     .filter((key) => key !== undefined);
 }
 
@@ -532,7 +536,8 @@ describe("presentInlinePermissionPrompt", () => {
       expect(lines.length).toBeLessThanOrEqual(
         DEFAULT_RENDER_BUDGET.maxRows + DECISION_CHROME_ROWS,
       );
-      expect(lines).toContain("subagent  : scout · session abc123");
+      // pi-permissions: matched within its framed row.
+      expect(lines.join("\n")).toContain("subagent  : scout · session abc123");
     });
 
     it("falls back to the select flow outside TUI mode", async () => {
@@ -703,14 +708,16 @@ describe("presentInlinePermissionPrompt", () => {
         "Title",
         makeAsk("/repo/a/very/long/secret.txt"),
       );
+      // pi-permissions: rows sit inside the frame, so the hint is the row above
+      // its bottom rule and a fact is matched within its framed row.
       const bounded = captured.component?.render(120) ?? [];
-      expect(bounded).toContain("path : /repo/a/ve…");
-      expect(bounded.at(-1)).toContain("ctrl+o full request");
+      expect(bounded.join("\n")).toContain("path : /repo/a/ve…");
+      expect(bounded.at(-2)).toContain("ctrl+o full request");
 
       captured.component?.handleInput(CTRL_O);
       const expanded = captured.component?.render(120) ?? [];
-      expect(expanded).toContain("path : /repo/a/very/long/secret.txt");
-      expect(expanded.at(-1)).toContain("ctrl+o collapse");
+      expect(expanded.join("\n")).toContain("path : /repo/a/very/long/secret.txt");
+      expect(expanded.at(-2)).toContain("ctrl+o collapse");
       // The host's own tool expansion still follows the same keystroke (#642).
       expect(setToolsExpanded).toHaveBeenCalledWith(true);
 

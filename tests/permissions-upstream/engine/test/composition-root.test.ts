@@ -2410,7 +2410,8 @@ describe("configured prompt preferences reach the inline dialog", () => {
   /** The hotkey each option row advertises, in rendered order. */
   function optionKeys(lines: string[]): (string | undefined)[] {
     return lines
-      .map((line) => /^[ \u25b6] \((\w)\) /.exec(line)?.[1])
+      // pi-permissions: rows sit inside the frame, the highlighted one marked ❯.
+      .map((line) => /^│ [❯ ] \((\w)\) /.exec(line)?.[1])
       .filter((key) => key !== undefined);
   }
 
