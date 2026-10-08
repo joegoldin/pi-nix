@@ -100,3 +100,29 @@ describe("the ledger around both halves", () => {
 		expect((await s.toolCall({ ...call, toolCallId: "c3", input: { ...call.input, content: "other" } }, ctx))?.block).toBe(true);
 	});
 });
+
+describe("subagents", () => {
+	it("makes every child of a session load pi-permissions, for every runner, and lets go at shutdown", async () => {
+		const { requireInChildren } = await import("./index.ts");
+		const root: Record<symbol, unknown> = {};
+		const key = Symbol.for("pi-subagents.required-child-extensions.v1");
+		const undo = requireInChildren("s1", root);
+		const store = root[key] as { version: number; bySession: Map<string, { id: string; path: string; requireForAllRunners?: boolean }[]> };
+		expect(store.version).toBe(1);
+		const [entry] = store.bySession.get("s1")!;
+		expect(entry).toMatchObject({ id: "pi-permissions", requireForAllRunners: true });
+		expect(entry!.path).toEndWith("/src/index.ts");
+		// Another host's requirement for the same session is kept.
+		store.bySession.set("s1", [{ id: "other", path: "/x.ts" }, ...store.bySession.get("s1")!]);
+		requireInChildren("s1", root);
+		expect(store.bySession.get("s1")!.map((e) => e.id)).toEqual(["other", "pi-permissions"]);
+		undo();
+		expect(store.bySession.get("s1")!.map((e) => e.id)).toEqual(["other", "pi-permissions"]);
+	});
+
+	it("refuses a registry it does not understand rather than leave children ungated", async () => {
+		const { requireInChildren } = await import("./index.ts");
+		const root: Record<symbol, unknown> = { [Symbol.for("pi-subagents.required-child-extensions.v1")]: { version: 2 } };
+		expect(() => requireInChildren("s1", root)).toThrow("unknown shape");
+	});
+});

@@ -47,11 +47,19 @@ interrupted.
 
 ## Subagents
 
-pi-subagents loads the permission system in a child from
+Every subagent is gated, and grandchildren after it. At each session start
+pi-permissions registers itself in pi-subagents' registry of required child
+extensions, for every runner: every child of the session loads it, no agent
+default, override or empty extension list removes it, a child that cannot
+load it fails to start rather than running ungated, and a child is refused on
+a runner that cannot load it (a remote machine). A child registers itself for
+its own children in turn. A child is headless, so it never asks: what auto
+mode would block there is blocked.
+
+pi-subagents also loads the permission system in a child from
 `npm/node_modules/@gotgenes/pi-permission-system`, which pi-nix links to this
-package, so a child gets both halves; a child's asks are forwarded to the
-parent session. The package registers once per session even when a child is
-handed it twice, by that link and by `settings.json`'s packages list.
+package, and a child's asks are forwarded to the parent session. The package
+registers once per session however many times a child is handed it.
 
 ## Config
 

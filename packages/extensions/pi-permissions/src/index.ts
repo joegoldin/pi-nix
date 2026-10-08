@@ -13,6 +13,8 @@
 // afterwards. An approved call passes both halves for the rest of the session,
 // and the agent is told, so it retries.
 
+import { realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import autoMode from "./auto/index.ts";
 import { type Denial, type PermissionRecord, PermissionLedger } from "./denials.ts";
@@ -29,6 +31,46 @@ import { type MenuEffect, PermissionsMenu } from "./ui/menu-state.ts";
 // synchronously up to its first await, so the copy that loaded first answers
 // before the second registers anything.
 const PROBE = "pi-permissions:loaded";
+
+// pi-subagents' registry of extensions every child of a session must load
+// (its src/shared/required-child-extensions.js, version 1). A child launched
+// without one that is required fails to start rather than running, and no
+// agent default, override or empty extension list removes it; with
+// requireForAllRunners a child is also refused on a runner that cannot load
+// it. pi-permissions registers itself for each session, so every subagent is
+// gated, and a child registers itself for its own children in turn.
+const REQUIRED_CHILD_EXTENSIONS = Symbol.for("pi-subagents.required-child-extensions.v1");
+const ENTRY_PATH = realpathSync(fileURLToPath(import.meta.url));
+
+interface RequiredChildEntry {
+	id: string;
+	path: string;
+	requireForAllRunners?: true;
+}
+
+/** Make every child of `sessionId` load this extension. Returns the undo. */
+export function requireInChildren(sessionId: string, root: Record<symbol, unknown> = globalThis as never): () => void {
+	let store = root[REQUIRED_CHILD_EXTENSIONS] as { version?: unknown; bySession?: unknown } | undefined;
+	if (store === undefined) {
+		store = { version: 1, bySession: new Map() };
+		root[REQUIRED_CHILD_EXTENSIONS] = store;
+	}
+	if (store.version !== 1 || !(store.bySession instanceof Map)) {
+		throw new Error("pi-subagents' required child extension registry has an unknown shape; refusing to leave subagents ungated.");
+	}
+	const bySession = store.bySession as Map<string, readonly RequiredChildEntry[]>;
+	const own: RequiredChildEntry = Object.freeze({ id: "pi-permissions", path: ENTRY_PATH, requireForAllRunners: true as const });
+	const others = (bySession.get(sessionId) ?? []).filter((entry) => entry.id !== own.id);
+	const entries = Object.freeze([...others, own]);
+	bySession.set(sessionId, entries);
+	return () => {
+		const current = bySession.get(sessionId);
+		if (!current) return;
+		const rest = current.filter((entry) => entry !== own);
+		if (rest.length) bySession.set(sessionId, Object.freeze(rest));
+		else bySession.delete(sessionId);
+	};
+}
 
 /** Where the ledger is kept in the session. */
 const LEDGER_ENTRY = "pi-permissions";
@@ -97,10 +139,19 @@ export default function piPermissions(pi: ExtensionAPI): void {
 	autoMode(gated);
 	permissionSystem(gated);
 
+	let unrequire: (() => void) | undefined;
 	pi.on("session_start", (_event, ctx) => {
+		unrequire?.();
+		const sessionId = ctx.sessionManager.getSessionId?.();
+		unrequire = sessionId ? requireInChildren(sessionId) : undefined;
 		const entries = ctx.sessionManager.getEntries() as { type?: string; customType?: string; data?: unknown }[];
 		const last = [...entries].reverse().find((e) => e.type === "custom" && e.customType === LEDGER_ENTRY);
 		ledger.restore(last?.data as PermissionRecord | undefined);
+	});
+
+	pi.on("session_shutdown", () => {
+		unrequire?.();
+		unrequire = undefined;
 	});
 
 	function approve(denial: Denial, ctx: ExtensionContext): void {
