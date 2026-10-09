@@ -365,10 +365,10 @@ export const unifiedConfigSchema = z
     }),
     doublePressToConfirm: z.boolean().optional().meta({
       description:
-        "Require a confirming second press of a decision hotkey in the inline permission dialog. Applies to TUI sessions only.",
+        "Require a second Enter or decision-hotkey press in the inline permission dialog. Off by default; TUI only.",
       markdownDescription:
-        "Require a confirming second press of a decision hotkey (`y`/`s`/`n`/`r`) in the inline permission dialog before it commits — the first press arms the action and shows a `Press y again to approve.` hint.\n\nApplies to interactive **TUI** sessions only; the non-TUI (RPC/frontend) prompt keeps its single-select flow. Set to `false` to commit decisions on the first hotkey press.",
-      default: true,
+        "When enabled, require a second Enter or decision-hotkey (`y`/`s`/`n`/`r`) press before committing the highlighted action. The first press arms the action and shows a confirmation hint. Moving to another action clears it. Escape always denies immediately.\n\nOff by default. Applies only to the inline permission-system TUI dialog, not auto-mode block prompts or non-TUI (RPC/frontend) selects.",
+      default: false,
     }),
     permissionDialogKeys: dialogKeysSchema.optional(),
     promptNotifications: z

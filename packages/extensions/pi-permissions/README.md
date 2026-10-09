@@ -82,7 +82,7 @@ Shift+Tab, or ←/→, move between them; Esc closes):
   picker), the ask-before-block setting, this session's counts with a reset,
   reload, the decision log, and any config warnings.
 - **Settings**: the permission system's switches (YOLO mode, the review log,
-  debug logging, double-press to confirm) and its config file. pi-nix writes
+  debug logging, double-press to confirm—off by default) and its config file. pi-nix writes
   that file when pi starts, so a change here lasts until then.
 
 `/permissions approve last` approves the newest block without the menu.
@@ -90,6 +90,10 @@ Shift+Tab, or ←/→, move between them; Esc closes):
 Subcommands remain available there, for example `/permissions auto status` and
 `/permissions settings show`. The legacy `/automode`, `/auto-mode`, and
 `/permission-system` commands are no longer registered.
+
+When enabled, double confirmation applies to Enter and decision hotkeys in
+the inline permission dialog; Escape still denies immediately. Auto-mode block
+prompts and non-TUI selects remain single-confirmation surfaces.
 
 The prompts and the menu are drawn as pi-custom draws its dialogs: framed, in
 the editor's place, `❯` on the highlighted row.

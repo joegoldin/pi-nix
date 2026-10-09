@@ -97,7 +97,7 @@ describe("normalizePermissionSystemConfig", () => {
       debugLog: true,
       permissionReviewLog: false,
       yoloMode: true,
-      doublePressToConfirm: true,
+      doublePressToConfirm: false,
     });
   });
 
@@ -116,9 +116,13 @@ describe("normalizePermissionSystemConfig", () => {
     expect(result.yoloMode).toBe(false);
   });
 
-  it("defaults doublePressToConfirm to true when missing", () => {
+  it("defaults doublePressToConfirm to false when missing", () => {
     const result = normalizePermissionSystemConfig({});
-    expect(result.doublePressToConfirm).toBe(true);
+    expect(result.doublePressToConfirm).toBe(false);
+  });
+
+  it("honors explicit double confirmation", () => {
+    expect(normalizePermissionSystemConfig({ doublePressToConfirm: true }).doublePressToConfirm).toBe(true);
   });
 
   it("sets doublePressToConfirm false when explicitly disabled", () => {

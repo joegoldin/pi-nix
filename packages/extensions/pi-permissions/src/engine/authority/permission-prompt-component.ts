@@ -307,9 +307,11 @@ class PermissionPromptComponent implements Component {
   private hint(view: DialogView): string {
     const keys = [
       "↑/↓ move",
-      "enter confirm",
+      this.config.doublePressToConfirm ? "enter twice to confirm" : "enter confirm",
       "esc deny",
-      "press a letter, then again to confirm",
+      this.config.doublePressToConfirm
+        ? "press a letter, then again to confirm"
+        : "press a letter to choose",
     ];
     if (this.expanded) {
       keys.push("ctrl+o collapse");

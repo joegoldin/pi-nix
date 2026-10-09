@@ -186,6 +186,15 @@ function decisionOptionKeys(captured: { component?: CapturedComponent }) {
 // ── Tests ─────────────────────────────────────────────────────────────────
 
 describe("presentInlinePermissionPrompt", () => {
+  it("shows single-press hints when double confirmation is disabled", () => {
+    const { view, captured } = makeFakeView(false);
+    void presentInlinePermissionPrompt(view, "Permission Required", ASK);
+    const text = captured.component?.render(160).join("\n") ?? "";
+    expect(text).toContain("enter confirm");
+    expect(text).toContain("press a letter to choose");
+    expect(text).not.toContain("again to confirm");
+  });
+
   it("renders inline (not as an overlay) with the request facts and hotkey labels", () => {
     const { view, captured } = makeFakeView(true);
     void presentInlinePermissionPrompt(view, "Permission Required", ASK);
@@ -347,9 +356,10 @@ describe("presentInlinePermissionPrompt", () => {
   });
 
   describe("navigation and escape", () => {
-    it("resolves the highlighted option on enter", async () => {
-      // y -> s -> n, then enter
-      expect(await runPrompt(true, [ARROW_DOWN, ARROW_DOWN, ENTER])).toEqual({
+    it.each([false, true])("confirms with the configured number of Enter presses (double: %s)", async (doublePress) => {
+      // y -> s -> n, then one or two confirming presses.
+      const keys = [ARROW_DOWN, ARROW_DOWN, ENTER, ...(doublePress ? [ENTER] : [])];
+      expect(await runPrompt(doublePress, keys)).toEqual({
         approved: false,
         state: "denied",
       });

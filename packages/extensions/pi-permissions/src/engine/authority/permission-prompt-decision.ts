@@ -184,10 +184,10 @@ function reduceDecisionStep(
       });
     case "hotkey":
       return visibleActions(config).includes(event.action)
-        ? pressHotkey(config, state, event.action)
+        ? pressDecision(config, state, event.action)
         : render(state);
     case "confirm":
-      return commit(config, state, state.highlightedAction);
+      return pressDecision(config, state, state.highlightedAction, "Enter");
     case "cancel":
       return { kind: "decision", decision: createDeniedPermissionDecision() };
     case "submitReason":
@@ -195,10 +195,11 @@ function reduceDecisionStep(
   }
 }
 
-function pressHotkey(
+function pressDecision(
   config: PromptModelConfig,
   state: PromptViewState,
   action: PromptAction,
+  key = config.keys[action],
 ): PromptOutcome {
   if (!config.doublePressToConfirm || state.armedAction === action) {
     return commit(config, state, action);
@@ -207,7 +208,7 @@ function pressHotkey(
     ...state,
     highlightedAction: action,
     armedAction: action,
-    hint: `Press ${config.keys[action]} again to ${OPTION_VERBS[action]}.`,
+    hint: `Press ${key} again to ${OPTION_VERBS[action]}.`,
   });
 }
 

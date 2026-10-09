@@ -117,7 +117,7 @@ export function buildSettingItems(
       id: "doublePressToConfirm",
       label: "Double-press to confirm",
       description:
-        "Require a confirming second press of a decision hotkey in the inline TUI permission dialog",
+        "Require a second Enter or decision-hotkey press in the inline TUI permission dialog (off by default)",
       currentValue: toOnOff(config.doublePressToConfirm),
       values: ON_OFF,
     },

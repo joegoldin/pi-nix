@@ -18,7 +18,7 @@ export interface PermissionSystemExtensionConfig {
   debugLog: boolean;
   permissionReviewLog: boolean;
   yoloMode: boolean;
-  /** Require a confirming second press of a decision hotkey in the inline TUI dialog. Defaults to true. */
+  /** Require a second Enter or decision-hotkey press in the inline TUI dialog. Defaults to false. */
   doublePressToConfirm: boolean;
   /** Additional directories to auto-allow for reads as Pi infrastructure. */
   piInfrastructureReadPaths?: string[];
@@ -44,7 +44,7 @@ export const DEFAULT_EXTENSION_CONFIG: PermissionSystemExtensionConfig = {
   debugLog: false,
   permissionReviewLog: true,
   yoloMode: false,
-  doublePressToConfirm: true,
+  doublePressToConfirm: false,
 };
 
 function resolveExtensionRoot(moduleUrl = import.meta.url): string {
@@ -76,7 +76,7 @@ export function normalizePermissionSystemConfig(
     debugLog: raw.debugLog === true,
     permissionReviewLog: raw.permissionReviewLog !== false,
     yoloMode: raw.yoloMode === true,
-    doublePressToConfirm: raw.doublePressToConfirm !== false,
+    doublePressToConfirm: raw.doublePressToConfirm === true,
   };
   if (raw.piInfrastructureReadPaths !== undefined) {
     result.piInfrastructureReadPaths = raw.piInfrastructureReadPaths;
