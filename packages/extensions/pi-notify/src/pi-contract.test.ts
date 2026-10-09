@@ -17,7 +17,7 @@ const describeAgainstPi = SRC === undefined ? describe.skip : describe;
 describeAgainstPi("the events pi-notify subscribes to", () => {
 	it("are all declared on ExtensionAPI.on", () => {
 		const source = types();
-		for (const event of ["agent_settled", "tool_execution_start", "tool_execution_end"]) {
+		for (const event of ["agent_settled", "tool_execution_start", "tool_execution_end", "ui_prompt_start", "ui_prompt_end"]) {
 			expect(source).toContain(`on(event: "${event}", handler:`);
 		}
 	});
@@ -33,13 +33,13 @@ describeAgainstPi("the events pi-notify subscribes to", () => {
 		}
 	});
 
-	it("give agent_settled no payload, so the handler must not read one", () => {
+	it("declare the settled event and its cancellation flag", () => {
 		const source = types();
 		const start = source.indexOf("export interface AgentSettledEvent {");
 		expect(start).toBeGreaterThan(-1);
 		const body = source.slice(start, source.indexOf("\n}", start));
 		expect(body).toContain('type: "agent_settled";');
-		expect(body.split("\n").filter((l) => /^\t[a-zA-Z]/.test(l))).toHaveLength(1);
+		expect(body).toContain("aborted: boolean;");
 	});
 });
 

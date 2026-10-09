@@ -1598,7 +1598,7 @@ in
         description = ''
           Which events raise a notification.
 
-          - `needs_input` — a permission layer raised a prompt
+          - `needs_input` — a permission prompt or blocking Pi UI dialog
           - `settled` — the agent finished its turn (pi's `agent_settled`)
           - `long_running_tool` — a tool ran longer than
             `longRunningToolSeconds` (pi's `tool_execution_start`/`_end`)
@@ -1617,14 +1617,14 @@ in
         type = lib.types.bool;
         default = true;
         description = ''
-          Close the `needs_input` notification once the permission ask has been
+          Close the `needs_input` notification once the question or permission ask has been
           answered, rather than leaving it up until it times out. It is raised
           at critical urgency, which on most Linux desktops means it never
           times out at all.
 
-          Driven by pi-permission-system's `permissions:decision` broadcast,
-          correlated to the prompt by `requestId`. A prompt from any other
-          source carries no request id and is left alone.
+          Permission asks use the `permissions:decision` broadcast, correlated
+          by `requestId`. Other dialogs use Pi's native `ui_prompt_end` event.
+          A permission dialog does not also raise a generic notification.
         '';
       };
 

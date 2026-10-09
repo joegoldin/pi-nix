@@ -1,4 +1,7 @@
-// pi-notify entrypoint. Design §10's three triggers:
+// Desktop notifications for blocking dialogs, completed turns and long tools.
+// Native ui_prompt_start/end covers questions without coupling to their tools.
+// Permission broadcasts retain the named decision notification.
+// Design §10's original triggers:
 //
 //   Claude's `Notification` hook  -> a permission prompt raised, observed on the
 //                                    event bus rather than by coupling to whoever
@@ -64,9 +67,12 @@ export function registerHandlers(pi: NotifyHost, config: NotifyConfig, now: () =
 		// raised it. A tool call runs several gates and so raises several requests;
 		// only the ones that reached the UI are in here, so a decision that never
 		// prompted finds nothing and does nothing.
-		const live = new Map<string, NotificationHandle>();
+		const live = new Map<string, Promise<NotificationHandle | null>>();
+		const permissionsWaiting = new Set<string>();
+		let promptSequence = 0;
+		let nativePrompt: string | undefined;
 
-		const onPrompt = (data: unknown) => {
+		const onPrompt = (data: unknown, userInput = false) => {
 			const d = (data ?? {}) as Record<string, unknown>;
 			// PermissionUiPromptEvent carries `surface` ("bash", "skill", "read"),
 			// never `toolName`, so reading toolName alone made every one of these
@@ -82,32 +88,55 @@ export function registerHandlers(pi: NotifyHost, config: NotifyConfig, now: () =
 			// Tracking an ask that carries no requestId would leak a handle that
 			// nothing can ever match, so those notifications are fire and forget.
 			const dismissible = config.dismissOnResolve && requestId !== null;
-			void (async () => {
+			const pending = (async () => {
 				const stdout = await send(
-					{ title: config.appName, body: `Needs your decision on ${tool}`, urgency: "critical" },
+					{ title: config.appName, body: userInput ? "Needs your input" : `Needs your decision on ${tool}`, urgency: "critical" },
 					dismissible,
 				);
-				if (!dismissible || requestId === null || stdout === null) return;
-				const handle = notificationHandle(config, stdout);
-				if (handle !== null) live.set(requestId, handle);
+				return stdout === null ? null : notificationHandle(config, stdout);
 			})();
+			if (dismissible && requestId !== null) {
+				live.set(requestId, pending);
+				void pending.then((handle) => {
+					if (handle === null && live.get(requestId) === pending) live.delete(requestId);
+				});
+			}
 		};
-		pi.events.on(PERMISSIONS_UI_PROMPT_CHANNEL, onPrompt);
+		pi.events.on(PERMISSIONS_UI_PROMPT_CHANNEL, (data) => {
+			const d = (data ?? {}) as Record<string, unknown>;
+			if (typeof d.requestId === "string") permissionsWaiting.add(d.requestId);
+			onPrompt(data);
+		});
+		pi.on("ui_prompt_start", () => {
+			// Permission requests broadcast before opening Pi's dialog. Keep their
+			// named notification rather than also showing a generic one.
+			if (permissionsWaiting.size > 0) return;
+			nativePrompt = `pi-ui:${++promptSequence}`;
+			onPrompt({ requestId: nativePrompt }, true);
+		});
 
-		if (config.dismissOnResolve) {
-			pi.events.on(PERMISSIONS_DECISION_CHANNEL, (data: unknown) => {
-				const d = (data ?? {}) as Record<string, unknown>;
-				if (typeof d.requestId !== "string") return;
-				const handle = live.get(d.requestId);
-				if (handle === undefined) return;
-				// Dropped before the close runs, so a repeated decision on the same
-				// request cannot fire a second close at an id already reused.
-				live.delete(d.requestId);
-				const command = dismissCommand(config, handle);
-				if (command === null) return;
-				void run(command.command, command.args);
+		const onResolved = (data: unknown) => {
+			const d = (data ?? {}) as Record<string, unknown>;
+			if (typeof d.requestId !== "string") return;
+			permissionsWaiting.delete(d.requestId);
+			const handle = live.get(d.requestId);
+			if (handle === undefined) return;
+			// Dropped before the close runs, so a repeated decision on the same
+			// request cannot fire a second close at an id already reused.
+			live.delete(d.requestId);
+			// An answer can arrive before the desktop service returns its ID.
+			void handle.then((resolved) => {
+				if (resolved === null) return;
+				const command = dismissCommand(config, resolved);
+				if (command !== null) void run(command.command, command.args);
 			});
-		}
+		};
+		pi.events.on(PERMISSIONS_DECISION_CHANNEL, onResolved);
+		pi.on("ui_prompt_end", () => {
+			if (nativePrompt === undefined) return;
+			onResolved({ requestId: nativePrompt });
+			nativePrompt = undefined;
+		});
 	}
 
 	if (config.events.longToolCall) {

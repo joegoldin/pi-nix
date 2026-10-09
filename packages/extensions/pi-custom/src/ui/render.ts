@@ -29,6 +29,7 @@ import {
 import { brightened, CardComponent, type CardLayout, ELBOW_PREFIX, opens, paint, type UiTheme } from "./card.ts";
 import type { UiConfig } from "./config.ts";
 import {
+	formatDuration,
 	type GroupState,
 	planRow,
 	type RowPlan,
@@ -42,6 +43,7 @@ import { BUILT_IN_TOOLS, buildCard, type CardDeps, callActivity, type ToolResult
 
 /** What renderResult leaves for the card. Lives in pi's per-row renderer state. */
 interface RowRecord {
+	durationMs?: number;
 	result?: ToolResultLike;
 	isPartial: boolean;
 	isError: boolean;
@@ -50,6 +52,8 @@ interface RowRecord {
 
 /** The fields of pi's ToolRenderContext this module reads. */
 export interface RenderContextLike {
+	durationMs?: number;
+	outputPad?: number;
 	args: unknown;
 	toolCallId: string;
 	state: { piUi?: RowRecord };
@@ -157,6 +161,13 @@ class LiveCard {
 	}
 
 	render(width: number): string[] {
+		// Self-rendered cards own their padding; Pi pads only its default shell.
+		const pad = Math.min(this.context.outputPad ?? 0, Math.floor(Math.max(0, width - 1) / 2));
+		const margin = " ".repeat(pad);
+		return this.renderRows(width - pad * 2).map((line) => `${margin}${line}${margin}`);
+	}
+
+	private renderRows(width: number): string[] {
 		const config = this.deps.config();
 		const w = Math.max(1, width);
 		const runs = this.runs(config);
@@ -207,8 +218,8 @@ class LiveCard {
 
 	private card(config: UiConfig, inPanel: boolean, backgrounds: Omit<Backgrounds, "key">, width: number): string[] {
 		const record = this.context.state.piUi;
-		const build = (theme: UiTheme) =>
-			buildCard(
+		const build = (theme: UiTheme) => {
+			const model = buildCard(
 				{
 					toolName: this.toolName,
 					args: (this.context.args ?? {}) as Record<string, unknown>,
@@ -220,6 +231,13 @@ class LiveCard {
 				},
 				{ theme, config, highlight: this.deps.highlight, languageOf: this.deps.languageOf, diff: this.deps.diff },
 			);
+			if (!record?.isPartial && record?.durationMs !== undefined) {
+				const ms = record.durationMs;
+				const duration = ms < 1000 ? `${Math.round(ms)}ms` : formatDuration(ms);
+				model.summary = [model.summary, theme.fg("dim", `Took ${duration}`)].filter(Boolean).join(" · ");
+			}
+			return model;
+		};
 		const plain = build(this.theme);
 		const layout: CardLayout = {
 			mode: config.toolMode === "compact" ? "compact" : "on",
@@ -278,6 +296,7 @@ export function cardRenderers(toolName: string, deps: RendererDeps): ToolRendere
 		renderCall: (_args, theme, context: RenderContextLike) => new LiveCard(toolName, context, theme, deps),
 		renderResult: (result, options: { expanded: boolean; isPartial: boolean }, _theme, context: RenderContextLike) => {
 			context.state.piUi = {
+				durationMs: context.durationMs,
 				result,
 				isPartial: options.isPartial,
 				isError: context.isError,

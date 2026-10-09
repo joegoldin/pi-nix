@@ -1,4 +1,4 @@
-import { describe, expect, it, mock } from "bun:test";
+import { describe, expect, it, mock, test } from "bun:test";
 import { DEFAULT_CONFIG } from "./config.ts";
 import {
 	PERMISSIONS_DECISION_CHANNEL,
@@ -270,4 +270,58 @@ describe("the channel names pi-notify listens on", () => {
 	it("matches pi-permission-system's PERMISSIONS_DECISION_CHANNEL", () => {
 		expect(PERMISSIONS_DECISION_CHANNEL).toBe("permissions:decision");
 	});
+});
+
+describe("structured user questions", () => {
+	it("notifies while waiting and dismisses when answered", async () => {
+		const h = host(async () => ok("42\n"));
+		registerHandlers(h as never, { ...config, dismisser: "/bin/gdbus" });
+		h.fire("ui_prompt_start", { requestId: "question-1" });
+		await settle();
+		expect(h.exec).toHaveBeenCalledTimes(1);
+		expect(h.exec.mock.calls[0]![1]).toContain("Needs your input");
+		h.fire("ui_prompt_end", { requestId: "question-1" });
+		await settle();
+		expect(h.exec).toHaveBeenCalledTimes(2);
+		expect(h.exec.mock.calls[1]![0]).toBe("/bin/gdbus");
+	});
+
+	it("honours the needs-input toggle", async () => {
+		const h = host();
+		registerHandlers(h as never, { ...config, events: { ...config.events, permissionPrompt: false } });
+		h.fire("ui_prompt_start", { requestId: "question-1" });
+		await settle();
+		expect(h.exec).not.toHaveBeenCalled();
+	});
+});
+
+describe("a question answered before its notification finishes sending", () => {
+	it("dismisses the late notification rather than leaving it visible", async () => {
+		let release!: (result: unknown) => void;
+		const sending = new Promise((resolve) => { release = resolve; });
+		const h = host(async (command) => command === "/bin/notify-send" ? sending : ok());
+		registerHandlers(h as never, { ...config, dismisser: "/bin/gdbus" });
+		h.fire("ui_prompt_start", { requestId: "fast-question" });
+		h.fire("ui_prompt_end", { requestId: "fast-question" });
+		release(ok("42\n"));
+		await settle();
+		expect(h.exec).toHaveBeenCalledTimes(2);
+	});
+});
+
+
+test("native permission dialogs do not duplicate the named notification, even without dismissal", async () => {
+	for (const dismissOnResolve of [false, true]) {
+		const h = host();
+		registerHandlers(h as never, { ...config, dismissOnResolve });
+		h.emit(PERMISSIONS_UI_PROMPT_CHANNEL, { requestId: "permission", surface: "bash" });
+		await h.fire("ui_prompt_start", { kind: "custom" });
+		await settle();
+		expect(h.exec).toHaveBeenCalledTimes(1);
+		h.emit(PERMISSIONS_DECISION_CHANNEL, { requestId: "permission" });
+		await h.fire("ui_prompt_end", {});
+		await h.fire("ui_prompt_start", { kind: "input" });
+		await settle();
+		expect(h.exec.mock.calls.at(-1)![1]).toContain("Needs your input");
+	}
 });

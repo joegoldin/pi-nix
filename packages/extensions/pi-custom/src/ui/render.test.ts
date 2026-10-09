@@ -57,7 +57,7 @@ function setup(config: Partial<UiConfig> = {}) {
 			handleMouse(event: TuiMouseEvent): { handled?: boolean; render?: boolean } | undefined;
 		};
 	}
-	return { model, groups, hover, row, repaints: () => repaints };
+	return { model, groups, hover, row, contexts, repaints: () => repaints };
 }
 
 const assistant = (...ids: string[]): MessageLike => ({
@@ -307,5 +307,38 @@ describe("hover", () => {
 		expect(lines[1].startsWith(PANEL)).toBe(true);
 		head.handleMouse(mouse("move", 1));
 		expect(hover.isHovered("card:a")).toBe(true);
+	});
+});
+
+
+describe("Pi render context metadata", () => {
+	it("uses outputPad without changing the card content or overflowing", () => {
+		const s = setup({ groupRuns: false });
+		const card = s.row("pad", "echo hi", "hi");
+		const original = card.render(36).map(strip);
+		s.contexts.get("pad")!.outputPad = 2;
+		const padded = card.render(40).map(strip);
+		expect(padded).toEqual(original.map((line) => `  ${line}  `));
+		expect(padded.every((line) => line.length <= 40)).toBe(true);
+		s.contexts.get("pad")!.outputPad = 0;
+		expect(card.render(36).map(strip)).toEqual(original);
+	});
+
+	it("shows recorded final duration, including zero, but not a partial duration", () => {
+		const s = setup({ groupRuns: false });
+		const card = s.row("duration", "echo hi", "hi");
+		const context = s.contexts.get("duration")!;
+		const r = cardRenderers("bash", {
+			config: () => ({ ...DEFAULTS, groupRuns: false }),
+			highlight: (code) => code.split("\n"), languageOf: () => undefined, expandKey: () => "ctrl+o",
+		});
+		context.durationMs = 1250;
+		r.renderResult!({ content: [{ type: "text", text: "hi" }] }, { expanded: false, isPartial: false }, theme, context);
+		expect(card.render(80).map(strip).join("\n")).toContain("Took 1s");
+		context.durationMs = 0;
+		r.renderResult!({ content: [{ type: "text", text: "hi" }] }, { expanded: false, isPartial: false }, theme, context);
+		expect(card.render(80).map(strip).join("\n")).toContain("Took 0ms");
+		r.renderResult!({ content: [{ type: "text", text: "hi" }] }, { expanded: false, isPartial: true }, theme, context);
+		expect(card.render(80).map(strip).join("\n")).not.toContain("Took");
 	});
 });

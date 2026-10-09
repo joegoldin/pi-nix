@@ -14,7 +14,9 @@ completer.
   cap says `… N more lines not shown (expanded view limit)`, so it never reads
   as folded. Built-in tools get cards written for them; others get a generic
   card; tools that ship their own renderer keep it. Modes: on, compact (header
-  and result on one line), off (pi's own rendering).
+  and result on one line), off (pi's own rendering). Cards honour Pi's `outputPad` setting, including
+  grouped runs, and show the recorded `durationMs` as `Took …` on completed
+  results; streaming results never show a final duration.
 - **Tool runs.** Consecutive low-stakes exploration folds into one dim line,
   as Claude Code's does: reads, searches, listings, and shell commands that
   only inspect (`ls`, `cat`, `rg`, `git log`, `jj st`, `sed -n`, `gh pr view`
