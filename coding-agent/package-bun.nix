@@ -120,6 +120,13 @@ let
       runHook postBuild
     '';
 
+    doCheck = true;
+    checkPhase = ''
+      runHook preCheck
+      bun test packages/tui/test/tui-alt-screen.test.ts packages/tui/test/jump-to-last-user.test.ts
+      runHook postCheck
+    '';
+
     installPhase = ''
       runHook preInstall
       ${builtins.readFile ./pack.sh}

@@ -85,10 +85,13 @@
             overlays = [ (bun2nixFor system).overlays.default ];
           };
 
-          src = pkgs.fetchFromGitHub {
-            owner = "earendil-works";
-            repo = "pi";
-            inherit rev hash;
+          src = pkgs.applyPatches {
+            src = pkgs.fetchFromGitHub {
+              owner = "earendil-works";
+              repo = "pi";
+              inherit rev hash;
+            };
+            patches = [ ./coding-agent/jump-to-last-user.patch ];
           };
 
           patch = import ./patch.nix { inherit pkgs; };

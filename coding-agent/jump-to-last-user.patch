@@ -1,0 +1,224 @@
+--- a/packages/coding-agent/src/modes/interactive/tui-renderer.ts
++++ b/packages/coding-agent/src/modes/interactive/tui-renderer.ts
+@@ -30,6 +30,10 @@
+ 			scrollToEndIndicator: () => {
+ 				const shortcut = keyDisplayText("tui.altScreen.bottom");
+ 				const label = ` ↓ Jump to latest message${shortcut ? ` · ${shortcut}` : ""} `;
++				return theme.bg("selectedBg", theme.fg("text", label));
++			},
++			scrollToLastPromptIndicator: (direction) => {
++				const label = ` ${direction < 0 ? "↑" : "↓"} Jump to last user message `;
+ 				return theme.bg("selectedBg", theme.fg("text", label));
+ 			},
+ 			openUrl: openBrowser,
+--- a/packages/tui/src/tui-alt-screen.ts
++++ b/packages/tui/src/tui-alt-screen.ts
+@@ -184,6 +184,7 @@
+ 	 * primary scroll view while that view is scrolled away from its end.
+ 	 */
+ 	scrollToEndIndicator?: () => string;
++	scrollToLastPromptIndicator?: (direction: -1 | 1) => string;
+ 	/** Open an OSC 8 hyperlink activated with a primary-button click. */
+ 	openUrl?: (url: string) => void;
+ 	/** Handle an unmodified secondary-button press for clipboard paste. Currently enabled on Windows only. */
+@@ -227,6 +228,7 @@
+ 	private scrollbarDrag?: ScrollbarDrag;
+ 	private scrollbarHover?: ScrollView;
+ 	private scrollToEndIndicatorRect?: ScrollToEndIndicatorRect;
++	private scrollToLastPromptIndicatorRect?: ScrollToEndIndicatorRect & { targetRow: number };
+ 	private activeSearch?: ActiveSearch;
+ 	private pressedUrl?: string;
+ 	private selectionDragged = false;
+@@ -247,6 +249,7 @@
+ 	private readonly searchCurrentMatchStyle: (text: string) => string;
+ 	private readonly searchNavigationButtonStyle: (text: string, hovered: boolean) => string;
+ 	private readonly scrollToEndIndicator?: () => string;
++	private readonly scrollToLastPromptIndicator?: (direction: -1 | 1) => string;
+ 	private readonly openUrl?: (url: string) => void;
+ 	private readonly onRightClickPaste?: () => void;
+ 	private copyOnSelect: boolean;
+@@ -274,6 +277,7 @@
+ 		this.searchCurrentMatchStyle = options.searchCurrentMatchStyle ?? ((text) => `\x1b[1;7m${text}\x1b[22;27m`);
+ 		this.searchNavigationButtonStyle = options.searchNavigationButtonStyle ?? ((text) => text);
+ 		this.scrollToEndIndicator = options.scrollToEndIndicator;
++		this.scrollToLastPromptIndicator = options.scrollToLastPromptIndicator;
+ 		this.openUrl = options.openUrl;
+ 		this.onRightClickPaste = options.onRightClickPaste;
+ 		this.copyOnSelect = options.copyOnSelect ?? true;
+@@ -1033,6 +1037,20 @@
+ 	}
+ 
+ 	private handleScrollToEndIndicatorMouseEvent(event: SgrMouseEvent): boolean {
++		const prompt = this.scrollToLastPromptIndicatorRect;
++		if (
++			prompt &&
++			!event.release &&
++			(event.button & 32) === 0 &&
++			(event.button & 3) === 0 &&
++			event.y === prompt.row &&
++			event.x >= prompt.column &&
++			event.x < prompt.column + prompt.width
++		) {
++			this.getPrimaryScrollView().scrollTo(prompt.targetRow, { disableFollow: true });
++			this.requestRender();
++			return true;
++		}
+ 		const rect = this.scrollToEndIndicatorRect;
+ 		if (!rect || event.release || (event.button & 32) !== 0 || (event.button & 3) !== 0) return false;
+ 		if (event.y !== rect.row || event.x < rect.column || event.x >= rect.column + rect.width) return false;
+@@ -1661,6 +1679,38 @@
+ 		return result;
+ 	}
+ 
++	private compositeScrollToLastPromptIndicator(screen: string[], layout: LayoutFrame, width: number): string[] {
++		this.scrollToLastPromptIndicatorRect = undefined;
++		const scrollView = layout.primaryScrollView ?? this.implicitScrollView;
++		if (!this.scrollToLastPromptIndicator) return screen;
++		const box = getScrollViewBox(layout, scrollView);
++		const clip = box?.clip;
++		if (!clip || clip.width <= 0 || clip.height <= 1) return screen;
++		const targetRow = box?.scrollContentLines?.findLastIndex((line) => OSC133_PROMPT_START.test(line)) ?? -1;
++		// Use the current layout so resize, branching and session switches cannot leave a stale anchor.
++		if (targetRow < 0 || (targetRow >= scrollView.scrollTop && targetRow < scrollView.scrollTop + clip.height))
++			return screen;
++		const row = clip.y;
++		if (row >= screen.length || isImageLine(screen[row] ?? "")) return screen;
++		const scrollbarColumn = box ? getScrollbarGeometry(box)?.column : undefined;
++		const label = truncateToWidth(
++			this.scrollToLastPromptIndicator(targetRow < scrollView.scrollTop ? -1 : 1),
++			clip.width,
++			"",
++		);
++		const labelWidth = visibleWidth(label);
++		const column = clip.x + Math.floor((clip.width - labelWidth) / 2);
++		const rightEdge = scrollbarColumn ?? clip.x + clip.width;
++		const availableWidth = Math.max(0, rightEdge - column);
++		const text = truncateToWidth(label, availableWidth, "");
++		const textWidth = visibleWidth(text);
++		if (textWidth === 0) return screen;
++		const result = [...screen];
++		result[row] = compositeTuiLine(result[row] ?? "", text, column, textWidth, width);
++		this.scrollToLastPromptIndicatorRect = { row, column, width: textWidth, targetRow };
++		return result;
++	}
++
+ 	private compositeFlashes(screen: string[], width: number, height: number): string[] {
+ 		const flashLines = this.flashes.render(width).slice(-height);
+ 		if (flashLines.length === 0) return screen;
+@@ -1687,6 +1737,7 @@
+ 		let screen = nextLayout.lines.map((line) => line.replace(OSC133_ZONE_PREFIX, ""));
+ 		screen = this.applySearchHighlights(screen, nextLayout);
+ 		screen = this.compositeScrollToEndIndicator(screen, nextLayout, width);
++		screen = this.compositeScrollToLastPromptIndicator(screen, nextLayout, width);
+ 		screen = this.compositeOverlays(screen, width, height);
+ 		if (screen.length > height) screen = screen.slice(screen.length - height);
+ 		screen = this.applySelection(screen, nextLayout);
+--- /dev/null
++++ b/packages/tui/test/jump-to-last-user.test.ts
+@@ -0,0 +1,106 @@
++import assert from "node:assert/strict";
++import { it } from "node:test";
++import { ScrollView } from "../src/components/scroll-view.ts";
++import { Text } from "../src/components/text.ts";
++import { TuiAltScreen } from "../src/tui-alt-screen.ts";
++import { VirtualTerminal } from "./virtual-terminal.ts";
++
++const prompt = "\x1b]133;A\x07";
++const label = " Jump to last user message ";
++
++it("jumps to the most recent user prompt, not the first, without following new output", async () => {
++	const terminal = new VirtualTerminal(60, 6);
++	const tui = new TuiAltScreen(terminal, undefined, undefined, {
++		scrollToLastPromptIndicator: () => label,
++		scrollToEndIndicator: () => " Jump to latest message ",
++	});
++	const lines = [
++		`${prompt}first user`,
++		"old answer",
++		`${prompt}last user`,
++		...Array.from({ length: 20 }, (_, i) => `answer ${i}`),
++	];
++	const text = new Text(lines.join("\n"), 0, 0);
++	const transcript = new ScrollView(text, { follow: "end", primary: true });
++	tui.setLayoutRoot(transcript);
++	tui.start();
++	try {
++		await terminal.waitForRender();
++		assert.ok(terminal.getViewport()[0].includes(label));
++		terminal.sendInput("\x1b[<0;30;1M");
++		terminal.sendInput("\x1b[<0;30;1m");
++		await terminal.waitForRender();
++		assert.equal(transcript.scrollTop, 2);
++		assert.equal(transcript.isFollowingEnd, false);
++		assert.ok(terminal.getViewport()[0].includes("last user"));
++		assert.ok(!terminal.getViewport()[0].includes(label));
++		assert.ok(terminal.getViewport()[5].includes("Jump to latest message"));
++		text.setText([...lines, "more streaming output"].join("\n"));
++		tui.requestRender();
++		await terminal.waitForRender();
++		assert.equal(transcript.scrollTop, 2);
++	} finally {
++		tui.stop();
++	}
++});
++
++it("has no jump control without a prompt and clears stale targets after transcript replacement", async () => {
++	const terminal = new VirtualTerminal(60, 6);
++	const tui = new TuiAltScreen(terminal, undefined, undefined, { scrollToLastPromptIndicator: () => label });
++	const text = new Text(`${prompt}user\n${"answer\n".repeat(20)}`, 0, 0);
++	const transcript = new ScrollView(text, { follow: "end", primary: true });
++	tui.setLayoutRoot(transcript);
++	tui.start();
++	try {
++		await terminal.waitForRender();
++		assert.ok(terminal.getViewport()[0].includes(label));
++		text.setText("new session\nno user messages");
++		tui.requestRender();
++		await terminal.waitForRender();
++		assert.ok(!terminal.getViewport().some((line) => line.includes(label)));
++		terminal.sendInput("\x1b[<0;30;1M");
++		terminal.sendInput("\x1b[<0;30;1m");
++		await terminal.waitForRender();
++		assert.equal(transcript.scrollTop, 0);
++	} finally {
++		tui.stop();
++	}
++});
++
++it("recomputes the direction and clickable label after scrolling and resizing", async () => {
++	const terminal = new VirtualTerminal(60, 6);
++	let direction = 0;
++	const tui = new TuiAltScreen(terminal, undefined, undefined, {
++		scrollToLastPromptIndicator: (value) => {
++			direction = value;
++			return label;
++		},
++	});
++	const text = new Text(
++		[`${prompt}first`, ...Array(10).fill("old output"), `${prompt}latest`, ...Array(20).fill("new output")].join(
++			"\n",
++		),
++		0,
++		0,
++	);
++	const transcript = new ScrollView(text, { follow: "end", primary: true, scrollbar: "always" });
++	tui.setLayoutRoot(transcript);
++	tui.start();
++	try {
++		await terminal.waitForRender();
++		assert.equal(direction, -1);
++		tui.scrollToTop();
++		await terminal.waitForRender();
++		assert.equal(direction, 1);
++		terminal.resize(20, 5);
++		await terminal.waitForRender();
++		assert.ok(terminal.getViewport()[0].includes("Jump to last"));
++		terminal.sendInput("\x1b[<0;10;1M");
++		terminal.sendInput("\x1b[<0;10;1m");
++		await terminal.waitForRender();
++		assert.equal(transcript.scrollTop, 11);
++		assert.ok(terminal.getViewport()[0].includes("latest"));
++	} finally {
++		tui.stop();
++	}
++});
