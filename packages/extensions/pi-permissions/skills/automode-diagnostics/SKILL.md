@@ -38,11 +38,11 @@ For a classifier decision, use the effective configuration and the logged classi
 Only change configuration when the user explicitly requests a correction.
 
 1. Explain the proposed narrow change.
-2. Ask the user to run `/automode off`.
+2. Ask the user to run `/permissions auto off`.
 3. Wait for confirmation.
 4. While auto mode is off, edit only the requested automode configuration and related evidence files.
 5. Validate JSON syntax and the exact diff.
-6. Ask the user to run `/automode reload` and then `/automode on`.
+6. Ask the user to run `/permissions auto reload` and then `/permissions auto on`.
 7. Call `automode_inspect` with `status` and `config` to confirm that auto mode is enabled and the new configuration is active.
 8. Retry an action only when the user requested it and the action is safe.
 
@@ -60,4 +60,4 @@ Report:
 - remaining uncertainty; and
 - whether auto mode is enabled.
 
-If the session ends while auto mode is off, tell the user to run `/automode on`.
+If the session ends while auto mode is off, tell the user to run `/permissions auto on`.

@@ -196,13 +196,13 @@ This setting guides the classifier. It does not create a deterministic tool perm
 
 ## Diagnose a rule that does not match
 
-1. Run `/automode config` or inspect the `config` view of `automode_inspect`.
+1. Run `/permissions auto config` or inspect the `config` view of `automode_inspect`.
 2. Confirm that the expected rule appears in the effective configuration.
-3. Inspect `/automode denials` or the `denials` view to identify the enforcement layer.
+3. Inspect `/permissions auto denials` or the `denials` view to identify the enforcement layer.
 4. If you enabled observability logging, inspect the matching decision entry.
 5. For Bash, identify each executable command, operator, and redirect in the call.
 6. Add only the narrowest missing coverage.
-7. Run `/automode reload` after a configuration change.
+7. Run `/permissions auto reload` after a configuration change.
 
 Parser errors, dynamic command names, dynamic wrapper scripts, and unsupported control structures cannot use `permissions.allow`. These calls continue to the classifier or fail closed.
 

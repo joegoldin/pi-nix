@@ -43,7 +43,7 @@ export interface SessionConfigStore extends ConfigReader {
 }
 
 /**
- * Narrow subset of `ConfigStore` for the `/permission-system` command.
+ * Narrow subset of `ConfigStore` for the `/permissions settings` command.
  *
  * Using an interface rather than the concrete class avoids private-member
  * coupling between the class and test doubles.

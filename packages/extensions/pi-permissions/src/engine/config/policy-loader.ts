@@ -93,7 +93,7 @@ export interface PolicyLoader {
   getConfiguredMcpServerNames(): readonly string[];
   /** Combined mtime stamp for cache invalidation. */
   getCacheStamp(agentName?: string): string;
-  /** Resolved paths for the /permission-system show command. */
+  /** Resolved paths for the /permissions settings show command. */
   getResolvedPolicyPaths(): ResolvedPolicyPaths;
 }
 

@@ -258,7 +258,7 @@ function validateStringArraySetting(
   }
 }
 
-/** Validate config shape and emit human-readable diagnostics for `/automode config`. */
+/** Validate config shape and emit human-readable diagnostics for `/permissions auto config`. */
 export function validateSettingsFile(
   settings: SettingsFile,
   source: string,
@@ -841,7 +841,7 @@ function ignoredSharedAllowDiagnostics(
   });
 }
 
-/** Load config from disk and environment variables, including diagnostics for `/automode config`. Project files require explicit trust. */
+/** Load config from disk and environment variables, including diagnostics for `/permissions auto config`. Project files require explicit trust. */
 export function loadEffectiveConfigWithDiagnostics(
   cwd: string,
   projectTrusted = false,

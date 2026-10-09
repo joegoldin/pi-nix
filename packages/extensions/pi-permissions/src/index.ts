@@ -92,14 +92,14 @@ interface ToolCallEventLike {
 type ToolCallResult = { block?: boolean; reason?: string } | undefined | void;
 type ToolCallHandler = (event: ToolCallEventLike, ctx: ExtensionContext) => ToolCallResult | Promise<ToolCallResult>;
 
-/** The two halves' own commands, which open /permissions on their tab when given no arguments. */
+/** Internal commands captured under /permissions instead of exposed as competing entry points. */
 const MENU_COMMANDS: Record<string, MenuTab> = {
 	automode: "auto",
 	"auto-mode": "auto",
 	"permission-system": "settings",
 };
 
-type CommandHandler = (args: string, ctx: ExtensionCommandContext) => Promise<void> | void;
+type MenuCommand = Parameters<ExtensionAPI["registerCommand"]>[1];
 
 /** An interruption to steer is neither a refusal nor something to approve later. */
 function wasInterruption(reason: string): boolean {
@@ -133,8 +133,7 @@ export default function piPermissions(pi: ExtensionAPI): void {
 			// would be told of a way out it cannot use.
 			return ctx.hasUI && ctx.mode === "tui" ? { ...result, reason: reason + APPROVABLE } : result;
 		};
-	// Late-bound: the commands below are registered before openPermissions exists.
-	let openPermissions: (ctx: ExtensionCommandContext, tab: MenuTab) => Promise<void> = async () => {};
+	const menuCommands = new Map<MenuTab, MenuCommand>();
 	const gated = new Proxy(pi, {
 		get(target, property, receiver) {
 			if (property === "on") {
@@ -142,17 +141,10 @@ export default function piPermissions(pi: ExtensionAPI): void {
 					target.on(event as never, (event === "tool_call" ? gate(handler as ToolCallHandler) : handler) as never);
 			}
 			if (property === "registerCommand") {
-				return (name: string, command: { handler: CommandHandler; description?: string }) => {
+				return (name: string, command: MenuCommand) => {
 					const tab = MENU_COMMANDS[name];
-					if (!tab) return target.registerCommand(name, command as never);
-					// With arguments the command does what it always did; on its own it
-					// opens the one menu, on its tab.
-					return target.registerCommand(name, {
-						...command,
-						description: `${command.description ?? ""} (no arguments: /permissions)`.trim(),
-						handler: (args: string, ctx: ExtensionCommandContext) =>
-							args.trim() || ctx.mode !== "tui" ? command.handler(args, ctx) : openPermissions(ctx, tab),
-					} as never);
+					if (tab) menuCommands.set(tab, command);
+					else target.registerCommand(name, command);
 				};
 			}
 			const value = Reflect.get(target, property, receiver);
@@ -336,7 +328,7 @@ export default function piPermissions(pi: ExtensionAPI): void {
 		});
 	}
 
-	openPermissions = async (ctx, tab) => {
+	async function openPermissions(ctx: ExtensionCommandContext, tab: MenuTab): Promise<void> {
 		let next: MenuTab | undefined = tab;
 		while (next) {
 			const wanted = await showMenu(ctx, next);
@@ -346,15 +338,37 @@ export default function piPermissions(pi: ExtensionAPI): void {
 				next = "auto";
 			}
 		}
-	};
+	}
 
 	pi.registerCommand("permissions", {
 		description: "Permissions in one place: blocked calls, approvals, auto mode and settings",
+		getArgumentCompletions: async (prefix) => {
+			for (const route of ["auto", "settings"] as const) {
+				if (!prefix.startsWith(`${route} `)) continue;
+				const items = await menuCommands.get(route)?.getArgumentCompletions?.(prefix.slice(route.length + 1));
+				return items?.map((item) => ({ ...item, value: `${route} ${item.value}` })) ?? null;
+			}
+			const items = ["auto", "settings", "approve last"]
+				.filter((value) => value.startsWith(prefix))
+				.map((value) => ({ value, label: value }));
+			return items.length ? items : null;
+		},
 		handler: async (args, ctx) => {
+			const [route, ...rest] = args.trim().split(/\s+/);
+			if (route === "auto" || route === "settings") {
+				const subcommand = rest.join(" ");
+				if (!subcommand && ctx.mode === "tui") await openPermissions(ctx, route);
+				else await menuCommands.get(route)!.handler(subcommand, ctx);
+				return;
+			}
 			if (args.trim() === "approve last") {
 				const latest = ledger.open()[0];
 				if (!latest) ctx.ui.notify("Nothing blocked is waiting.", "info");
 				else approve(latest, ctx);
+				return;
+			}
+			if (route) {
+				ctx.ui.notify("Usage: /permissions [auto [command]|settings [command]|approve last]", "info");
 				return;
 			}
 			if (ctx.mode !== "tui") {

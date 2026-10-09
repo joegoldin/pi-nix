@@ -138,7 +138,7 @@ export type PiAutomodeOptions = {
   analyzeBash?: typeof analyzeBash;
   /**
    * pi-permissions: handed this extension's controls once it is set up, so the
-   * /permissions menu can show and change what /automode does.
+   * /permissions menu can show and change what /permissions auto does.
    */
   onControls?: (controls: AutoModeControls) => void;
 };
@@ -161,7 +161,7 @@ export type AutoModeSnapshot = {
 
 export type AutoModeControls = {
   snapshot(ctx: ExtensionContext): AutoModeSnapshot;
-  /** Runs an /automode subcommand: "on", "off", "reload", "reset", "model". */
+  /** Runs a /permissions auto subcommand: "on", "off", "reload", "reset", "model". */
   run(args: string, ctx: ExtensionCommandContext): Promise<void>;
 };
 
@@ -1162,7 +1162,7 @@ export function createPiAutomode(options: PiAutomodeOptions = {}) {
       }
 
       ctx.ui.notify(
-        "Usage: /automode [status|on|off|reload|reset|defaults|config|denials|model [provider/id]]",
+        "Usage: /permissions auto [status|on|off|reload|reset|defaults|config|denials|model [provider/id]]",
         "error",
       );
     }
@@ -1201,7 +1201,7 @@ export function createPiAutomode(options: PiAutomodeOptions = {}) {
     });
 
     pi.registerCommand("auto-mode", {
-      description: "Alias for /automode",
+      description: "Alias for /permissions auto",
       handler: handleAutomodeCommand,
     });
   };

@@ -43,7 +43,7 @@ const COMMAND_ARGUMENTS = [
   },
 ] as const;
 const USAGE_TEXT =
-  "Usage: /permission-system [show|path|reset|help] (or run /permission-system with no args to open settings modal)";
+  "Usage: /permissions settings [show|path|reset|help] (or run /permissions settings with no args to open settings modal)";
 
 function cloneDefaultConfig(): PermissionSystemExtensionConfig {
   return {
@@ -265,7 +265,7 @@ export function registerPermissionSystemCommand(
 
       if (!ctx.hasUI) {
         ctx.ui.notify(
-          "/permission-system requires interactive TUI mode.",
+          "/permissions settings requires interactive TUI mode.",
           "warning",
         );
         return;

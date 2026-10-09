@@ -8,7 +8,7 @@ import {
 import type { SelectItem } from "@earendil-works/pi-tui";
 import { formatModelSpec } from "./model.ts";
 
-/** Interactive model selector shown when `/automode model` is run without arguments. */
+/** Interactive model selector shown when `/permissions auto model` is run without arguments. */
 export function promptForClassifierModel(
   ctx: ExtensionContext,
   current?: string,

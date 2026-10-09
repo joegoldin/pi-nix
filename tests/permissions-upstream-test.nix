@@ -1,8 +1,8 @@
 # The upstream test suites of the two permission engines vendored into
 # pi-permissions: src/engine from @gotgenes/pi-permission-system and src/auto
 # from @czottmann/pi-automode. The suites live under
-# ./permissions-upstream as upstream ships them and run against the vendored
-# source, each under the runner it was written for: vitest for the permission
+# ./permissions-upstream, with command-help assertions adapted to /permissions,
+# and run against the vendored source under the runner each was written for: vitest for the permission
 # system, `node --test` through tsx for auto mode. Neither runs under bun test
 # (module mocks, child processes), which is why they are not in pi-permissions'
 # own check.

@@ -10,11 +10,11 @@ It reads `autoMode` only from Pi-owned configuration sources:
 
 At startup, pi-automode moves a legacy `~/.pi/agent/automode.json` file to the new global path. If both files exist, it uses the new file and reports the conflict. If migration fails, it uses the legacy file for that session and reports the error.
 
-It does not read project configuration until Pi trusts the project. For an untrusted project, it ignores `.pi/automode.local.json` and `.pi/automode.json`. `/automode config` reports each ignored file that exists.
+It does not read project configuration until Pi trusts the project. For an untrusted project, it ignores `.pi/automode.local.json` and `.pi/automode.json`. `/permissions auto config` reports each ignored file that exists.
 
 Shared project `.pi/automode.json` cannot weaken auto mode. For a trusted project, it can add `permissions.deny` and `permissions.ask` rules.
 
-The shared file cannot set `autoMode` or add `permissions.allow` rules. If the file contains `permissions.allow`, `/automode config` reports a diagnostic.
+The shared file cannot set `autoMode` or add `permissions.allow` rules. If the file contains `permissions.allow`, `/permissions auto config` reports a diagnostic.
 
 To disable pi-automode for the current project, create or edit `.pi/automode.local.json`:
 
@@ -132,7 +132,7 @@ Auto mode can write a JSONL observability log for decisions and classifier usage
 
 With logging enabled, persisted-session sidecars also contain ccusage-compatible entries for every classifier response. When `classifierIo` is off, `ccusage pi` still reports a separate `-pi-automode` session. In-memory logs use the same entry shape but live outside the normal Pi session tree.
 
-See [Observability logging](observability-logging.md) for the log file location, entry schema, and the `classifierIo` privacy tradeoff. Run `/automode config` to see the resolved log file path.
+See [Observability logging](observability-logging.md) for the log file location, entry schema, and the `classifierIo` privacy tradeoff. Run `/permissions auto config` to see the resolved log file path.
 
 ## Permission patterns
 
@@ -203,4 +203,4 @@ For example, register an OpenRouter preset in the built-in `openrouter` provider
 }
 ```
 
-Restart Pi (or run `/reload`), then select the model with `/automode model openrouter/@preset/nvidia-nemotron-3-nano-30b-a3b-fast`.
+Restart Pi (or run `/reload`), then select the model with `/permissions auto model openrouter/@preset/nvidia-nemotron-3-nano-30b-a3b-fast`.

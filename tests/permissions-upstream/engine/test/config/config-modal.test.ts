@@ -205,7 +205,7 @@ test("permission-system command handlers manage config summary, persistence, and
 
     await definition!.handler("help", infoCtx.ctx);
     expect(lastNotification(infoCtx.notifications).message).toContain(
-      "Usage: /permission-system",
+      "Usage: /permissions settings",
     );
 
     await definition!.handler("reset", infoCtx.ctx);
@@ -223,13 +223,13 @@ test("permission-system command handlers manage config summary, persistence, and
     await definition!.handler("unknown", infoCtx.ctx);
     expect(lastNotification(infoCtx.notifications).level).toBe("warning");
     expect(lastNotification(infoCtx.notifications).message).toContain(
-      "Usage: /permission-system",
+      "Usage: /permissions settings",
     );
 
     const headlessCtx = createCommandContext(false);
     await definition!.handler("", headlessCtx.ctx);
     expect(lastNotification(headlessCtx.notifications).message).toBe(
-      "/permission-system requires interactive TUI mode.",
+      "/permissions settings requires interactive TUI mode.",
     );
 
     const modalCtx = createCommandContext(true);

@@ -24,7 +24,7 @@ Set `autoMode.log` in a Pi-owned configuration source. These sources include `~/
 
 Fields merge independently across configuration sources. For example, set `enabled` globally and set `classifierIo` for a trusted project.
 
-Shared project `.pi/automode.json` cannot set `log`. The shared file cannot set any `autoMode` field. `/automode config` reports an invalid shape.
+Shared project `.pi/automode.json` cannot set `log`. The shared file cannot set any `autoMode` field. `/permissions auto config` reports an invalid shape.
 
 Pi-automode writes log entries only while auto mode is **enabled**. With auto mode off, no tool calls reach the hook. Thus, pi-automode writes no entries.
 
@@ -49,7 +49,7 @@ Pi in-memory sessions have no session file or session directory. These sessions 
 
 The project directory uses the same `--path-with-dashes--` encoding as normal Pi session directories. The date partition uses UTC.
 
-A custom session manager can supply an absolute `sessionDir` without a session file. In this case, pi-automode continues to use that directory. Run `/automode config` to see the resolved path.
+A custom session manager can supply an absolute `sessionDir` without a session file. In this case, pi-automode continues to use that directory. Run `/permissions auto config` to see the resolved path.
 
 Persisted sessions use one combined file per session. In-memory sessions use one file for each session ID and UTC day.
 

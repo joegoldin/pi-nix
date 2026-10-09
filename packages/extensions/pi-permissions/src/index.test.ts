@@ -19,7 +19,7 @@ function session() {
 	};
 	const tools: string[] = [];
 	const handlers = new Map<string, ((event: unknown, ctx: unknown) => unknown)[]>();
-	const commands = new Map<string, { handler: (args: string, ctx: unknown) => unknown }>();
+	const commands = new Map<string, { handler: (args: string, ctx: unknown) => unknown; getArgumentCompletions?: (prefix: string) => { value: string; label: string }[] | null }>();
 	const sent: { message: { customType: string; content: string }; options: unknown }[] = [];
 	const entries: { type: string; customType: string; data: unknown }[] = [];
 	const api = () =>
@@ -128,7 +128,15 @@ describe("subagents", () => {
 });
 
 describe("one menu", () => {
-	it("opens /permissions from /automode and /permission-system on their own, and keeps their subcommands", async () => {
+	it("completes nested settings commands beneath the single public entry", async () => {
+		const s = session();
+		piPermissions(s.api());
+		const complete = s.commands.get("permissions")!.getArgumentCompletions;
+		expect((await complete?.(""))?.map((item) => item.value)).toEqual(["auto", "settings", "approve last"]);
+		expect(await complete?.("settings sh")).toEqual([expect.objectContaining({ value: "settings show" })]);
+	});
+
+	it("exposes only /permissions, with both menus and their subcommands under it", async () => {
 		const s = session();
 		piPermissions(s.api());
 		const opened: string[][] = [];
@@ -157,14 +165,20 @@ describe("one menu", () => {
 			sessionManager: { getEntries: () => s.entries, getSessionId: () => "s1", getSessionFile: () => undefined, getSessionDir: () => "/tmp", getBranch: () => [] },
 			isProjectTrusted: () => false,
 		};
-		await s.commands.get("automode")!.handler("", ctx);
-		await s.commands.get("permission-system")!.handler("", ctx);
+		expect([...s.commands.keys()]).toEqual(["permissions"]);
+		await s.commands.get("permissions")!.handler("auto", ctx);
+		await s.commands.get("permissions")!.handler("settings", ctx);
 		expect(opened).toHaveLength(2);
 		// Each opens on its own tab.
 		expect(opened[0]!.some((l) => l.includes("Classifier model"))).toBe(true);
 		expect(opened[1]!.some((l) => l.includes("YOLO mode"))).toBe(true);
-		await s.commands.get("automode")!.handler("status", ctx);
+		await s.commands.get("permissions")!.handler("auto status", ctx);
 		expect(opened).toHaveLength(2);
 		expect(notes.some((n) => n.includes("checked actions:"))).toBe(true);
+		await s.commands.get("permissions")!.handler("auto help", ctx);
+		await s.commands.get("permissions")!.handler("settings help", ctx);
+		expect(notes.some((n) => n.includes("Usage: /permissions auto"))).toBe(true);
+		expect(notes.some((n) => n.includes("Usage: /permissions settings"))).toBe(true);
+		expect(notes.join("\n")).not.toMatch(/\/(automode|auto-mode|permission-system)\b/);
 	});
 });

@@ -86,9 +86,10 @@ Shift+Tab, or ←/→, move between them; Esc closes):
   that file when pi starts, so a change here lasts until then.
 
 `/permissions approve last` approves the newest block without the menu.
-`/automode` and `/permission-system` on their own open `/permissions` on
-their tab; with arguments (`/automode off`, `/permission-system show`) they
-do what they always did.
+`/permissions auto` and `/permissions settings` open their respective tabs.
+Subcommands remain available there, for example `/permissions auto status` and
+`/permissions settings show`. The legacy `/automode`, `/auto-mode`, and
+`/permission-system` commands are no longer registered.
 
 The prompts and the menu are drawn as pi-custom draws its dialogs: framed, in
 the editor's place, `❯` on the highlighted row.

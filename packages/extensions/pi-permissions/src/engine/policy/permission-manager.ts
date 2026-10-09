@@ -260,7 +260,7 @@ export class PermissionManager implements ScopedPermissionManager {
 
   /**
    * Return the composed config-layer rules for the given agent scope.
-   * Used by the `/permission-system show` command to display effective rules
+   * Used by the `/permissions settings show` command to display effective rules
    * with their origin annotations.
    * Session rules are not included — they are runtime-only.
    */

@@ -15,7 +15,7 @@ The tool accepts one `action` value.
 | `defaults` | Inspect built-in rule lists. | The built-in environment, allow, protected-path, soft-deny, and hard-deny lists. |
 | `denials` | Find recent rejected actions. | Reverse-chronological timestamps, enforcement kinds, and tool names. |
 
-The tool reads the same in-memory configuration and state that pi-automode enforces. Configuration changes take effect after session start or `/automode reload`.
+The tool reads the same in-memory configuration and state that pi-automode enforces. Configuration changes take effect after session start or `/permissions auto reload`.
 
 ## Enforcement behavior
 
@@ -30,7 +30,7 @@ If a local check blocks the call, pi-automode records it as a blocked action. If
 
 The extension verifies the registered tool source before it applies the bypass. A tool from another extension with the same name does not receive this exemption.
 
-The tool cannot enable or disable auto mode, reload configuration, reset state, select a model, or edit configuration. The user must run the related `/automode` command directly.
+The tool cannot enable or disable auto mode, reload configuration, reset state, select a model, or edit configuration. The user must run the related `/permissions auto` command directly.
 
 ## Model-visible data
 
@@ -87,9 +87,9 @@ Classifier rules cannot override permission or deterministic denials.
 3. Read a matching decision entry before you propose a rule change.
 4. Identify the enforcement layer before you change a rule.
 5. If a configuration change is necessary, explain the change.
-6. Ask the user to run `/automode off`.
+6. Ask the user to run `/permissions auto off`.
 7. Make only the requested configuration change during that maintenance window.
-8. Ask the user to run `/automode reload` and `/automode on`.
+8. Ask the user to run `/permissions auto reload` and `/permissions auto on`.
 9. Use `automode_inspect` to make sure that auto mode is enabled.
 10. Retry only an action that you know is safe.
 

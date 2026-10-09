@@ -85,7 +85,7 @@ flowchart TD
 
 ## Configuration loading
 
-Pi-automode loads global and inline configuration during extension initialization. It loads project configuration on `session_start`. `/automode reload` reloads the effective configuration.
+Pi-automode loads global and inline configuration during extension initialization. It loads project configuration on `session_start`. `/permissions auto reload` reloads the effective configuration.
 
 The effective configuration combines these sources:
 
@@ -94,11 +94,11 @@ The effective configuration combines these sources:
 - `PI_AUTOMODE_SETTINGS_JSON`
 - shared `.pi/automode.json` for trusted projects, but only for `permissions.deny` and `permissions.ask`
 
-Before `session_start`, pi-automode loads only global and inline configuration. If `ctx.isProjectTrusted()` returns `true`, it reads project configuration during `session_start` and `/automode reload`.
+Before `session_start`, pi-automode loads only global and inline configuration. If `ctx.isProjectTrusted()` returns `true`, it reads project configuration during `session_start` and `/permissions auto reload`.
 
-For an untrusted project, pi-automode ignores both project files. `/automode config` reports each ignored file that exists.
+For an untrusted project, pi-automode ignores both project files. `/permissions auto config` reports each ignored file that exists.
 
-Shared `.pi/automode.json` cannot change `autoMode` rules or add `permissions.allow`. A checked-in file must not reduce classifier coverage. If shared configuration contains `permissions.allow`, `/automode config` reports a diagnostic.
+Shared `.pi/automode.json` cannot change `autoMode` rules or add `permissions.allow`. A checked-in file must not reduce classifier coverage. If shared configuration contains `permissions.allow`, `/permissions auto config` reports a diagnostic.
 
 Deny and ask patterns use this source order: global, shared project, project-local, inline. Allow patterns use this source order: global, project-local, inline.
 
@@ -177,7 +177,7 @@ A configured pattern can contain at most 4,096 UTF-16 code units. An input can c
 
 The default list is empty. Thus, behavior does not change without explicit user configuration. Decision logs use `kind: permissions.allow`.
 
-`/automode status` reports the rule count. `/automode config` shows the resolved patterns.
+`/permissions auto status` reports the rule count. `/permissions auto config` shows the resolved patterns.
 
 [ADR-001](adr/ADR-001-permission-precedence-and-trust-boundaries.md) records the precedence and trust-boundary rationale.
 
@@ -327,7 +327,7 @@ Pi-automode selects the classifier model in this order:
 1. `autoMode.classifierModel` from configuration
 2. the current Pi session model.
 
-`/automode model provider/model-id` and the interactive model picker save `autoMode.classifierModel` to `~/.pi/agent/extensions/pi-automode/config.json`. Project-local `.pi/automode.local.json` can still override that global choice.
+`/permissions auto model provider/model-id` and the interactive model picker save `autoMode.classifierModel` to `~/.pi/agent/extensions/pi-automode/config.json`. Project-local `.pi/automode.local.json` can still override that global choice.
 
 `autoMode.classifierReasoningLevel` can request `low`, `medium`, `high`, `xhigh`, or `max` reasoning for both stages.
 
@@ -426,25 +426,25 @@ Pi sends tool output to the model. Therefore, the `status` and `denials` views o
 
 The `config` view contains effective rule text. Do not store secrets in automode rules.
 
-No state-changing command has a tool equivalent. The user must run `/automode on`, `/automode off`, `/automode reload`, `/automode reset`, and `/automode model` directly. See [Agent diagnostics](diagnostics.md) for the inspection contract, privacy limits, and diagnosis workflow.
+No state-changing command has a tool equivalent. The user must run `/permissions auto on`, `/permissions auto off`, `/permissions auto reload`, `/permissions auto reset`, and `/permissions auto model` directly. See [Agent diagnostics](diagnostics.md) for the inspection contract, privacy limits, and diagnosis workflow.
 
 ## Command interactions
 
 The classifier flow can be inspected or changed through slash commands:
 
 ```text
-/automode status
-/automode on
-/automode off
-/automode reload
-/automode reset
-/automode defaults
-/automode config
-/automode denials
-/automode model
-/automode model provider/model-id
+/permissions auto status
+/permissions auto on
+/permissions auto off
+/permissions auto reload
+/permissions auto reset
+/permissions auto defaults
+/permissions auto config
+/permissions auto denials
+/permissions auto model
+/permissions auto model provider/model-id
 ```
 
-`/auto-mode` is an alias.
+`/permissions auto` opens the Auto mode tab; the old `/automode` and `/auto-mode` commands are not registered.
 
-`/automode off` disables the whole flow for the current session. `/automode on` re-enables it. `/automode model` saves the classifier model to `~/.pi/agent/extensions/pi-automode/config.json`.
+`/permissions auto off` disables the whole flow for the current session. `/permissions auto on` re-enables it. `/permissions auto model` saves the classifier model to `~/.pi/agent/extensions/pi-automode/config.json`.
