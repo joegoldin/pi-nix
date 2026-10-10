@@ -6,8 +6,8 @@
  				const label = ` ↓ Jump to latest message${shortcut ? ` · ${shortcut}` : ""} `;
 +				return theme.bg("selectedBg", theme.fg("text", label));
 +			},
-+			scrollToLastPromptIndicator: (direction) => {
-+				const label = ` ${direction < 0 ? "↑" : "↓"} Jump to last user message `;
++			scrollToLastPromptIndicator: () => {
++				const label = " ↑ Jump to previous user message ";
  				return theme.bg("selectedBg", theme.fg("text", label));
  			},
  			openUrl: openBrowser,
@@ -66,7 +66,7 @@
  		const rect = this.scrollToEndIndicatorRect;
  		if (!rect || event.release || (event.button & 32) !== 0 || (event.button & 3) !== 0) return false;
  		if (event.y !== rect.row || event.x < rect.column || event.x >= rect.column + rect.width) return false;
-@@ -1661,6 +1679,38 @@
+@@ -1661,6 +1679,40 @@
  		return result;
  	}
  
@@ -77,15 +77,17 @@
 +		const box = getScrollViewBox(layout, scrollView);
 +		const clip = box?.clip;
 +		if (!clip || clip.width <= 0 || clip.height <= 1) return screen;
-+		const targetRow = box?.scrollContentLines?.findLastIndex((line) => OSC133_PROMPT_START.test(line)) ?? -1;
++		const targetRow =
++			box?.scrollContentLines?.findLastIndex(
++				(line, row) => row <= scrollView.scrollTop && OSC133_PROMPT_START.test(line),
++			) ?? -1;
 +		// Use the current layout so resize, branching and session switches cannot leave a stale anchor.
-+		if (targetRow < 0 || (targetRow >= scrollView.scrollTop && targetRow < scrollView.scrollTop + clip.height))
-+			return screen;
++		if (targetRow < 0 || targetRow === scrollView.scrollTop) return screen;
 +		const row = clip.y;
 +		if (row >= screen.length || isImageLine(screen[row] ?? "")) return screen;
 +		const scrollbarColumn = box ? getScrollbarGeometry(box)?.column : undefined;
 +		const label = truncateToWidth(
-+			this.scrollToLastPromptIndicator(targetRow < scrollView.scrollTop ? -1 : 1),
++			this.scrollToLastPromptIndicator(-1),
 +			clip.width,
 +			"",
 +		);
@@ -105,7 +107,7 @@
  	private compositeFlashes(screen: string[], width: number, height: number): string[] {
  		const flashLines = this.flashes.render(width).slice(-height);
  		if (flashLines.length === 0) return screen;
-@@ -1687,6 +1737,7 @@
+@@ -1687,6 +1739,7 @@
  		let screen = nextLayout.lines.map((line) => line.replace(OSC133_ZONE_PREFIX, ""));
  		screen = this.applySearchHighlights(screen, nextLayout);
  		screen = this.compositeScrollToEndIndicator(screen, nextLayout, width);
@@ -115,7 +117,7 @@
  		screen = this.applySelection(screen, nextLayout);
 --- /dev/null
 +++ b/packages/tui/test/jump-to-last-user.test.ts
-@@ -0,0 +1,106 @@
+@@ -0,0 +1,120 @@
 +import assert from "node:assert/strict";
 +import { it } from "node:test";
 +import { ScrollView } from "../src/components/scroll-view.ts";
@@ -185,39 +187,53 @@
 +	}
 +});
 +
-+it("recomputes the direction and clickable label after scrolling and resizing", async () => {
++it("walks backward through user prompts when scrolling above the newest, including after resize", async () => {
 +	const terminal = new VirtualTerminal(60, 6);
-+	let direction = 0;
 +	const tui = new TuiAltScreen(terminal, undefined, undefined, {
-+		scrollToLastPromptIndicator: (value) => {
-+			direction = value;
++		scrollToLastPromptIndicator: (direction) => {
++			assert.equal(direction, -1);
 +			return label;
 +		},
 +	});
-+	const text = new Text(
-+		[`${prompt}first`, ...Array(10).fill("old output"), `${prompt}latest`, ...Array(20).fill("new output")].join(
-+			"\n",
-+		),
-+		0,
-+		0,
-+	);
-+	const transcript = new ScrollView(text, { follow: "end", primary: true, scrollbar: "always" });
++	const lines = [
++		`${prompt}first`, ...Array(10).fill("first answer"),
++		`${prompt}middle`, ...Array(10).fill("middle answer"),
++		`${prompt}latest`, ...Array(20).fill("latest answer"),
++	];
++	const transcript = new ScrollView(new Text(lines.join("\n"), 0, 0), {
++		follow: "end", primary: true, scrollbar: "always",
++	});
 +	tui.setLayoutRoot(transcript);
 +	tui.start();
++	const click = async (column: number) => {
++		terminal.sendInput(`\x1b[<0;${column};1M`);
++		terminal.sendInput(`\x1b[<0;${column};1m`);
++		await terminal.waitForRender();
++	};
 +	try {
 +		await terminal.waitForRender();
-+		assert.equal(direction, -1);
-+		tui.scrollToTop();
++		await click(30);
++		assert.equal(transcript.scrollTop, 22);
++		assert.ok(terminal.getViewport()[0].includes("latest"));
++		// The newest prompt is still visible below the top, but the jump now leads backward.
++		transcript.scrollTo(21, { disableFollow: true });
++		tui.requestRender();
 +		await terminal.waitForRender();
-+		assert.equal(direction, 1);
++		assert.ok(terminal.getViewport()[0].includes(label));
++		await click(30);
++		assert.equal(transcript.scrollTop, 11);
++		assert.ok(terminal.getViewport()[0].includes("middle"));
++		transcript.scrollTo(10, { disableFollow: true });
++		tui.requestRender();
++		await terminal.waitForRender();
 +		terminal.resize(20, 5);
 +		await terminal.waitForRender();
 +		assert.ok(terminal.getViewport()[0].includes("Jump to last"));
-+		terminal.sendInput("\x1b[<0;10;1M");
-+		terminal.sendInput("\x1b[<0;10;1m");
-+		await terminal.waitForRender();
-+		assert.equal(transcript.scrollTop, 11);
-+		assert.ok(terminal.getViewport()[0].includes("latest"));
++		await click(10);
++		assert.equal(transcript.scrollTop, 0);
++		assert.equal(transcript.isFollowingEnd, false);
++		assert.ok(terminal.getViewport()[0].includes("first"));
++		assert.ok(!terminal.getViewport().some((line) => line.includes("Jump to last")));
 +	} finally {
 +		tui.stop();
 +	}
