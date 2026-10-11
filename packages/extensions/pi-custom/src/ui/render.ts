@@ -54,6 +54,7 @@ interface RowRecord {
 export interface RenderContextLike {
 	durationMs?: number;
 	outputPad?: number;
+	lastComponent?: unknown;
 	args: unknown;
 	toolCallId: string;
 	state: { piUi?: RowRecord };
@@ -144,6 +145,7 @@ class LiveCard {
 	private run: ToolRun | undefined;
 	/** Whether the card, as last drawn, has anything more to show open. */
 	private opens = true;
+	private cached: { key: unknown[]; lines: string[] } | undefined;
 
 	constructor(
 		private toolName: string,
@@ -152,8 +154,15 @@ class LiveCard {
 		private deps: RendererDeps,
 	) {}
 
-	private get repaint(): () => void {
-		return () => this.context.invalidate?.();
+	private repaint = (): void => {
+		this.context.invalidate?.();
+	};
+
+	update(context: RenderContextLike, theme: UiTheme): void {
+		this.context = context;
+		this.theme = theme;
+		// Pi calls the renderer on argument/result updates, including in-place streaming mutations.
+		this.invalidate();
 	}
 
 	private runs(config: UiConfig): RunsDeps | undefined {
@@ -163,20 +172,29 @@ class LiveCard {
 	render(width: number): string[] {
 		// Self-rendered cards own their padding; Pi pads only its default shell.
 		const pad = Math.min(this.context.outputPad ?? 0, Math.floor(Math.max(0, width - 1) / 2));
-		const margin = " ".repeat(pad);
-		return this.renderRows(width - pad * 2).map((line) => `${margin}${line}${margin}`);
-	}
-
-	private renderRows(width: number): string[] {
 		const config = this.deps.config();
-		const w = Math.max(1, width);
 		const runs = this.runs(config);
 		if (this.context.invalidate) this.deps.noteRepaint?.(this.repaint);
 		const plan = runs
 			? planRow(runs.model, this.context.toolCallId, this.toolName, (run) => runs.groups.isShown(run, runs.toolsExpanded()))
 			: STANDALONE;
-		const backgrounds = backgroundsFor(this.theme);
+		const key = [
+			width, pad, this.context.args, this.context.cwd, this.context.expanded, this.context.state.piUi,
+			...Object.values(config), this.deps.expandKey(), this.deps.priorContent?.(this.context.toolCallId),
+			plan.header, plan.header && runs?.model.revisionOf(plan.header), plan.live, plan.card, plan.inPanel, plan.thinking,
+			this.deps.hover?.isHovered(`card:${this.context.toolCallId}`),
+			plan.header && this.deps.hover?.isHovered(`run:${plan.header.id}`),
+		];
+		const cached = this.cached;
+		if (cached && key.length === cached.key.length && key.every((value, i) => value === cached.key[i])) return cached.lines;
+		const margin = " ".repeat(pad);
+		const lines = this.renderRows(Math.max(1, width - pad * 2), config, plan).map((line) => `${margin}${line}${margin}`);
+		this.cached = { key, lines };
+		return lines;
+	}
 
+	private renderRows(w: number, config: UiConfig, plan: RowPlan): string[] {
+		const backgrounds = backgroundsFor(this.theme);
 		const rows: string[] = [];
 		this.run = plan.header;
 		if (plan.header) {
@@ -281,7 +299,10 @@ class LiveCard {
 		return undefined;
 	}
 
-	invalidate(): void {}
+	invalidate(): void {
+		this.cached = undefined;
+		backgroundCache = undefined;
+	}
 }
 
 export interface ToolRenderersLike {
@@ -293,7 +314,13 @@ export interface ToolRenderersLike {
 export function cardRenderers(toolName: string, deps: RendererDeps): ToolRenderersLike {
 	return {
 		renderShell: "self",
-		renderCall: (_args, theme, context: RenderContextLike) => new LiveCard(toolName, context, theme, deps),
+		renderCall: (_args, theme, context: RenderContextLike) => {
+			if (context.lastComponent instanceof LiveCard) {
+				context.lastComponent.update(context, theme);
+				return context.lastComponent;
+			}
+			return new LiveCard(toolName, context, theme, deps);
+		},
 		renderResult: (result, options: { expanded: boolean; isPartial: boolean }, _theme, context: RenderContextLike) => {
 			context.state.piUi = {
 				durationMs: context.durationMs,

@@ -94,6 +94,7 @@ function argsOf(value: unknown): Record<string, unknown> {
 
 export class RunModel {
 	private byCall = new Map<string, ToolRun>();
+	private revisions = new WeakMap<ToolRun, number>();
 	/** Calls seen that join no run: their cards stand on their own. */
 	private standalone = new Set<string>();
 	/** The run the next exploratory call joins; undefined after a break. */
@@ -171,6 +172,7 @@ export class RunModel {
 		});
 		this.current.thinkingMs += this.pendingMs;
 		this.current.thinkingUnknown ||= this.pendingUnknown;
+		this.changed(this.current);
 		this.resetThinking();
 		this.byCall.set(part.id, this.current);
 	}
@@ -187,14 +189,24 @@ export class RunModel {
 	}
 
 	setFailed(toolCallId: string, failed: boolean): void {
-		const call = this.callOf(toolCallId);
-		if (call) call.failed = failed;
+		const run = this.byCall.get(toolCallId);
+		if (!run) return;
+		const call = run.calls.find((c) => c.id === toolCallId);
+		if (call && call.failed !== failed) {
+			call.failed = failed;
+			this.changed(run);
+		}
 	}
 
 	/** A call began executing, with the arguments it runs with. */
 	started(toolCallId: string, args: unknown): void {
-		const call = this.callOf(toolCallId);
-		if (call) call.args = argsOf(args);
+		const run = this.byCall.get(toolCallId);
+		if (!run) return;
+		const call = run.calls.find((c) => c.id === toolCallId);
+		if (call) {
+			call.args = argsOf(args);
+			this.changed(run);
+		}
 	}
 
 	breakRun(): void {
@@ -214,6 +226,11 @@ export class RunModel {
 
 	runOf(toolCallId: string): ToolRun | undefined {
 		return this.byCall.get(toolCallId);
+	}
+
+	/** A run mutates in place; renderers use its revision instead of hashing its content. */
+	revisionOf(run: ToolRun): number {
+		return this.revisions.get(run) ?? 0;
 	}
 
 	/** Still being added to: the agent is working and nothing has followed the run's last call. */
@@ -254,8 +271,8 @@ export class RunModel {
 		return hidden;
 	}
 
-	private callOf(toolCallId: string): RunCall | undefined {
-		return this.byCall.get(toolCallId)?.calls.find((c) => c.id === toolCallId);
+	private changed(run: ToolRun): void {
+		this.revisions.set(run, this.revisionOf(run) + 1);
 	}
 
 	private resetThinking(): void {

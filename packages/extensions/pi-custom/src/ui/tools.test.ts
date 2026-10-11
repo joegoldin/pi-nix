@@ -108,6 +108,17 @@ describe("bash", () => {
 });
 
 describe("edit", () => {
+	it("reuses a width-dependent diff while measuring folded and expanded layouts", () => {
+		const input = done("edit", { path: "a.ts" }, "");
+		input.result = { details: { diff: "-1 old\n+1 new\n+2 more" } };
+		const body = buildCard(input, deps).body as (width: number) => string[];
+		const wide = body(140);
+		expect(body(140)).toBe(wide);
+		const narrow = body(30);
+		expect(narrow).not.toEqual(wide);
+		expect(body(30)).toBe(narrow);
+	});
+
 	it("counts the change and draws the diff at the card's width", () => {
 		const input = done("edit", { path: "/repo/a.ts" }, "Successfully replaced");
 		input.result = { ...input.result, details: { diff: "-1 old\n+1 new\n+2 more" } };

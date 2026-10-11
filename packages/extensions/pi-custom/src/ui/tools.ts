@@ -199,7 +199,7 @@ function bashCard(input: CardInput, deps: CardDeps): CardModel {
 }
 
 function editCard(input: CardInput, deps: CardDeps): CardModel {
-	const { theme, config } = deps;
+	const { theme } = deps;
 	const path = str(input.args.path) ?? "";
 	const model: CardModel = { title: "Update", target: displayPath(path, input.cwd), state: stateOf(input) };
 	if (model.state === "pending") return model;
@@ -216,12 +216,23 @@ function editCard(input: CardInput, deps: CardDeps): CardModel {
 	return {
 		...model,
 		summary,
-		body: (width) => renderDiffRows(rows, config.diffLayout, config.diffSplitMinWidth, width, theme),
+		body: diffBody(rows, deps),
+	};
+}
+
+function diffBody(rows: ReturnType<typeof parseDiff>, deps: CardDeps): (width: number) => string[] {
+	let cached: { width: number; lines: string[] } | undefined;
+	return (width) => {
+		// A card measures both folded and open before painting; all three use the same body width.
+		if (cached?.width !== width) {
+			cached = { width, lines: renderDiffRows(rows, deps.config.diffLayout, deps.config.diffSplitMinWidth, width, deps.theme) };
+		}
+		return cached.lines;
 	};
 }
 
 function writeCard(input: CardInput, deps: CardDeps): CardModel {
-	const { theme, config } = deps;
+	const { theme } = deps;
 	const path = str(input.args.path) ?? "";
 	const content = str(input.args.content) ?? "";
 	const model: CardModel = { title: "Write", target: displayPath(path, input.cwd), state: stateOf(input) };
@@ -238,7 +249,7 @@ function writeCard(input: CardInput, deps: CardDeps): CardModel {
 				"toolDiffRemoved",
 				plural(removed, "removal"),
 			)}`,
-			body: (width) => renderDiffRows(rows, config.diffLayout, config.diffSplitMinWidth, width, theme),
+			body: diffBody(rows, deps),
 		};
 	}
 	// A new file (or one whose old content is unknown) is shown as Claude Code
