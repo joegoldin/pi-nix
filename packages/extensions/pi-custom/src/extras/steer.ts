@@ -1,21 +1,11 @@
-// Esc with messages queued: interrupt and send them now.
+// Ctrl+Enter with messages queued: interrupt and send them now.
 //
-// pi's Esc during a run aborts it and moves every queued message back into the
-// editor, joined with a blank line ahead of whatever draft was there, and then
-// waits for you to press Enter. Here the queued part is sent as soon as the
-// abort settles, and the draft stays in the editor: queued messages become an
-// interruption with a steer, which is what typing them during the run meant.
+// Interactive pi's extension abort restores the queue ahead of the editor draft.
+// Once the run settles, send only that restored prefix and keep the draft.
+// Escape remains pi's normal abort and cancels a pending send-now request.
 //
-// pi gives extensions no read of its queue, so this works from what pi's own
-// Esc leaves behind. It acts only when that is unmistakable: the run ended
-// aborted, and the editor holds exactly the restored queue in front of the
-// draft that was there when Esc was pressed. Anything else leaves the editor
-// as pi left it.
-//
-// For as long as that Esc's abort is settling, globalThis[STEERING] is true, so
-// auto mode (pi-nix's pi-automode-interrupt.patch) can tell an interruption to
-// give guidance from a plain Esc, which cancels: a check it was making on the
-// call is not recorded or reported as a denial.
+// While this abort settles, STEERING distinguishes guidance from cancellation
+// for auto mode's existing interruption handling.
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { matchesKey } from "@earendil-works/pi-tui";
@@ -35,53 +25,48 @@ export function restoredQueue(after: string, draft: string): string | undefined 
 	return queued.trim() ? queued : undefined;
 }
 
-interface MessageLike {
-	role?: string;
-	stopReason?: string;
-	errorMessage?: string;
-}
-
-/** pi records an Esc abort either as stopReason "aborted" or as an error saying so. */
-export function wasAborted(last: MessageLike | undefined): boolean {
-	return last?.stopReason === "aborted" || (last?.stopReason === "error" && /\baborted\b/i.test(last.errorMessage ?? ""));
-}
-
 export function registerSteerNow(pi: ExtensionAPI): void {
 	let draft: string | undefined;
-	let aborted = false;
+	let restored: string | undefined;
 	let unsubscribe: (() => void) | undefined;
+
+	function reset(): void {
+		draft = undefined;
+		restored = undefined;
+		steering(false);
+	}
+
+	pi.registerShortcut("ctrl+enter", {
+		description: "Interrupt and send queued messages now",
+		handler: (ctx) => {
+			if (!ctx.hasUI || ctx.isIdle() || !ctx.hasPendingMessages() || draft !== undefined) return;
+			draft = ctx.ui.getEditorText();
+			steering(true);
+			ctx.abort();
+			restored = ctx.ui.getEditorText();
+		},
+	});
 
 	pi.on("session_start", (_event, ctx) => {
 		unsubscribe?.();
 		unsubscribe = undefined;
-		draft = undefined;
-		steering(false);
+		reset();
 		if (!ctx.hasUI || typeof ctx.ui.onTerminalInput !== "function") return;
-		// Observes, never consumes: pi's own Esc still does the aborting.
 		unsubscribe = ctx.ui.onTerminalInput((data) => {
-			if (matchesKey(data, "escape") && !ctx.isIdle() && ctx.hasPendingMessages()) {
-				draft = ctx.ui.getEditorText();
-				aborted = false;
-				steering(true);
-			}
+			if (matchesKey(data, "escape")) reset();
 			return undefined;
 		});
 	});
 
-	pi.on("agent_end", (event) => {
-		if (draft === undefined) return;
-		const last = [...(event.messages as MessageLike[])].reverse().find((m) => m.role === "assistant");
-		aborted = wasAborted(last);
-	});
-
 	pi.on("agent_settled", (_event, ctx) => {
 		const before = draft;
-		const wasAborted = aborted;
-		draft = undefined;
-		aborted = false;
-		steering(false);
-		if (before === undefined || !wasAborted) return;
-		const queued = restoredQueue(ctx.ui.getEditorText(), before);
+		const after = restored;
+		reset();
+		// Aborting a tool does not necessarily produce an "aborted" assistant message.
+		if (before === undefined || after === undefined) return;
+		// Do not accidentally submit typing added while the abort was settling.
+		if (ctx.ui.getEditorText() !== after) return;
+		const queued = restoredQueue(after, before);
 		if (queued === undefined) return;
 		ctx.ui.setEditorText(before);
 		pi.sendUserMessage(queued);
@@ -90,7 +75,6 @@ export function registerSteerNow(pi: ExtensionAPI): void {
 	pi.on("session_shutdown", () => {
 		unsubscribe?.();
 		unsubscribe = undefined;
-		draft = undefined;
-		steering(false);
+		reset();
 	});
 }
