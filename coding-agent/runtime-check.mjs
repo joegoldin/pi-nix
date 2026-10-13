@@ -48,7 +48,6 @@ const { CodemodeSandbox } = await import(pathToFileURL(join(modules, "@earendil-
 const result = await new CodemodeSandbox().execute("return 6 * 7;");
 assert.equal(result.ok, true, JSON.stringify(result));
 assert.equal(result.value, 42);
-require("esbuild").transformSync("const value: number = 1", { loader: "ts" });
 const photon = require("@silvia-odwyer/photon-node");
 const image = new photon.PhotonImage(new Uint8Array(100 * 100 * 4).fill(255), 100, 100);
 const png = image.get_bytes();
