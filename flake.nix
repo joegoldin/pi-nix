@@ -91,7 +91,10 @@
               repo = "pi";
               inherit rev hash;
             };
-            patches = [ ./coding-agent/jump-to-last-user.patch ];
+            patches = [
+              ./coding-agent/jump-to-last-user.patch
+              ./coding-agent/herdr-osc52.patch
+            ];
           };
 
           patch = import ./patch.nix { inherit pkgs; };
