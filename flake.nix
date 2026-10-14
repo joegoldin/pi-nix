@@ -93,7 +93,6 @@
             };
             patches = [
               ./coding-agent/jump-to-last-user.patch
-              ./coding-agent/herdr-osc52.patch
             ];
           };
 

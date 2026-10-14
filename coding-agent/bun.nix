@@ -146,6 +146,10 @@
     url = "https://registry.npmjs.org/@biomejs/cli-win32-x64/-/cli-win32-x64-2.3.5.tgz";
     hash = "sha512-nUmR8gb6yvrKhtRgzwo/gDimPwnO5a4sCydf8ZS2kHIJhEmSmk+STsusr1LHTuM//wXppBawvSQi2xFXJCdgKQ==";
   };
+  "@biomejs/wasm-nodejs@2.3.5" = fetchurl {
+    url = "https://registry.npmjs.org/@biomejs/wasm-nodejs/-/wasm-nodejs-2.3.5.tgz";
+    hash = "sha512-oEryO1M/vq0iUPxgDMPIJIqGmcLcwn/en9DYLBAaBMSzm1pu0ArnJ3nWpBUjoh977oelyZHKILzNiu0dCNCi0g==";
+  };
   "@cto.af/wtf8@0.0.5" = fetchurl {
     url = "https://registry.npmjs.org/@cto.af/wtf8/-/wtf8-0.0.5.tgz";
     hash = "sha512-LfUFi+Vv4eDzj+XAtR89e3wwjXA/NZjUSwU5NhwbBrLecxPaBYFy3exCuc1j+D4UZeOVdqlsl8G7LmOt18V0tg==";
@@ -165,15 +169,12 @@
   };
   "@earendil-works/pi-agent-core" = workspaceSubdir "packages/agent";
   "@earendil-works/pi-ai" = workspaceSubdir "packages/ai";
-  "@earendil-works/pi-client" = workspaceSubdir "packages/client";
   "@earendil-works/pi-codemode" = workspaceSubdir "packages/codemode";
   "@earendil-works/pi-coding-agent" = workspaceSubdir "packages/coding-agent";
   "@earendil-works/pi-durable" = workspaceSubdir "packages/durable";
   "@earendil-works/pi-env" = workspaceSubdir "packages/env";
   "@earendil-works/pi-evals" = workspaceSubdir "packages/evals";
   "@earendil-works/pi-mcp" = workspaceSubdir "packages/mcp";
-  "@earendil-works/pi-protocol" = workspaceSubdir "packages/protocol";
-  "@earendil-works/pi-server" = workspaceSubdir "packages/server";
   "@earendil-works/pi-telemetry" = workspaceSubdir "packages/telemetry";
   "@earendil-works/pi-tui" = workspaceSubdir "packages/tui";
   "@esbuild/aix-ppc64@0.28.2" = fetchurl {
@@ -400,6 +401,10 @@
     url = "https://registry.npmjs.org/@silvia-odwyer/photon-node/-/photon-node-0.3.4.tgz";
     hash = "sha512-bnly4BKB3KDTFxrUIcgCLbaeVVS8lrAkri1pEzskpmxu9MdfGQTy8b8EgcD83ywD3RPMsIulY8xJH5Awa+t9fA==";
   };
+  "@silvia-odwyer/photon@0.3.3" = fetchurl {
+    url = "https://registry.npmjs.org/@silvia-odwyer/photon/-/photon-0.3.3.tgz";
+    hash = "sha512-8BhUjEch4slwRe8uXnaA4vcA5uiiOTT90UMsxulOj2gN98X1p0q9Z4Ysk4DkD05uNgbR9XoSqtZ37w+33w4QKQ==";
+  };
   "@smithy/core@3.34.1" = fetchurl {
     url = "https://registry.npmjs.org/@smithy/core/-/core-3.34.1.tgz";
     hash = "sha512-dLcOUxz8YCv1RZUMKq6GbyUf95pLbrqh34bPvpCZ1+CByFF31BEAFewZjsGCnVsZTKdThNENfGyAgk2TJqVwSw==";
@@ -483,6 +488,10 @@
   "@types/semver@7.7.1" = fetchurl {
     url = "https://registry.npmjs.org/@types/semver/-/semver-7.7.1.tgz";
     hash = "sha512-FmgJfu+MOcQ370SD0ev7EI8TlCAfKYU+B4m5T3yXc1CiRN94g/SZPtsCkk506aUDtlMnFZvasDwHHUcZUEaYuA==";
+  };
+  "@types/ws@8.18.2" = fetchurl {
+    url = "https://registry.npmjs.org/@types/ws/-/ws-8.18.2.tgz";
+    hash = "sha512-67MQl+fpWKVTT1NYdnmo3U4sc/xPo/zQBncVnI74qmQa0z/b+1g6iYqNmGCPbxO+zz2aklb08a0oHfegiVd0/w==";
   };
   "@typescript/typescript-aix-ppc64@7.0.2" = fetchurl {
     url = "https://registry.npmjs.org/@typescript/typescript-aix-ppc64/-/typescript-aix-ppc64-7.0.2.tgz";
@@ -1172,10 +1181,8 @@
     url = "https://registry.npmjs.org/pathe/-/pathe-2.0.3.tgz";
     hash = "sha512-WUjGcAqP1gQacoQe+OBJsFA7Ld4DyXuUIjZ5cc75cLHvJ7dtNsTugphxIADwspS+AraAUePCKrSVtPLFj/F88w==";
   };
-  "pi-extension-custom-provider-anthropic" =
-    workspaceSubdir "packages/coding-agent/examples/extensions/custom-provider-anthropic";
-  "pi-extension-custom-provider-gitlab-duo" =
-    workspaceSubdir "packages/coding-agent/examples/extensions/custom-provider-gitlab-duo";
+  "pi-extension-custom-provider-anthropic" = workspaceSubdir "packages/coding-agent/examples/extensions/custom-provider-anthropic";
+  "pi-extension-custom-provider-gitlab-duo" = workspaceSubdir "packages/coding-agent/examples/extensions/custom-provider-gitlab-duo";
   "pi-extension-gondolin" = workspaceSubdir "packages/coding-agent/examples/extensions/gondolin";
   "pi-extension-sandbox" = workspaceSubdir "packages/coding-agent/examples/extensions/sandbox";
   "pi-extension-with-deps" = workspaceSubdir "packages/coding-agent/examples/extensions/with-deps";
@@ -1430,6 +1437,10 @@
   "wrappy@1.0.2" = fetchurl {
     url = "https://registry.npmjs.org/wrappy/-/wrappy-1.0.2.tgz";
     hash = "sha512-l4Sp/DRseor9wL6EvV2+TuQn63dMkPjZ/sp9XkghTEbV9KlPS1xUsZ3u7/IQO4wxtcFB4bgpQPRcR3QCvezPcQ==";
+  };
+  "ws@8.21.0" = fetchurl {
+    url = "https://registry.npmjs.org/ws/-/ws-8.21.0.tgz";
+    hash = "sha512-Vsp28b7DRcimFQvrqu2Wek3z1iYxDCWqHYB8Qsnk/S4RfaCQzPGPyBNuVjJV3cd6UiKtUtp6sNM77gWvzcCH+g==";
   };
   "ws@8.21.3" = fetchurl {
     url = "https://registry.npmjs.org/ws/-/ws-8.21.3.tgz";
