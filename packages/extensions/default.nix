@@ -49,10 +49,6 @@ let
 
   # These npm packages need integration patches in addition to the generic build.
   patched = {
-    ext-narumitw-pi-usage = bunPkgs.callPackage ./narumitw-pi-usage.nix {
-      inherit mkPiExtension;
-      pin = pins."@narumitw/pi-usage";
-    };
     ext-pi-lens = mkPiExtension {
       pname = "pi-lens";
       inherit (pins."pi-lens")

@@ -12,17 +12,6 @@
       "prompts"
     ]
   },
-  "@narumitw/pi-usage": {
-    "version": "0.63.0",
-    "url": "https://registry.npmjs.org/@narumitw/pi-usage/-/pi-usage-0.63.0.tgz",
-    "hash": "sha512-YS3xY7bbMkWhDXhx3/dMYQ7ra51u9mvChZ5uz7/+LtcIQdoaSqPkE4Jv9onAlTx7KHzLDwpaUXoe6B1oMnG6yw==",
-    "bundled": false,
-    "entrypoints": [
-      "src/index.ts"
-    ],
-    "skills": [],
-    "prompts": []
-  },
   "pi-web-access": {
     "version": "0.37.0",
     "url": "https://registry.npmjs.org/pi-web-access/-/pi-web-access-0.37.0.tgz",

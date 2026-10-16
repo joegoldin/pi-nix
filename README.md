@@ -337,7 +337,6 @@ Pinned extensions are exposed as `packages.<system>.ext-<slug>`:
 | `ext-pi-subagents` | `pi-subagents` | subagents |
 | `ext-pi-lens` | `pi-lens` | LSP and linter feedback, its tools deferred behind its loader |
 | `ext-pi-web-access` | `pi-web-access` | web search and fetch |
-| `ext-narumitw-pi-usage` | `@narumitw/pi-usage` | subscription and API usage, patched to publish its report for the footer |
 
 Five more are first-party, built from `packages/extensions/` in this repo
 rather than from a pin:

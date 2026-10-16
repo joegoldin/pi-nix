@@ -26,7 +26,6 @@ let
   };
 
   expectedNames = [
-    "ext-narumitw-pi-usage"
     # custom, foreign-skills, notify, permissions and voice are first-party,
     # from packages/extensions/<name>: no pin, and only custom and permissions
     # vendor a lockfile.
