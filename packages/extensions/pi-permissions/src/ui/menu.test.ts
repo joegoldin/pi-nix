@@ -21,7 +21,7 @@ function setup() {
 }
 
 describe("the /permissions menu", () => {
-	it("lists what was blocked, newest first, the selected one opened up", () => {
+	it("lists what was blocked, newest first, with compact reason excerpts", () => {
 		const { view } = setup();
 		const lines = view.render(80);
 		expect(lines[0]).toContain("Denied (2)");
@@ -34,8 +34,70 @@ describe("the /permissions menu", () => {
 		expect(second).toBeGreaterThan(first);
 		expect(lines[first]).toStartWith("❯ ● Write(/etc/hosts)");
 		expect(lines[first]).toContain("2m ago");
-		// The selected denial shows its input.
-		expect(lines.some((l) => l.includes('"content": "x"'))).toBe(true);
+		// Input is reserved for the explanation view.
+		expect(lines.some((l) => l.includes('"content": "x"'))).toBe(false);
+		expect(lines).toContain("     System file.");
+		expect(lines.at(-1)).toContain("e explain");
+	});
+
+	it("explains the selected denial without approving it, then returns to the same row", () => {
+		const { view, effects, menu } = setup();
+		view.handleInput("j");
+		view.handleInput("e");
+		const lines = view.render(80);
+		expect(lines).toContain("Reason");
+		expect(lines).toContain("Deletes files.");
+		expect(lines).toContain("Command");
+		expect(lines).toContain("rm -rf build");
+		expect(lines).toContain('  "command": "rm -rf build"');
+		for (const key of ["a", "x", "\r", "\t"]) view.handleInput(key);
+		expect(effects).toHaveLength(0);
+		view.handleInput("\x1b");
+		expect(menu.cursor).toBe(1);
+		expect(view.render(80).some((l) => l.startsWith("❯ ● Bash"))).toBe(true);
+		expect(effects).toHaveLength(0);
+	});
+
+	it("keeps long reasons compact but makes the entire reason and input scrollable", () => {
+		const { ledger, menu, effects } = setup();
+		const reason = "[pi-permission-system] " + "Long denial reason. ".repeat(30) + "REASON_END";
+		const command = "printf " + "long-command-".repeat(30) + "COMMAND_END";
+		ledger.record({ toolCallId: "long", toolName: "bash", input: { command, tail: "INPUT_END" }, reason });
+		const view = new PermissionsMenuView(menu, plain, (e) => effects.push(e), () => 12);
+		const compact = view.render(60);
+		expect(compact.some((l) => l.includes("REASON_END"))).toBe(false);
+		expect(compact.filter((l) => l.includes("Long denial"))).toHaveLength(1);
+		view.handleInput("e");
+		let seen = "";
+		for (let i = 0; i < 150; i++) {
+			const lines = view.render(60);
+			expect(lines.length).toBeLessThanOrEqual(12);
+			expect(lines.every((l) => l.length <= 60)).toBe(true);
+			seen += lines.join("\n");
+			view.handleInput("j");
+		}
+		expect(seen).toContain("[pi-permission-system]");
+		expect(seen).toContain("REASON_END");
+		expect(seen).toContain("COMMAND_END");
+		expect(seen).toContain("INPUT_END");
+		for (let i = 0; i < 150; i++) view.handleInput("k");
+		expect(view.render(60)[2]).toBe("Reason");
+		view.handleInput("e");
+		expect(view.render(60)[0]).toContain("Denied (3)");
+		expect(effects).toHaveLength(0);
+	});
+
+	it("ignores explain on empty lists and other tabs", () => {
+		const { view, menu, ledger, effects } = setup();
+		for (const denial of ledger.open()) ledger.dismiss(denial.id);
+		view.handleInput("e");
+		expect(view.render(80)).toContain("Nothing blocked is waiting.");
+		for (const tab of ["granted", "auto", "settings"] as const) {
+			menu.tab = tab;
+			view.handleInput("e");
+			expect(view.render(80)[0]).toContain("Denied (0)");
+		}
+		expect(effects).toHaveLength(0);
 	});
 
 	it("approves or dismisses the selected denial, and revokes from the other tab", () => {

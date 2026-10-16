@@ -74,9 +74,10 @@ asking before a classifier block stands.
 `/permissions` is the one place for all of it, a menu in four tabs (Tab and
 Shift+Tab, or ←/→, move between them; Esc closes):
 
-- **Denied**: what was blocked, newest first, the selected one with its
-  reason and input. `a` (or Enter) approves it and tells the agent, `x`
-  dismisses it.
+- **Denied**: what was blocked, newest first, with a short reason excerpt.
+  `e` explains the selected denial: the full reason, command, and tool input,
+  wrapped to fit. ↑/↓ (or j/k) scroll; `e` or Esc returns to the list.
+  `a` (or Enter) approves from the list and tells the agent; `x` dismisses it.
 - **Allowed**: what you approved. `x` revokes.
 - **Auto mode**: on or off for this session, the classifier model (opens a
   picker), the ask-before-block setting, this session's counts with a reset,

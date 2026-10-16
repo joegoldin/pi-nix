@@ -1,7 +1,7 @@
 // The /permissions menu, the one place for permissions: what was blocked, to
 // approve or dismiss; what you approved, to revoke; auto mode; and the
 // permission system's settings. Drawn as pi-custom draws /context and /ui:
-// framed, in the editor's place, the selected row opened up.
+// framed, in the editor's place, with full denial details on demand.
 
 import { matchesKey, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import type { Denial, Grant } from "../denials.ts";
@@ -14,10 +14,11 @@ export interface MenuTheme extends FrameTheme {
 	bg?(slot: string, text: string): string;
 }
 
-/** Rows of detail shown for the selected denial's input. */
-const INPUT_ROWS = 8;
-
 export class PermissionsMenuView {
+	private explanation?: Denial;
+	private explanationTop = 0;
+	private explanationMaxTop = 0;
+
 	constructor(
 		private readonly menu: PermissionsMenu,
 		private readonly theme: MenuTheme,
@@ -27,6 +28,21 @@ export class PermissionsMenuView {
 	) {}
 
 	handleInput(data: string): void {
+		if (this.explanation) {
+			if (matchesKey(data, "escape") || data === "q" || data === "e") {
+				this.explanation = undefined;
+			} else if (matchesKey(data, "up") || data === "k") {
+				this.explanationTop = Math.max(0, this.explanationTop - 1);
+			} else if (matchesKey(data, "down") || data === "j") {
+				this.explanationTop = Math.min(this.explanationMaxTop, this.explanationTop + 1);
+			}
+			return;
+		}
+		if (data === "e" && this.menu.tab === "denied") {
+			this.explanation = this.menu.denied()[this.menu.cursor];
+			this.explanationTop = 0;
+			return;
+		}
 		const key = this.keyOf(data);
 		if (!key) return;
 		const effect = this.menu.press(key);
@@ -47,6 +63,7 @@ export class PermissionsMenuView {
 	}
 
 	render(width: number): string[] {
+		if (this.explanation) return this.explanationRows(this.explanation, width);
 		const { menu, theme } = this;
 		const denied = menu.denied();
 		const granted = menu.granted();
@@ -93,7 +110,7 @@ export class PermissionsMenuView {
 		return { rows: out, focus };
 	}
 
-	/** Rows per item, the selected item opened up; returns the rows and where the cursor's item starts. */
+	/** Compact rows per denial, with the selected item's position for scrolling. */
 	private deniedRows(denied: Denial[], width: number): { rows: string[]; focus: number } {
 		const { theme, menu } = this;
 		if (denied.length === 0) return { rows: [theme.fg("muted", "Nothing blocked is waiting.")], focus: 0 };
@@ -103,17 +120,33 @@ export class PermissionsMenuView {
 			const here = i === menu.cursor;
 			if (here) focus = rows.length;
 			rows.push(this.headline(d.toolName, d.input, ago(d.at, this.now()), here, width));
-			if (!here) {
-				rows.push(theme.fg("muted", truncateToWidth(`     ${shortReason(d.reason).replace(/\s+/g, " ")}`, width, "…")));
-				return;
-			}
-			for (const part of wrapTextWithAnsi(shortReason(d.reason), Math.max(1, width - 5))) rows.push(theme.fg("muted", `     ${part}`));
-			const input = JSON.stringify(d.input, null, 2).split("\n");
-			const shown = input.slice(0, INPUT_ROWS);
-			for (const line of shown) rows.push(theme.fg("dim", truncateToWidth(`     ${line}`, width, "…")));
-			if (input.length > shown.length) rows.push(theme.fg("dim", `     … ${input.length - shown.length} more lines`));
+			rows.push(theme.fg("muted", truncateToWidth(`     ${shortReason(d.reason).replace(/\s+/g, " ")}`, Math.min(width, 125), "…")));
 		});
 		return { rows, focus };
+	}
+
+	private explanationRows(denial: Denial, width: number): string[] {
+		const { theme } = this;
+		const wrap = (text: string) => wrapTextWithAnsi(text, Math.max(1, width));
+		const input = denial.input && typeof denial.input === "object" ? (denial.input as Record<string, unknown>) : {};
+		const body = [
+			theme.bold("Reason"),
+			...wrap(denial.reason).map((line) => theme.fg("muted", line)),
+			"",
+			...(typeof input.command === "string" ? [theme.bold("Command"), ...wrap(input.command), ""] : []),
+			theme.bold("Tool input"),
+			...wrap(JSON.stringify(denial.input ?? null, null, 2)),
+		];
+		const height = Math.max(1, this.height() - 4);
+		this.explanationMaxTop = Math.max(0, body.length - height);
+		this.explanationTop = Math.min(this.explanationTop, this.explanationMaxTop);
+		return [
+			theme.bold(`Denied: ${denial.toolName}`),
+			"",
+			...body.slice(this.explanationTop, this.explanationTop + height),
+			"",
+			theme.fg("dim", `↑/↓ scroll · e or esc back · ${this.explanationTop + 1}–${Math.min(body.length, this.explanationTop + height)}/${body.length}`),
+		];
 	}
 
 	private grantedRows(granted: Grant[], width: number): { rows: string[]; focus: number } {
@@ -150,7 +183,7 @@ export class PermissionsMenuView {
 }
 
 const HINTS: Record<MenuTab, string> = {
-	denied: "a approve and tell the agent · x dismiss · tab next · esc close",
+	denied: "e explain · a approve and tell the agent · x dismiss · tab next · esc close",
 	granted: "x revoke · tab next · esc close",
 	auto: "enter change · tab next · esc close",
 	settings: "enter toggle · tab next · esc close",
