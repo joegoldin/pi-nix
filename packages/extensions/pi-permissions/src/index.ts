@@ -18,7 +18,7 @@ import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { type AutoModeControls, createPiAutomode } from "./auto/extension.ts";
 import { withPermissionChain } from "./auto/permission-chain.ts";
-import { type Denial, type PermissionRecord, PermissionLedger } from "./denials.ts";
+import { approvalScope, type Denial, type PermissionRecord, PermissionLedger } from "./denials.ts";
 import { applySetting, buildSettingItems, type PermissionSystemConfigController } from "./engine/config/config-modal.ts";
 import permissionSystem from "./engine/index.ts";
 import { callLabel } from "./ui/call-label.ts";
@@ -116,6 +116,15 @@ export default function piPermissions(pi: ExtensionAPI): void {
 
 	const ledger = new PermissionLedger();
 	const persist = () => pi.appendEntry(LEDGER_ENTRY, ledger.snapshot());
+	const clearSimilar = () => {
+		if (ledger.clearSimilar()) persist();
+	};
+	// New operator intent can narrow earlier approval. Do not let a cached scope
+	// outrun a later instruction; exact overrides remain individually revocable.
+	pi.on("input", (event) => {
+		if (event.source !== "extension") clearSimilar();
+	});
+	pi.events.on("pi-user-decision:submitted", clearSimilar);
 
 	// Each half's tool_call handler runs only for calls not already approved,
 	// and every block it returns is recorded.
@@ -157,17 +166,32 @@ export default function piPermissions(pi: ExtensionAPI): void {
 	// permission system prompts for it.
 	let autoControls: AutoModeControls | undefined;
 	let settingsController: PermissionSystemConfigController | undefined;
-	withPermissionChain(createPiAutomode({ onControls: (controls) => (autoControls = controls) }))(gated);
+	withPermissionChain(createPiAutomode({
+		onControls: (controls) => (autoControls = controls),
+		approvals: {
+			scope: (toolName, input, cwd) => approvalScope(toolName, input, cwd)?.label,
+			has: (toolName, input, cwd) => ledger.isSimilarlyGranted(toolName, input, cwd),
+			remember: (toolName, input, cwd) => {
+				ledger.approveSimilar(toolName, input, cwd);
+				persist();
+			},
+		},
+	}))(gated);
 	permissionSystem(gated, { onSettings: (controller) => (settingsController = controller) });
 
+	function restoreLedger(ctx: ExtensionContext): void {
+		const entries = ctx.sessionManager.getBranch() as { type?: string; customType?: string; data?: unknown }[];
+		const last = [...entries].reverse().find((e) => e.type === "custom" && e.customType === LEDGER_ENTRY);
+		ledger.restore(last?.data as PermissionRecord | undefined);
+	}
+
+	pi.on("session_tree", (_event, ctx) => restoreLedger(ctx));
 	let unrequire: (() => void) | undefined;
 	pi.on("session_start", (_event, ctx) => {
 		unrequire?.();
 		const sessionId = ctx.sessionManager.getSessionId?.();
 		unrequire = sessionId ? requireInChildren(sessionId) : undefined;
-		const entries = ctx.sessionManager.getEntries() as { type?: string; customType?: string; data?: unknown }[];
-		const last = [...entries].reverse().find((e) => e.type === "custom" && e.customType === LEDGER_ENTRY);
-		ledger.restore(last?.data as PermissionRecord | undefined);
+		restoreLedger(ctx);
 	});
 
 	pi.on("session_shutdown", () => {

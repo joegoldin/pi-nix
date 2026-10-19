@@ -26,9 +26,12 @@ Each tool call passes through, in order:
 3. **The authorizer chain**: auto mode's classifier is a link on it, so an
    `ask` reaches the classifier before it reaches you. With `askOnBlock` on,
    a classifier block asks you first, in the terminal UI only, with a
-   countdown and a notification: Allow (`y`) runs the call, Deny (`n` or Esc)
-   refuses it, and no answer in time keeps the block, the agent told nobody
-   answered, so a later go-ahead from you clears it. A headless session
+   countdown and a notification. `y` approves the displayed reusable scope;
+   `Y` approves just this attempt. Reusable approval is offered only for a
+   soft denial with a supported scope. `n` or Esc refuses; no answer in time
+   keeps the block. `e` stops the timer and shows the full reason, exact
+   command and tool input without executing anything. ↑/↓ scroll; `e` or Esc
+   returns, with the timer still stopped. A headless session
    (print, JSON, RPC, a subagent) never asks; the block stands at once.
 4. **You**, at the permission prompt, for whatever the chain defers.
 
@@ -37,6 +40,21 @@ Whatever either half blocks is recorded with the call's full input. In
 as written, is then allowed for the rest of the session past both halves,
 hard denies included, and the agent is told, so it retries. A block's reason
 tells the agent this when there is a terminal UI to open the menu in.
+
+Reusable approvals live in that same ledger and Allowed tab. They cover the
+same shell command and working directory (ignoring timeout and background-task
+labels), or the same edit/write operation on a resolved file path. File contents
+may differ; commands may not. These scopes expire on your next instruction or
+submitted questionnaire answer, or when revoked. They resolve repeat soft denials,
+not hard denials or classifier failures, and never skip deterministic checks,
+explicit ask rules or protected-write checks. Branches restore their own ledger.
+
+Questionnaires do not go through the classifier: asking for a decision does not
+execute the proposed action. Explicit deny rules still apply. Successful answers
+are recorded in the native session and read alongside real user messages in
+chronological order, including across compaction. Older answers are recovered
+only from matched questionnaire calls and validated results; arbitrary tool output
+cannot supply approval. Later instructions can narrow or revoke earlier answers.
 
 Only rules listed under `hard_deny` bind the classifier unconditionally; it is
 told so, and its examples take their tier from the listed rules.
@@ -104,7 +122,8 @@ the editor's place, `❯` on the highlighted row.
 | Path | What it is |
 |---|---|
 | `src/index.ts` | The entry: both halves, auto mode first, once per session; the ledger around their tool_call handlers; `/permissions` |
-| `src/denials.ts` | What was blocked and what you approved, persisted in the session (pure) |
+| `src/denials.ts` | What was blocked and what you approved, persisted in the session |
+| `src/user-decisions.ts` | Validated questionnaire decisions from the native session |
 | `src/ui/block-prompt.ts`, `block-prompt-state.ts` | The ask before a classifier block stands, with its countdown |
 | `src/ui/menu.ts`, `menu-state.ts` | The `/permissions` menu |
 | `src/ui/frame.ts`, `call-label.ts` | The dialog frame and how a call is named, after pi-custom's |

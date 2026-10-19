@@ -320,7 +320,15 @@ export function registerAsk(pi: ExtensionAPI): void {
 		}),
 		async execute(_id, params, _signal, _onUpdate, ctx) {
 			const questions = normalise(params.questions as Question[]);
-			const reply = (result: Result) => ({ content: [{ type: "text" as const, text: formatResult(result) }], details: result });
+			const reply = (result: Result) => {
+				// Native session entries preserve UI-origin answers across compaction.
+				// Permission review reads these, never arbitrary tool-output claims.
+				if (!result.cancelled && !result.error) {
+					pi.appendEntry("pi-user-decision", { version: 1, source: "questionnaire", toolCallId: _id, questions, ...result });
+					pi.events.emit("pi-user-decision:submitted", { toolCallId: _id });
+				}
+				return { content: [{ type: "text" as const, text: formatResult(result) }], details: result };
+			};
 			if (!ctx.hasUI) {
 				return {
 					content: [{ type: "text" as const, text: "Error: UI not available (running in non-interactive mode)" }],

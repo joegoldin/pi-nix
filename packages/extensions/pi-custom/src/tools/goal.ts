@@ -632,7 +632,8 @@ export function registerGoal(pi: ExtensionAPI, config: () => UiConfig): void {
 	});
 
 	pi.on("before_agent_start", (event) => {
-		runAutomatic = event.prompt.includes(`<!-- ${CONTINUATION_MARKER}:`);
+		// Background notifications start runs without a user-text prompt.
+		runAutomatic = "prompt" in event && event.prompt.includes(`<!-- ${CONTINUATION_MARKER}:`);
 		runToolAttempted = false;
 		if (!goal || goal.status !== "active") return undefined;
 		if (!runAutomatic) continuationWanted = false;

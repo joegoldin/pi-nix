@@ -158,6 +158,7 @@ export class PermissionsMenuView {
 			const here = i === menu.cursor;
 			if (here) focus = rows.length;
 			rows.push(this.headline(g.toolName, g.input, `approved ${ago(g.at, this.now())}`, here, width, "success"));
+			if (g.scope) rows.push(...wrapTextWithAnsi(`     Session scope: ${g.scope.label}`, Math.max(1, width)).map((line) => theme.fg("muted", line)));
 		});
 		return { rows, focus };
 	}

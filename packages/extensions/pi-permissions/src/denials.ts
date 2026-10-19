@@ -1,13 +1,43 @@
-// What was blocked, and what you have since allowed. Pure: index.ts records
-// into it from the tool_call handlers it wraps, persists it in the session,
-// and the /permissions menu acts on it.
+// What was blocked, and what you have since allowed. index.ts persists the
+// ledger in the session; the prompt and /permissions menu both use it.
 //
-// A grant is for one exact call, the tool and its input as written, and lasts
-// for the session. It passes both halves of the extension, hard denies
-// included: it is your own decision, taken after the block, with the call in
-// front of you.
+// Exact menu grants retain their existing session-wide override behavior.
+// Scoped prompt grants pass deterministic policy checks, expire on new user
+// intent, and can be revoked from the same menu.
 
+import { resolve } from "node:path";
+import { resolvePathForPolicy, resolveToolInputPath } from "./auto/paths.ts";
 import { canonicalJson } from "./ui/call-label.ts";
+
+export interface ApprovalScope {
+	key: string;
+	label: string;
+}
+
+/** No fuzzy command matching: the scope shown to the operator is the scope used. */
+export function approvalScope(toolName: string, input: unknown, cwd: string): ApprovalScope | undefined {
+	if (!input || typeof input !== "object" || Array.isArray(input)) return undefined;
+	const args = { ...input as Record<string, unknown> };
+	const directory = resolvePathForPolicy(resolve(cwd)) ?? resolve(cwd);
+	let label: string;
+	if ((toolName === "bash" || toolName === "bg_run") && typeof args.command === "string") {
+		delete args.timeout;
+		if (toolName === "bg_run") {
+			delete args.timeoutSeconds;
+			delete args.name;
+			delete args.description;
+		}
+		label = `Same ${toolName} command in ${directory} (timing and task label may differ)`;
+	} else if ((toolName === "edit" || toolName === "write") && typeof args.path === "string") {
+		const path = resolveToolInputPath(toolName, directory, args.path);
+		if (path === undefined) return undefined;
+		args.path = resolvePathForPolicy(path) ?? path;
+		if (toolName === "edit") delete args.edits;
+		else delete args.content;
+		label = `${toolName} ${args.path} in ${directory} (new contents/edits allowed)`;
+	} else return undefined;
+	return { key: `scope\u0000${directory}\u0000${toolName}\u0000${canonicalJson(args)}`, label: `${label}; until your next instruction or questionnaire answer` };
+}
 
 export type DenialState = "open" | "approved" | "dismissed";
 
@@ -28,6 +58,8 @@ export interface Grant {
 	toolName: string;
 	input: unknown;
 	at: number;
+	/** Scoped approvals still pass deterministic denies; exact menu grants are separate. */
+	scope?: ApprovalScope;
 }
 
 /** The record as it is persisted in the session. */
@@ -84,6 +116,30 @@ export class PermissionLedger {
 
 	isGranted(toolName: string, input: unknown): boolean {
 		return this.grants.has(grantKey(toolName, input));
+	}
+
+	approveSimilar(toolName: string, input: unknown, cwd: string): Grant | undefined {
+		const scope = approvalScope(toolName, input, cwd);
+		if (!scope) return undefined;
+		const grant = { key: scope.key, toolName, input, at: this.now(), scope };
+		this.grants.set(scope.key, grant);
+		return grant;
+	}
+
+	isSimilarlyGranted(toolName: string, input: unknown, cwd: string): boolean {
+		const scope = approvalScope(toolName, input, cwd);
+		return !!scope && this.grants.has(scope.key);
+	}
+
+	clearSimilar(): boolean {
+		let changed = false;
+		for (const [key, grant] of this.grants) {
+			if (grant.scope) {
+				this.grants.delete(key);
+				changed = true;
+			}
+		}
+		return changed;
 	}
 
 	/** Newest first. */

@@ -1,5 +1,6 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { safeJson, truncateMiddle } from "./utils.ts";
+import { operatorDecisions } from "../user-decisions.ts";
 
 const MAX_USER_ENTRY_TOKENS = 1000;
 const MAX_TOOL_ENTRY_TOKENS = 1000;
@@ -88,11 +89,9 @@ function truncateToTokenCap(
 
 function collectTranscriptEntries(ctx: ExtensionContext): TranscriptEntry[] {
   const entries: TranscriptEntry[] = [];
-  const sessionManager = ctx.sessionManager as typeof ctx.sessionManager & {
-    buildContextEntries?: () => ReturnType<typeof ctx.sessionManager.getBranch>;
-  };
-  const contextEntries = sessionManager.buildContextEntries?.() ??
-    sessionManager.getBranch();
+  // Native branch order keeps real user instructions and UI decisions in
+  // sequence; a compaction summary is not a new operator authorization.
+  const contextEntries = ctx.sessionManager.getBranch();
 
   for (const [index, entry] of contextEntries.entries()) {
     if (entry.type !== "message") continue;
@@ -122,7 +121,7 @@ function collectTranscriptEntries(ctx: ExtensionContext): TranscriptEntry[] {
 function selectUserEntries(
   entries: TranscriptEntry[],
   maxTokens: number,
-): { selected: TranscriptEntry[]; omitted: boolean } {
+): { selected: (TranscriptEntry & { truncated: boolean })[]; omitted: boolean } {
   const users = entries.filter((entry) => entry.kind === "user");
   if (users.length === 0) return { selected: [], omitted: false };
 
@@ -196,15 +195,39 @@ function selectToolEntries(
   };
 }
 
-/** Build classifier evidence from user text and assistant tool-call payloads only. */
+/** Build classifier evidence from user text, UI decisions and assistant calls. */
 export function buildClassifierTranscript(
   ctx: ExtensionContext,
   budgets: ClassifierTranscriptBudgets,
 ): string {
   const entries = collectTranscriptEntries(ctx);
-  const users = selectUserEntries(entries, budgets.maxUserTokens);
+  // The compacted model context can omit UI answers. Recover only native
+  // operator decisions from this branch, not arbitrary historical tool output.
+  const decisions = operatorDecisions(ctx.sessionManager.getBranch());
+  const decisionBudget = decisions.length ? Math.floor(budgets.maxUserTokens / 2) : 0;
+  const retained: TranscriptEntry[] = [];
+  let used = 0;
+  for (const decision of [...decisions].reverse()) {
+    const cost = approximateTokenCount(decision.text);
+    // An incomplete answer can drop its restrictions; omit it rather than
+    // truncating it into broader authority.
+    if (used + cost > decisionBudget) break;
+    retained.unshift({ ...decision, order: 0, kind: "user" });
+    used += cost;
+  }
+  const users = selectUserEntries(entries, budgets.maxUserTokens - used);
+  // An omitted or clipped later instruction might revoke an old approval.
+  // Do not recover that approval without all intervening operator context.
+  const completeUsers = new Set(users.selected.filter((entry) =>
+    !entry.truncated
+  ).map((entry) => entry.index));
+  const lastOmittedUser = entries.reduce((last, entry) =>
+    entry.kind === "user" && !completeUsers.has(entry.index) ? entry.index : last,
+    -1,
+  );
+  const safeDecisions = retained.filter((entry) => entry.index > lastOmittedUser);
   const tools = selectToolEntries(entries, budgets.maxToolTokens);
-  const selected = [...users.selected, ...tools.selected].sort(
+  const selected = [...users.selected, ...tools.selected, ...safeDecisions].sort(
     (left, right) => left.index - right.index || left.order - right.order,
   );
   if (users.omitted || tools.omitted) {
@@ -215,7 +238,10 @@ export function buildClassifierTranscript(
       text: "<transcript_entries_omitted />",
     });
   }
-  return selected.map((entry) => entry.text).join("\n");
+  return [
+    ...selected.map((entry) => entry.text),
+    ...(safeDecisions.length < decisions.length ? ["<operator_decisions_omitted />"] : []),
+  ].join("\n");
 }
 
 export function loadedContextFromSystemPromptOptions(options: unknown): string {

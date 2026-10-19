@@ -122,6 +122,12 @@ function projectIsTrusted(
 }
 
 export type PiAutomodeOptions = {
+  /** Shared session ledger, owned by pi-permissions rather than this classifier. */
+  approvals?: {
+    scope(toolName: string, input: unknown, cwd: string): string | undefined;
+    has(toolName: string, input: unknown, cwd: string): boolean;
+    remember(toolName: string, input: unknown, cwd: string): void;
+  };
   /** Override config loading in tests. Runtime code uses Pi-owned disk settings. */
   loadConfig?: (cwd: string, projectTrusted: boolean) => EffectiveConfig;
   /** Override classifier calls in tests so unit tests never need a real LLM/API key. */
@@ -441,7 +447,8 @@ export function createPiAutomode(options: PiAutomodeOptions = {}) {
       input: unknown,
       reason: string,
       logCtx: LogCtx,
-    ): Promise<"allow" | "deny" | "timeout" | undefined> {
+      scope?: string,
+    ): Promise<"allow-session" | "allow" | "deny" | "timeout" | undefined> {
       const ask = cfg.askOnBlock;
       if (!ask?.enabled || !ctx.hasUI || ctx.mode !== "tui" || logCtx.deterministicOnly) return undefined;
       const requestId = `pi-automode-${logCtx.decisionId}`;
@@ -451,12 +458,13 @@ export function createPiAutomode(options: PiAutomodeOptions = {}) {
         input,
         reason,
         timeoutSeconds: ask.timeoutSeconds,
+        scope,
       });
       emitPermissionEvent("permissions:decision", {
         requestId,
         surface: toolName,
-        result: answer === "allow" ? "allow" : "deny",
-        resolution: answer === "allow" ? "user_approved" : answer === "deny" ? "user_denied" : "confirmation_unavailable",
+        result: answer === "allow" || answer === "allow-session" ? "allow" : "deny",
+        resolution: answer === "allow" || answer === "allow-session" ? "user_approved" : answer === "deny" ? "user_denied" : "confirmation_unavailable",
       });
       return answer;
     }
@@ -934,6 +942,21 @@ export function createPiAutomode(options: PiAutomodeOptions = {}) {
         );
       }
 
+      // Asking the operator is not executing the operation described in the
+      // question. Deterministic denials above still apply to the tool itself.
+      if (event.toolName === "ask_user_question") {
+        return allow(ctx, "user", "Local operator questionnaire; no action is executed", event.toolName, summary, logCtx);
+      }
+
+      // Reusable scopes do not override explicit ask rules or protected writes.
+      let canReuseApproval = !askRequiresClassifier;
+      if (event.toolName === "write" || event.toolName === "edit") {
+        const path = extractInputPath(event.toolName, input);
+        const resolved = path === undefined ? undefined : resolveToolInputPath(event.toolName, ctx.cwd, path);
+        if (resolved === undefined || isProtectedPath(resolved, ctx.cwd, cfg.protectedPaths)) canReuseApproval = false;
+      }
+      const scopedApproval = canReuseApproval && options.approvals?.has(event.toolName, input, ctx.cwd);
+
       if (event.toolCallId && userApproved.has(event.toolCallId)) {
         return allow(ctx, "user", "Allowed by the user at the prompt", event.toolName, summary, logCtx);
       }
@@ -957,16 +980,26 @@ export function createPiAutomode(options: PiAutomodeOptions = {}) {
         );
       }
 
+      // Remembered scope resolves soft denials, not hard rules or classifier
+      // failures. Recheck risk because file contents and environments can change.
+      if (scopedApproval && decision.tier === "soft_deny" && !ctx.signal?.aborted) {
+        return allow(ctx, "user", "Allowed by the operator's displayed session scope", event.toolName, summary, logCtx);
+      }
+
       // An aborted classifier request fails closed as a block; when the abort
       // was an interruption to send queued messages, it is that instead.
       if (steering(ctx)) {
         return interrupted(ctx, "classifier", event.toolName, summary, logCtx);
       }
-      const answer = await askBeforeBlock(ctx, cfg, event.toolName, input, decision.reason, logCtx);
+      const scope = canReuseApproval && decision.tier === "soft_deny"
+        ? options.approvals?.scope(event.toolName, input, ctx.cwd)
+        : undefined;
+      const answer = await askBeforeBlock(ctx, cfg, event.toolName, input, decision.reason, logCtx, scope);
       if (steering(ctx)) {
         return interrupted(ctx, "classifier", event.toolName, summary, logCtx);
       }
-      if (answer === "allow") {
+      if (answer === "allow" || answer === "allow-session") {
+        if (answer === "allow-session" && scope) options.approvals?.remember(event.toolName, input, ctx.cwd);
         if (event.toolCallId) userApproved.add(event.toolCallId);
         return allow(ctx, "user", "Allowed by the user at the prompt", event.toolName, summary, logCtx);
       }

@@ -6,7 +6,7 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { matchesKey, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { callLabel } from "./call-label.ts";
-import { BLOCK_CHOICES, type BlockAnswer, BlockPrompt } from "./block-prompt-state.ts";
+import { type BlockAnswer, BlockPrompt } from "./block-prompt-state.ts";
 import { Framed, type FrameTheme } from "./frame.ts";
 
 /** Under this many seconds the countdown turns from dim to a warning. */
@@ -23,37 +23,80 @@ export interface BlockAsk {
 	input: unknown;
 	reason: string;
 	timeoutSeconds: number;
+	/** Exact reusable scope; absent when this call cannot safely be generalized. */
+	scope?: string;
 }
 
 export class BlockPromptView {
+	private expanded = false;
+	private top = 0;
+	private maxTop = 0;
+
 	constructor(
 		private readonly prompt: BlockPrompt,
 		private readonly ask: BlockAsk,
 		private readonly theme: BlockTheme,
+		private readonly height: () => number = () => 20,
 	) {}
 
 	render(width: number): string[] {
 		const { theme, prompt, ask } = this;
+		if (this.expanded) return this.explanation(width);
 		const { title, target } = callLabel(ask.toolName, ask.input);
 		const lines = [`${theme.fg("warning", "●")} ${theme.bold(title)}${target ? theme.fg("muted", `(${target})`) : ""}`];
 		const wrapped = wrapTextWithAnsi(ask.reason, Math.max(1, width - 5));
 		wrapped.forEach((part, i) => lines.push(theme.fg("muted", `${i === 0 ? "  ⎿  " : "     "}${part}`)));
 		lines.push("");
-		BLOCK_CHOICES.forEach((choice, i) => {
+		if (ask.scope) lines.push(...wrapTextWithAnsi(`Remembered scope: ${ask.scope}`, Math.max(1, width)).map((line) => theme.fg("muted", line)), "");
+		prompt.choices.forEach((choice, i) => {
 			const here = i === prompt.cursor;
 			const label = `${choice.label} ${theme.fg("dim", `(${choice.key})`)}`;
 			lines.push(here ? `${theme.fg("accent", "❯ ")}${theme.bold(label)}` : `  ${label}`);
 		});
 		lines.push("");
 		const left = prompt.secondsLeft();
-		lines.push(theme.fg(left < URGENT_SECONDS ? "warning" : "dim", `No answer in ${left}s keeps the block`));
-		lines.push(theme.fg("dim", "Enter select · ↑/↓ · y allow · n or Esc deny"));
+		lines.push(theme.fg(!prompt.explaining && left < URGENT_SECONDS ? "warning" : "dim", prompt.explaining ? "Timer stopped — waiting for your decision" : `No answer in ${left}s keeps the block`));
+		lines.push(theme.fg("dim", `${ask.scope ? "y allow scope · " : ""}Y allow once · n or Esc deny · e explain/stop timer`));
 		return lines;
+	}
+
+	private explanation(width: number): string[] {
+		const { ask, theme } = this;
+		const wrap = (text: string) => wrapTextWithAnsi(text, Math.max(1, width));
+		const input = ask.input && typeof ask.input === "object" ? ask.input as Record<string, unknown> : {};
+		const rows = [
+			theme.bold("Why approval is needed"),
+			...wrap(ask.reason),
+			"",
+			...(typeof input.command === "string" ? [theme.bold("Exact command (not executed)"), ...wrap(input.command), ""] : []),
+			theme.bold("Full tool input"),
+			...wrap(JSON.stringify(ask.input ?? null, null, 2)),
+		];
+		const available = Math.max(1, this.height() - 6);
+		this.maxTop = Math.max(0, rows.length - available);
+		this.top = Math.min(this.top, this.maxTop);
+		return [
+			theme.bold(`Explain: ${ask.toolName}`),
+			theme.fg("dim", "Timer stopped — no command runs until you approve"),
+			...rows.slice(this.top, this.top + available),
+			theme.fg("dim", `↑/↓ scroll · e or Esc back · ${this.top + 1}–${Math.min(rows.length, this.top + available)}/${rows.length}`),
+		];
 	}
 
 	handleInput(data: string): void {
 		const { prompt } = this;
-		if (matchesKey(data, "escape")) prompt.cancel();
+		if (this.expanded) {
+			if (matchesKey(data, "escape") || data === "e") this.expanded = false;
+			else if (matchesKey(data, "up") || data === "k") this.top = Math.max(0, this.top - 1);
+			else if (matchesKey(data, "down") || data === "j") this.top = Math.min(this.maxTop, this.top + 1);
+			else if (data === "n") prompt.cancel();
+			return;
+		}
+		if (data === "e" && !prompt.result) {
+			prompt.press("e");
+			this.expanded = true;
+			this.top = 0;
+		} else if (matchesKey(data, "escape")) prompt.cancel();
 		else if (matchesKey(data, "up")) prompt.move(-1);
 		else if (matchesKey(data, "down")) prompt.move(1);
 		else if (matchesKey(data, "enter")) prompt.confirm();
@@ -72,8 +115,8 @@ export async function askBeforeBlock(ctx: ExtensionContext, ask: BlockAsk): Prom
 	// The terminal bell, as pi-custom's questions ring it: the call is waiting.
 	if (process.stdout.isTTY) process.stdout.write("\x07");
 	return ctx.ui.custom<BlockAnswer>((tui, theme, _keybindings, done) => {
-		const prompt = new BlockPrompt(timeoutMs);
-		const view = new Framed(new BlockPromptView(prompt, ask, theme as never), "Auto mode would block this", theme as never);
+		const prompt = new BlockPrompt(timeoutMs, Date.now, !!ask.scope);
+		const view = new Framed(new BlockPromptView(prompt, ask, theme as never, () => process.stdout.rows || 24), "Auto mode would block this", theme as never);
 		let finished = false;
 		const onAbort = () => {
 			prompt.cancel();

@@ -5,6 +5,7 @@
 // pi-automode-permission-chain check, which ran the same cases against the two
 // packages side by side.
 import { test, expect } from "bun:test";
+import { approvalScope, PermissionLedger } from "./denials.ts";
 const { withPermissionChain, getPermissionsService, DETERMINISTIC_ONLY } = await import(
   `./auto/permission-chain.ts`
 );
@@ -208,7 +209,7 @@ const { parseToolPattern } = await import(
   `./auto/permissions.ts`
 );
 
-async function realHost(configForTrust, classifyAction, ctxOverrides = {}) {
+async function realHost(configForTrust, classifyAction, ctxOverrides = {}, approvals = undefined) {
   const handlers = new Map();
   const commands = new Map();
   let state;
@@ -239,6 +240,7 @@ async function realHost(configForTrust, classifyAction, ctxOverrides = {}) {
     getAllTools: () => [],
   };
   withPermissionChain(createPiAutomode({
+    approvals,
     loadConfig: (_cwd, trusted) => ({ ...config, ...configForTrust(trusted) }),
     classifyAction: async (...args) => {
       classifierCalls++;
@@ -498,6 +500,75 @@ function terminalUi() {
 // ask-on-block: with askOnBlock on, a classifier block asks first, in the
 // terminal UI. Allow runs the call; Deny or Esc refuses it; no answer in time
 // keeps the block, and says so, so a later go-ahead can clear it.
+test("lowercase y stores a bounded approval shared by subsequent calls", async () => {
+  const ledger = new PermissionLedger();
+  const term = terminalUi();
+  const h = await realHost(
+    () => ({ askOnBlock: { enabled: true, timeoutSeconds: 1 } }),
+    async () => ({ decision: "block", tier: "soft_deny", reason: "Requires authorization" }),
+    { hasUI: true, mode: "tui", ui: term.ui },
+    {
+      scope: (name, input, cwd) => approvalScope(name, input, cwd)?.label,
+      has: (name, input, cwd) => ledger.isSimilarlyGranted(name, input, cwd),
+      remember: (name, input, cwd) => ledger.approveSimilar(name, input, cwd),
+    },
+  );
+  await h.emit("tool_call", event);
+  const pending = h.service.links.get("pi-automode")(details, {}, log);
+  while (term.mounted.length === 0) await new Promise((r) => setTimeout(r, 5));
+  expect(term.mounted[0].render(100).join("\n")).toContain("Remembered scope");
+  term.press("y");
+  expect(await pending).toEqual({ kind: "allow" });
+  const next = { ...event, toolCallId: "next", input: { ...event.input, timeout: 90 } };
+  await h.emit("tool_call", next);
+  expect(await h.service.links.get("pi-automode")({ ...details, toolCallId: "next" }, {}, log)).toEqual({ kind: "allow" });
+  expect(h.classifierCalls()).toBe(2);
+  expect(term.mounted).toHaveLength(1);
+  expect(ledger.grantList()).toHaveLength(1);
+});
+
+test("a remembered scope never clears hard denials or classifier failures", async () => {
+  for (const tier of ["hard_deny", "none"]) {
+    const h = await realHost(
+      () => ({}),
+      async () => ({ decision: "block", tier, reason: "Must remain blocked" }),
+      {},
+      { has: () => true, scope: () => "same command", remember: () => { throw new Error("must not grant"); } },
+    );
+    await h.emit("tool_call", event);
+    expect((await h.service.links.get("pi-automode")(details, {}, log)).kind).toBe("deny");
+    expect(h.classifierCalls()).toBe(1);
+  }
+});
+
+test("a remembered scope cannot bypass an explicit deny or protected write", async () => {
+  const approvals = { has: () => true, scope: () => "same file", remember() {} };
+  const denied = await realHost(() => ({ permissionDeny: [parseToolPattern("bash(*)")] }), undefined, {}, approvals);
+  expect((await denied.emit("tool_call", event))?.block).toBe(true);
+  const protectedHost = await realHost(
+    () => ({ protectedPaths: ["protected"] }),
+    async () => ({ decision: "block", tier: "soft_deny", reason: "Protected write" }),
+    {}, approvals,
+  );
+  const call = { toolName: "write", toolCallId: "protected-write", input: { path: "/tmp/project/protected/a.ts", content: "new" } };
+  await protectedHost.emit("tool_call", call);
+  expect((await protectedHost.service.links.get("pi-automode")({ toolName: "write", toolCallId: call.toolCallId }, {}, log)).kind).toBe("deny");
+});
+
+test("an operator questionnaire is not classified as the action it asks about", async () => {
+  const h = await realHost(() => ({}), async () => ({ decision: "block", tier: "soft_deny", reason: "Remote transfer" }));
+  const call = { toolName: "ask_user_question", toolCallId: "question", input: { questions: [{ question: "May I transfer files to torrent over SSH?" }] } };
+  expect(await h.emit("tool_call", call)).toBeUndefined();
+  expect(await h.service.links.get("pi-automode")({ toolName: call.toolName, toolCallId: call.toolCallId }, {}, log)).toEqual({ kind: "allow" });
+  expect(h.classifierCalls()).toBe(0);
+});
+
+test("an explicit tool denial still applies to a questionnaire", async () => {
+  const h = await realHost(() => ({ permissionDeny: [parseToolPattern("ask_user_question")] }));
+  expect((await h.emit("tool_call", { toolName: "ask_user_question", toolCallId: "question-denied", input: {} }))?.block).toBe(true);
+  expect(h.classifierCalls()).toBe(0);
+});
+
 test("a classifier block asks first, and the answer decides", async () => {
   const blocked = { decision: "block", tier: "soft_deny", reason: "Writes a secret." };
   const run = async (answer, toolCallId) => {
@@ -515,7 +586,7 @@ test("a classifier block asks first, and the answer decides", async () => {
     return { h, term, verdict: await pending };
   };
 
-  const allowed = await run("y", "ask-allow");
+  const allowed = await run("Y", "ask-allow");
   expect(allowed.verdict).toEqual({ kind: "allow" });
   const shown = allowed.term.mounted[0].render(80).join("\n");
   expect(shown).toContain("Writes a secret.");

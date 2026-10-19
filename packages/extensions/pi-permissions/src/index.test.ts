@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { EventEmitter } from "node:events";
 import piPermissions from "./index.ts";
+import { PermissionLedger, type PermissionRecord } from "./denials.ts";
 
 /** A session's event bus as pi builds it, and a pi that records what is registered. */
 function session() {
@@ -46,7 +47,7 @@ function session() {
 		}
 		return undefined;
 	};
-	return { api, tools, handlers, commands, sent, entries, toolCall };
+	return { api, tools, handlers, commands, sent, entries, toolCall, bus };
 }
 
 describe("loading", () => {
@@ -98,6 +99,41 @@ describe("the ledger around both halves", () => {
 		expect(await s.toolCall({ ...call, toolCallId: "c2" }, ctx)).toBeUndefined();
 		// A different input is not covered.
 		expect((await s.toolCall({ ...call, toolCallId: "c3", input: { ...call.input, content: "other" } }, ctx))?.block).toBe(true);
+	});
+});
+
+describe("scoped approval lifetime", () => {
+	function restoredSession() {
+		const s = session();
+		const ledger = new PermissionLedger();
+		ledger.approveSimilar("bash", { command: "nixfmt a.nix" }, "/tmp");
+		const branch = [{ type: "custom", customType: "pi-permissions", data: ledger.snapshot() }];
+		const ctx = { sessionManager: { getBranch: () => branch } };
+		piPermissions(s.api());
+		s.handlers.get("session_start")!.at(-1)!({}, ctx);
+		return { s, ctx, branch };
+	}
+
+	it("new operator input expires scopes, extension continuations do not", () => {
+		const { s } = restoredSession();
+		s.handlers.get("input")![0]!({ source: "extension" }, {});
+		expect(s.entries).toHaveLength(0);
+		s.handlers.get("input")![0]!({ source: "interactive" }, {});
+		expect((s.entries.at(-1)!.data as PermissionRecord).grants).toEqual([]);
+	});
+
+	it("submitted questionnaire answers expire scopes through the shared event bus", () => {
+		const { s } = restoredSession();
+		s.bus.emit("pi-user-decision:submitted", { toolCallId: "q1" });
+		expect((s.entries.at(-1)!.data as PermissionRecord).grants).toEqual([]);
+	});
+
+	it("tree navigation cannot carry a scope to a branch without that approval", () => {
+		const { s, ctx, branch } = restoredSession();
+		branch.length = 0;
+		for (const handler of s.handlers.get("session_tree") ?? []) handler({}, ctx);
+		s.handlers.get("input")![0]!({ source: "interactive" }, {});
+		expect(s.entries).toHaveLength(0);
 	});
 });
 

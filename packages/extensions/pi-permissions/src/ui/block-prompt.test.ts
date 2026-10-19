@@ -28,6 +28,18 @@ describe("the ask before a block", () => {
 		expect(s.result).toBe("deny");
 	});
 
+	it("distinguishes session approval from one-shot approval", () => {
+		const scoped = new BlockPrompt(30_000, Date.now, true);
+		scoped.press("y");
+		expect(scoped.result).toBe("allow-session");
+		const once = new BlockPrompt(30_000, Date.now, true);
+		once.press("Y");
+		expect(once.result).toBe("allow");
+		const unavailable = new BlockPrompt(30_000);
+		unavailable.press("y");
+		expect(unavailable.result).toBeUndefined();
+	});
+
 	it("keeps the block when the time runs out, and not before", () => {
 		const c = clock();
 		const p = new BlockPrompt(30_000, c.now);
@@ -43,6 +55,49 @@ describe("the ask before a block", () => {
 		expect(p.result).toBe("timeout");
 	});
 
+	it("pauses the deadline when the user requests an explanation", () => {
+		const c = clock();
+		const p = new BlockPrompt(30_000, c.now);
+		c.advance(5_000);
+		p.press("e");
+		c.advance(60_000);
+		p.tick();
+		expect(p.result).toBeUndefined();
+		expect(p.secondsLeft()).toBe(25);
+		p.press("n");
+		expect(p.result).toBe("deny");
+	});
+
+	it("shows command details without executing or approving, and stays paused on return", () => {
+		const c = clock();
+		const p = new BlockPrompt(30_000, c.now);
+		const view = new BlockPromptView(p, { toolName: "bash", input: { command: "ssh torrent make check", timeout: 60 }, reason: "Remote execution needs approval.", timeoutSeconds: 30 }, plain);
+		view.handleInput("e");
+		const detail = view.render(80).join("\n");
+		expect(detail).toContain("Exact command (not executed)");
+		expect(detail).toContain("ssh torrent make check");
+		expect(detail).toContain("Remote execution needs approval.");
+		c.advance(60_000);
+		p.tick();
+		view.handleInput("e");
+		expect(p.result).toBeUndefined();
+		expect(view.render(80).join("\n")).toContain("Timer stopped");
+		view.handleInput("Y");
+		expect(p.result).toBe("allow");
+	});
+
+	it("scrolls long explanations and escape returns without denying", () => {
+		const p = new BlockPrompt(30_000);
+		const view = new BlockPromptView(p, { toolName: "bash", input: { command: "echo x\n".repeat(50) }, reason: "Review command", timeoutSeconds: 30 }, plain, () => 12);
+		view.handleInput("e");
+		const first = view.render(60);
+		view.handleInput("j");
+		expect(view.render(60)).not.toEqual(first);
+		view.handleInput("\x1b");
+		expect(p.result).toBeUndefined();
+		expect(view.render(60).join("\n")).toContain("Timer stopped");
+	});
+
 	it("names the call, gives the reason, and counts down", () => {
 		const c = clock();
 		const p = new BlockPrompt(30_000, c.now);
@@ -50,7 +105,7 @@ describe("the ask before a block", () => {
 		const lines = view.render(60);
 		expect(lines[0]).toBe("● Bash(rm -rf build)");
 		expect(lines[1]).toBe("  ⎿  Deletes files.");
-		expect(lines).toContain("❯ Allow (y)");
+		expect(lines).toContain("❯ Allow once (Y)");
 		expect(lines).toContain("  Deny (n)");
 		expect(lines).toContain("No answer in 30s keeps the block");
 		c.advance(4_000);

@@ -4,6 +4,27 @@ import { DENIAL_LIMIT, grantKey, PermissionLedger } from "./denials.ts";
 const blocked = (command: string, toolCallId = "c1") => ({ toolCallId, toolName: "bash", input: { command }, reason: "no" });
 
 describe("the permission ledger", () => {
+	it("reuses only the displayed command scope in the same cwd", () => {
+		const l = new PermissionLedger();
+		l.approveSimilar("bash", { command: "nixfmt file.nix", timeout: 30 }, "/work");
+		expect(l.isSimilarlyGranted("bash", { command: "nixfmt file.nix", timeout: 90 }, "/work")).toBe(true);
+		expect(l.isSimilarlyGranted("bash", { command: "nixfmt other.nix" }, "/work")).toBe(false);
+		expect(l.isSimilarlyGranted("bash", { command: "nixfmt file.nix" }, "/other")).toBe(false);
+		expect(l.isGranted("bash", { command: "nixfmt file.nix", timeout: 30 })).toBe(false);
+		const restored = new PermissionLedger();
+		restored.restore(l.snapshot());
+		expect(restored.isSimilarlyGranted("bash", { command: "nixfmt file.nix" }, "/work")).toBe(true);
+		restored.revoke(restored.grantList()[0]!.key);
+		expect(restored.isSimilarlyGranted("bash", { command: "nixfmt file.nix" }, "/work")).toBe(false);
+	});
+
+	it("file-edit approval covers new edits only to the named path and tool", () => {
+		const l = new PermissionLedger();
+		l.approveSimilar("edit", { path: "a.ts", edits: [{ oldText: "x", newText: "y" }] }, "/work");
+		expect(l.isSimilarlyGranted("edit", { path: "/work/a.ts", edits: [{ oldText: "y", newText: "z" }] }, "/work")).toBe(true);
+		expect(l.isSimilarlyGranted("edit", { path: "b.ts", edits: [] }, "/work")).toBe(false);
+		expect(l.isSimilarlyGranted("write", { path: "a.ts", content: "z" }, "/work")).toBe(false);
+	});
 	it("keeps denials newest first, up to its limit", () => {
 		const l = new PermissionLedger();
 		for (let i = 0; i < DENIAL_LIMIT + 5; i++) l.record(blocked(`echo ${i}`));
