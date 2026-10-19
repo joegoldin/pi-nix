@@ -22,12 +22,15 @@ function harness() {
 	const events = new Map<string, (event: any, ctx: ExtensionContext) => void>();
 	const shortcuts = new Map<string, { handler: (ctx: ExtensionContext) => void }>();
 	let input: ((data: string) => unknown) | undefined;
+	let widget: { render: (width: number) => string[] } | undefined;
 	const state = { editor: "draft", pending: ["queued one", "queued two"], idle: false, aborts: 0, sent: [] as string[] };
 	const ctx = {
 		hasUI: true,
+		mode: "tui",
 		isIdle: () => state.idle,
 		hasPendingMessages: () => state.pending.length > 0,
 		ui: {
+			setWidget: (_key: string, factory: Function | undefined) => { widget = factory?.({}, { fg: (_slot: string, text: string) => text }); },
 			getEditorText: () => state.editor,
 			setEditorText: (text: string) => { state.editor = text; },
 			onTerminalInput: (handler: typeof input) => { input = handler; return () => { input = undefined; }; },
@@ -47,13 +50,27 @@ function harness() {
 	registerSteerNow(pi);
 	const emit = (event: string, data = {}) => events.get(event)?.(data, ctx);
 	emit("session_start");
-	return { state, emit, input: (data: string) => input?.(data), sendNow: () => {
+	return { state, emit, hint: (width = 80) => widget?.render(width) ?? [], input: (data: string) => input?.(data), sendNow: () => {
 		expect(shortcuts.has("ctrl+enter")).toBe(true);
 		shortcuts.get("ctrl+enter")!.handler(ctx);
 	} };
 }
 
 describe("Ctrl+Enter steering", () => {
+	it("shows send-now and restore shortcuts beside a busy queue", () => {
+		const h = harness();
+		expect(h.hint().join("\n")).toContain("Ctrl+Enter sends now");
+		expect(h.hint().join("\n")).toContain("Esc restores to editor");
+		expect(h.hint(30).every((line) => line.length <= 30)).toBe(true);
+		h.state.pending = [];
+		expect(h.hint()).toEqual([]);
+		h.state.pending = ["queued"];
+		h.state.idle = true;
+		expect(h.hint()).toEqual([]);
+		h.emit("session_shutdown");
+		expect(h.hint()).toEqual([]);
+	});
+
 	it("aborts and sends the restored queue once settled, preserving the draft", () => {
 		const h = harness();
 		h.sendNow();

@@ -5,7 +5,7 @@
 // is idle, by a continuation prompt carrying the whole objective again. The
 // loop ends only through those tools, or a safety pause: too many automatic
 // turns, the same tool-free reply over and over, an exhausted token budget,
-// Esc, or an error.
+// Esc without queued guidance, or an error.
 //
 // The goal lives in a "goal-state" session entry, so it follows branches. A
 // hidden "goal-contract" message states the current objective and goal_id to
@@ -685,6 +685,13 @@ export function registerGoal(pi: ExtensionAPI, config: () => UiConfig): void {
 		goal.iteration++;
 		recordUsage(ctx);
 		const last = [...(event.messages as MessageLike[])].reverse().find((m) => m.role === "assistant");
+		// The queue may already be restored to the editor by the time abort ends.
+		// Let that guidance start the next run, not an automatic continuation.
+		if (last?.stopReason !== "error" && (globalThis as Record<symbol, unknown>)[Symbol.for("pi-custom.steering")] === true) {
+			continuationWanted = false;
+			persist();
+			return;
+		}
 		if (last?.stopReason === "aborted") {
 			stop(ctx, "paused");
 			notify("Goal paused after interruption. Run /goal resume to continue.", "warning");

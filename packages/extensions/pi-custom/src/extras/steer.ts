@@ -5,10 +5,11 @@
 // Escape remains pi's normal abort and cancels a pending send-now request.
 //
 // While this abort settles, STEERING distinguishes guidance from cancellation
-// for auto mode's existing interruption handling.
+// for auto mode and /goal. Escape with a queue also preserves the goal while
+// the restored guidance waits in the editor; it does not submit that text.
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { matchesKey } from "@earendil-works/pi-tui";
+import { matchesKey, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 
 export const STEERING = Symbol.for("pi-custom.steering");
 
@@ -51,9 +52,20 @@ export function registerSteerNow(pi: ExtensionAPI): void {
 		unsubscribe?.();
 		unsubscribe = undefined;
 		reset();
+		if (ctx.hasUI && ctx.mode === "tui") {
+			ctx.ui.setWidget("pi-custom-steer", (_tui, theme) => ({
+				render: (width) => !ctx.isIdle() && ctx.hasPendingMessages()
+					? wrapTextWithAnsi(theme.fg("dim", "Queued messages: Ctrl+Enter sends now · Esc restores to editor"), Math.max(1, width))
+					: [],
+				invalidate() {},
+			}), { placement: "aboveEditor" });
+		}
 		if (!ctx.hasUI || typeof ctx.ui.onTerminalInput !== "function") return;
 		unsubscribe = ctx.ui.onTerminalInput((data) => {
-			if (matchesKey(data, "escape")) reset();
+			if (matchesKey(data, "escape")) {
+				reset();
+				if (!ctx.isIdle() && ctx.hasPendingMessages()) steering(true);
+			}
 			return undefined;
 		});
 	});
@@ -72,7 +84,8 @@ export function registerSteerNow(pi: ExtensionAPI): void {
 		pi.sendUserMessage(queued);
 	});
 
-	pi.on("session_shutdown", () => {
+	pi.on("session_shutdown", (_event, ctx) => {
+		if (ctx.hasUI && ctx.mode === "tui") ctx.ui.setWidget("pi-custom-steer", undefined);
 		unsubscribe?.();
 		unsubscribe = undefined;
 		reset();
