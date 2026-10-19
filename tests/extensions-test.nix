@@ -34,6 +34,7 @@ let
     "ext-pi-custom"
     "ext-pi-foreign-skills"
     "ext-pi-lens"
+    "ext-pi-mcp-adapter"
     "ext-pi-notify"
     "ext-pi-permissions"
     "ext-pi-subagents"
@@ -106,6 +107,7 @@ pkgs.runCommand "pi-nix-extensions-tests" { nativeBuildInputs = [ pkgs.jq ]; } '
 
   check ${exts.ext-pi-subagents} deps
   check ${exts.ext-pi-permissions} deps
+  check ${exts.ext-pi-mcp-adapter} deps
 
   # Skills and prompts advertised through the passthru must be real directories.
   test -d ${exts.ext-pi-subagents}/skills

@@ -34,6 +34,8 @@ let
       bunLock = if pin.bundled then null else ./. + "/${slug}/bun.lock";
       bunNix = if pin.bundled then null else ./. + "/${slug}/bun.nix";
       promptFragment = null;
+      # recheck's native regex validator links against zlib on Linux.
+      extraBuildInputs = lib.optionals (name == "pi-mcp-adapter") [ pkgs.zlib ];
     };
   # First-party extensions. No pin, no lockfile: the source is in this repo and
   # neither package has a runtime dependency, so mkPiExtension's local-src arm

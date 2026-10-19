@@ -337,6 +337,25 @@ Pinned extensions are exposed as `packages.<system>.ext-<slug>`:
 | `ext-pi-subagents` | `pi-subagents` | subagents |
 | `ext-pi-lens` | `pi-lens` | LSP and linter feedback, its tools deferred behind its loader |
 | `ext-pi-web-access` | `pi-web-access` | web search and fetch |
+| `ext-pi-mcp-adapter` | `pi-mcp-adapter` | on-demand MCP servers, a discovery/call proxy, prompts, and authentication UI |
+
+To replace built-in MCP while retaining codemode:
+
+```nix
+programs.pi.coding-agent = {
+  extensionPackages = [ inputs.pi-nix.packages.${pkgs.stdenv.hostPlatform.system}.ext-pi-mcp-adapter ];
+  settings.extensions = [ "-builtin:mcp" ];
+  settings.defaultTools = [ "+codemode" ];
+};
+```
+
+The adapter reads shared `.mcp.json` files and Pi's existing `mcp.json` files;
+no server definitions need copying. Adapter-specific settings belong in
+`mcp-adapter.json`. Project servers retain the adapter's trust/approval checks.
+Codemode can call `tools.mcp(...)`; the separate `mcpScript` tool stays off by
+default. Permission extensions see proxy calls, not each underlying MCP tool's
+native identity. Existing built-in OAuth sign-ins require the adapter's import
+flow; the two clients do not share subsequent sign-ins or sign-outs.
 
 Five more are first-party, built from `packages/extensions/` in this repo
 rather than from a pin:

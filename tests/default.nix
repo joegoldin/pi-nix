@@ -13,6 +13,7 @@ in
   smoke = import ./smoke-test.nix args;
   builders = import ./lib-test.nix args;
   extensions = import ./extensions-test.nix args;
+  mcp-adapter = import ./mcp-adapter-test.nix args;
   update-app = import ./update-app-test.nix args;
   options = import ./options-test.nix args;
   additive = import ./additive-test.nix args;
