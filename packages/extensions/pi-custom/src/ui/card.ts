@@ -58,7 +58,7 @@ export interface CardLayout {
 	 * The pointer is over the card: everything under the header brightens, in
 	 * bold. The caller also hands in a theme whose greys are the text colour;
 	 * bold is what lifts the rows whose colours are their own, such as
-	 * highlighted code. A background is kept for what is open.
+	 * highlighted code. The caller supplies a full-row hover background.
 	 */
 	hovered?: boolean;
 }

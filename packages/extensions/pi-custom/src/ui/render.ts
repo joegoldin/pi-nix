@@ -99,13 +99,14 @@ interface ThemeColoursLike {
 interface Backgrounds {
 	key: string;
 	panel?: string;
+	hover?: string;
 }
 
 // The panel is toolPendingBg, the one background slot themes keep a neutral
 // grey (dark okhsl(229 5% 24%), light okhsl(248 3% 91%)); the other slots carry
 // a meaning in their tint: blue selection, green success, red error, violet
-// custom messages. Hover paints no background; it brightens grey text to the
-// text colour, as Claude Code's does.
+// custom messages. Hover lifts that panel toward the text colour so even
+// short summaries and already-open cards have a visible full-row highlight.
 //
 // pi's system theme leaves every panel on the terminal's default background
 // when the terminal reports no colours. The theme still has a concrete guess
@@ -113,6 +114,7 @@ interface Backgrounds {
 // enough to show: mixing is perceptual, and a step of a tenth from black is
 // still black to the eye.
 const PANEL_MIX = 0.22;
+const HOVER_MIX = 0.12;
 const DEFAULT_BG = "\x1b[49m";
 let backgroundCache: Backgrounds | undefined;
 
@@ -123,13 +125,18 @@ function backgroundsFor(theme: UiTheme): Omit<Backgrounds, "key"> {
 	const mode = t.getColorMode?.();
 	const base = t.colors?.toolPendingBg;
 	const text = t.colors?.text;
-	const key = `${slot}|${mode}|${base ? JSON.stringify(base) : ""}`;
+	const key = `${slot}|${mode}|${base ? JSON.stringify(base) : ""}|${text ? JSON.stringify(text) : ""}`;
 	if (backgroundCache?.key === key) return backgroundCache;
 	if (!base || !text || !mode) {
-		backgroundCache = { key, panel: slot === DEFAULT_BG ? undefined : slot };
+		backgroundCache = { key, panel: slot === DEFAULT_BG ? undefined : slot, hover: slot === DEFAULT_BG ? undefined : slot };
 		return backgroundCache;
 	}
-	backgroundCache = { key, panel: slot !== DEFAULT_BG ? slot : backgroundAnsi(mixColors(base, text, PANEL_MIX), mode) };
+	const panel = slot !== DEFAULT_BG ? base : mixColors(base, text, PANEL_MIX);
+	backgroundCache = {
+		key,
+		panel: slot !== DEFAULT_BG ? slot : backgroundAnsi(panel, mode),
+		hover: backgroundAnsi(mixColors(panel, text, HOVER_MIX), mode),
+	};
 	return backgroundCache;
 }
 
@@ -188,7 +195,12 @@ class LiveCard {
 		const cached = this.cached;
 		if (cached && key.length === cached.key.length && key.every((value, i) => value === cached.key[i])) return cached.lines;
 		const margin = " ".repeat(pad);
-		const lines = this.renderRows(Math.max(1, width - pad * 2), config, plan).map((line) => `${margin}${line}${margin}`);
+		const hover = backgroundsFor(this.theme).hover;
+		const lines = this.renderRows(Math.max(1, width - pad * 2), config, plan).map((line) => {
+			const padded = `${margin}${line}${margin}`;
+			// The pointer target includes pi's output margins, not just our inner row.
+			return hover && line.startsWith(hover) ? paint(padded, width, hover) : padded;
+		});
 		this.cached = { key, lines };
 		return lines;
 	}
@@ -206,6 +218,9 @@ class LiveCard {
 			if (plan.live && !plan.inPanel && latest) {
 				const shade = hovered ? "text" : "dim";
 				rows.push(truncateToWidth(this.theme.fg(shade, `${ELBOW_PREFIX}${callActivity(latest.toolName, latest.args, this.context.cwd)}`), w, "…"));
+			}
+			if (hovered && backgrounds.hover) {
+				for (let i = 0; i < rows.length; i++) rows[i] = paint(rows[i], w, backgrounds.hover);
 			}
 		}
 		this.headerRows = rows.length;
@@ -270,8 +285,8 @@ class LiveCard {
 		// up under the pointer, and a click on it is not passed on.
 		this.opens = opens(plain, layout, this.theme, width);
 		layout.expanded &&= this.opens;
-		layout.background = layout.expanded || inPanel ? backgrounds.panel : undefined;
 		layout.hovered = this.opens && (this.deps.hover?.isHovered(`card:${this.context.toolCallId}`) ?? false);
+		layout.background = layout.hovered ? backgrounds.hover : layout.expanded || inPanel ? backgrounds.panel : undefined;
 		const theme = layout.hovered ? brightened(this.theme) : this.theme;
 		layout.expandHint = theme.fg("muted", `(click or ${this.deps.expandKey()})`);
 		// The header keeps its colours; only what is under it lights up.

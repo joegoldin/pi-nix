@@ -123,7 +123,10 @@ completer.
   again on every paint, as the answer changes when a call joins a run. Rewriting the message to drop
   thinking was ruled out: the stored message is what the model is sent back,
   signatures and all.
-- **Hover.** pi sends a move to the component under the pointer only, so a card
+- **Hover.** Expandable cards and run headers paint a full-width background,
+  including output margins. The hover shade is lighter than an open card's
+  resting panel, and the original background returns when the pointer leaves.
+  pi sends a move to the component under the pointer only, so a card
   knows when the pointer arrives but not when it leaves. Every pointer report
   either reaches a card, which claims it, or it does not, and then nothing is
   hovered. Seeing the reports takes a stdin listener of our own: in fullscreen,

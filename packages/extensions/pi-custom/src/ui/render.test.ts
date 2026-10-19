@@ -275,6 +275,34 @@ describe("backgrounds", () => {
 });
 
 describe("hover", () => {
+	it("fills a compact hovered row including the output margins, then restores it on leave", () => {
+		const { hover, row, contexts } = setup({ groupRuns: false, toolMode: "compact" });
+		const card = row("compact", "seq", LONG);
+		contexts.get("compact")!.outputPad = 2;
+		const idle = card.render(60);
+		expect(idle).toHaveLength(1);
+		card.handleMouse(mouse("move", 0));
+		const lit = card.render(60);
+		expect(lit).toHaveLength(1);
+		expect(lit[0].startsWith("\x1b[48")).toBe(true);
+		expect(Bun.stringWidth(lit[0])).toBe(60);
+		expect(strip(lit[0]).trim()).toBe(strip(idle[0]).trim());
+		hover.settle();
+		hover.settle();
+		expect(card.render(60)).toEqual(idle);
+	});
+
+	it("distinguishes hovered expanded cards from their resting panel", () => {
+		const { row } = setup({ groupRuns: false });
+		const card = row("expanded", "seq", LONG, { expanded: true });
+		const idle = card.render(60);
+		expect(idle[0].startsWith(PANEL)).toBe(true);
+		card.handleMouse(mouse("move", 1));
+		const lit = card.render(60);
+		expect(lit.every((l) => l.startsWith("\x1b[48") && Bun.stringWidth(l) === 60)).toBe(true);
+		expect(lit[0].startsWith(PANEL)).toBe(false);
+	});
+
 	it("brightens the card's fold line under the pointer, until the pointer leaves", () => {
 		const { hover, row, repaints } = setup({ groupRuns: false });
 		const card = row("a", "seq", LONG);
@@ -284,8 +312,8 @@ describe("hover", () => {
 		expect(card.handleMouse(mouse("move", 1))).toEqual({ handled: true, render: false });
 		const lit = card.render(60);
 		expect(fold(lit)).toContain(TEXT);
-		// A collapsed card gets no background from hover.
-		expect(lit.some((l) => l.includes("\x1b[48"))).toBe(false);
+		// The hover covers the full card, including empty cells after the text.
+		expect(lit.every((l) => l.startsWith("\x1b[48") && Bun.stringWidth(l) === 60)).toBe(true);
 
 		hover.settle();
 		hover.settle();
@@ -303,7 +331,8 @@ describe("hover", () => {
 		expect(hover.isHovered("run:a")).toBe(true);
 		const lines = head.render(60);
 		expect(lines[0]).toContain(TEXT);
-		expect(lines[0].startsWith("\x1b[48")).toBe(false);
+		expect(lines[0].startsWith("\x1b[48")).toBe(true);
+		expect(Bun.stringWidth(lines[0])).toBe(60);
 		expect(lines[1].startsWith(PANEL)).toBe(true);
 		head.handleMouse(mouse("move", 1));
 		expect(hover.isHovered("card:a")).toBe(true);
