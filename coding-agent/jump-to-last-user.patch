@@ -79,7 +79,7 @@
  		this.openUrl = options.openUrl;
  		this.onRightClickPaste = options.onRightClickPaste;
  		this.copyOnSelect = options.copyOnSelect ?? true;
-@@ -1033,6 +1038,20 @@
+@@ -1034,6 +1039,20 @@
  	}
  
  	private handleScrollToEndIndicatorMouseEvent(event: SgrMouseEvent): boolean {
@@ -100,7 +100,7 @@
  		const rect = this.scrollToEndIndicatorRect;
  		if (!rect || event.release || (event.button & 32) !== 0 || (event.button & 3) !== 0) return false;
  		if (event.y !== rect.row || event.x < rect.column || event.x >= rect.column + rect.width) return false;
-@@ -1661,6 +1680,40 @@
+@@ -1662,6 +1681,42 @@
  		return result;
  	}
  
@@ -111,6 +111,8 @@
 +		const box = getScrollViewBox(layout, scrollView);
 +		const clip = box?.clip;
 +		if (!clip || clip.width <= 0 || clip.height <= 1) return screen;
++		const maxScrollTop = Math.max(0, (box?.scrollContentLines?.length ?? 0) - scrollView.viewportHeight);
++		if (scrollView.scrollTop >= maxScrollTop) return screen;
 +		const targetRow =
 +			box?.scrollContentLines?.findLastIndex(
 +				(line, row) => row <= scrollView.scrollTop && OSC133_USER_START.test(line),
@@ -141,8 +143,8 @@
  	private compositeFlashes(screen: string[], width: number, height: number): string[] {
  		const flashLines = this.flashes.render(width).slice(-height);
  		if (flashLines.length === 0) return screen;
-@@ -1687,6 +1740,7 @@
- 		let screen = nextLayout.lines.map((line) => line.replace(OSC133_ZONE_PREFIX, ""));
+@@ -1689,6 +1744,7 @@
+ 		let screen = this.resolveFakeCursors(nextLayout.lines.map((line) => line.replace(OSC133_ZONE_PREFIX, "")));
  		screen = this.applySearchHighlights(screen, nextLayout);
  		screen = this.compositeScrollToEndIndicator(screen, nextLayout, width);
 +		screen = this.compositeScrollToLastPromptIndicator(screen, nextLayout, width);
@@ -151,7 +153,7 @@
  		screen = this.applySelection(screen, nextLayout);
 --- /dev/null
 +++ b/packages/tui/test/jump-to-last-user.test.ts
-@@ -0,0 +1,155 @@
+@@ -0,0 +1,201 @@
 +import assert from "node:assert/strict";
 +import { it } from "node:test";
 +import { ScrollView } from "../src/components/scroll-view.ts";
@@ -181,6 +183,9 @@
 +	tui.start();
 +	try {
 +		await terminal.waitForRender();
++		transcript.scrollBy(-1);
++		tui.requestRender();
++		await terminal.waitForRender();
 +		assert.ok(terminal.getViewport()[0].includes(label));
 +		terminal.sendInput("\x1b[<0;30;1M");
 +		terminal.sendInput("\x1b[<0;30;1m");
@@ -207,6 +212,9 @@
 +	tui.setLayoutRoot(transcript);
 +	tui.start();
 +	try {
++		await terminal.waitForRender();
++		transcript.scrollBy(-1);
++		tui.requestRender();
 +		await terminal.waitForRender();
 +		assert.ok(terminal.getViewport()[0].includes(label));
 +		text.setText("new session\nno user messages");
@@ -246,6 +254,9 @@
 +		await terminal.waitForRender();
 +	};
 +	try {
++		await terminal.waitForRender();
++		transcript.scrollBy(-1);
++		tui.requestRender();
 +		await terminal.waitForRender();
 +		await click(30);
 +		assert.equal(transcript.scrollTop, 22);
@@ -296,6 +307,9 @@
 +	tui.start();
 +	try {
 +		await terminal.waitForRender();
++		transcript.scrollBy(-1);
++		tui.requestRender();
++		await terminal.waitForRender();
 +		terminal.sendInput("\x1b[<0;30;1M");
 +		terminal.sendInput("\x1b[<0;30;1m");
 +		await terminal.waitForRender();
@@ -303,6 +317,40 @@
 +		assert.equal(transcript.isFollowingEnd, false);
 +		assert.ok(terminal.getViewport().some((line) => line.includes("last user")));
 +		assert.ok(terminal.getViewport().some((line) => line.includes("second line")));
++	} finally {
++		tui.stop();
++	}
++});
++
++it("hides the previous-user control at the bottom and clears its click target", async () => {
++	const terminal = new VirtualTerminal(60, 6);
++	const tui = new TuiAltScreen(terminal, undefined, undefined, { scrollToLastPromptIndicator: () => label });
++	const transcript = new ScrollView(new Text(`${prompt}user\n${"answer\n".repeat(20)}`, 0, 0), {
++		follow: "end", primary: true,
++	});
++	tui.setLayoutRoot(transcript);
++	tui.start();
++	try {
++		await terminal.waitForRender();
++		assert.ok(!terminal.getViewport()[0].includes(label));
++		transcript.scrollBy(-1);
++		tui.requestRender();
++		await terminal.waitForRender();
++		assert.ok(terminal.getViewport()[0].includes(label));
++		transcript.scrollToEnd();
++		tui.requestRender();
++		await terminal.waitForRender();
++		assert.ok(!terminal.getViewport()[0].includes(label));
++		const bottom = transcript.scrollTop;
++		terminal.sendInput("\x1b[<0;30;1M");
++		terminal.sendInput("\x1b[<0;30;1m");
++		await terminal.waitForRender();
++		assert.equal(transcript.scrollTop, bottom);
++		// Being at the bottom does not necessarily mean following new output.
++		transcript.scrollTo(bottom, { disableFollow: true });
++		tui.requestRender();
++		await terminal.waitForRender();
++		assert.ok(!terminal.getViewport()[0].includes(label));
 +	} finally {
 +		tui.stop();
 +	}
