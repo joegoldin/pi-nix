@@ -2,8 +2,7 @@
 // transition and every message is testable without pi.
 //
 // Shapes and wording follow rpiv-todo: sessions recorded with it replay into
-// this list, because the state travels in each todo result's details as
-// { tasks, nextId }.
+// this list. Tool results and idle-reset entries carry { tasks, nextId }.
 
 import { wrapTextWithAnsi } from "@earendil-works/pi-tui";
 
@@ -13,6 +12,8 @@ export type TodoAction = "create" | "update" | "list" | "get" | "delete" | "clea
 export interface Todo {
 	id: number;
 	subject: string;
+	kind?: "task" | "group";
+	parentId?: number;
 	description?: string;
 	activeForm?: string;
 	status: TodoStatus;
@@ -29,6 +30,8 @@ export interface TodoState {
 export interface TodoParams {
 	action: TodoAction;
 	subject?: string;
+	kind?: "task" | "group";
+	parentId?: number | null;
 	description?: string;
 	activeForm?: string;
 	status?: TodoStatus;
@@ -87,7 +90,70 @@ function sameJson(a: unknown, b: unknown): boolean {
 	return JSON.stringify(a) === JSON.stringify(b);
 }
 
+export function groupProgress(state: TodoState, id: number): { done: number; total: number; status: TodoStatus } {
+	const children = state.tasks.filter((t) => t.parentId === id && t.status !== "deleted");
+	const done = children.filter((t) => t.status === "completed").length;
+	const status =
+		children.length && done === children.length
+			? "completed"
+			: done || children.some((t) => t.status === "in_progress")
+				? "in_progress"
+				: "pending";
+	return { done, total: children.length, status };
+}
+
+function deriveGroups(state: TodoState): TodoState {
+	return {
+		...state,
+		tasks: state.tasks.map((t) =>
+			t.kind === "group" && t.status !== "deleted" ? { ...t, status: groupProgress(state, t.id).status } : t,
+		),
+	};
+}
+
+/** Idle and restored sessions must not claim that an agent is still working. */
+export function pauseActive(state: TodoState): TodoState {
+	return deriveGroups({
+		...state,
+		tasks: state.tasks.map((t) => t.kind !== "group" && t.status === "in_progress" ? { ...t, status: "pending" as const } : t),
+	});
+}
+
+function validateGrouping(tasks: Todo[]): string | undefined {
+	for (const t of tasks.filter((t) => t.status !== "deleted")) {
+		if (t.kind === "group" && t.parentId !== undefined) return "groups must be top-level; only one level of nesting is allowed";
+		if (t.parentId !== undefined) {
+			const parent = tasks.find((p) => p.id === t.parentId);
+			if (!parent || parent.kind !== "group" || parent.status === "deleted") return `parentId: #${t.parentId} must be a live group`;
+		}
+		if (t.kind === "group" && t.blockedBy?.length) return "dependencies belong to tasks, not groups";
+		if (t.blockedBy?.some((id) => tasks.find((dep) => dep.id === id)?.kind === "group")) return "dependencies must reference tasks, not groups";
+	}
+}
+
 export function reduce(state: TodoState, p: TodoParams): Outcome {
+	const outcome = reduceAction(state, p);
+	if (outcome.error || outcome.state === state) return outcome;
+	const error = validateGrouping(outcome.state.tasks);
+	if (error) return fail(state, error);
+	const active = p.action === "update" ? outcome.state.tasks.find((t) => t.id === p.id) : undefined;
+	const paused: number[] = [];
+	if (active?.kind !== "group" && active?.status === "in_progress") {
+		outcome.state = {
+			...outcome.state,
+			tasks: outcome.state.tasks.map((t) => {
+				if (t.id === active.id || t.kind === "group" || t.status !== "in_progress") return t;
+				if (active.owner?.trim() && t.owner?.trim() && active.owner.trim() !== t.owner.trim()) return t;
+				paused.push(t.id);
+				return { ...t, status: "pending" as const };
+			}),
+		};
+	}
+	if (paused.length) outcome.text += `; returned ${paused.map((id) => `#${id}`).join(", ")} to pending`;
+	return { ...outcome, state: deriveGroups(outcome.state) };
+}
+
+function reduceAction(state: TodoState, p: TodoParams): Outcome {
 	const find = (id: number) => state.tasks.find((t) => t.id === id);
 	switch (p.action) {
 		case "create": {
@@ -98,6 +164,8 @@ export function reduce(state: TodoState, p: TodoParams): Outcome {
 				if (dep.status === "deleted") return fail(state, `blockedBy: #${b} is deleted`);
 			}
 			const task: Todo = { id: state.nextId, subject: p.subject, status: "pending" };
+			if (p.kind === "group") task.kind = "group";
+			if (p.parentId != null) task.parentId = p.parentId;
 			if (p.description) task.description = p.description;
 			if (p.activeForm) task.activeForm = p.activeForm;
 			if (p.blockedBy?.length) task.blockedBy = [...new Set(p.blockedBy)];
@@ -113,6 +181,8 @@ export function reduce(state: TodoState, p: TodoParams): Outcome {
 			const current = find(p.id);
 			if (!current) return fail(state, `#${p.id} not found`);
 			const mutable =
+				p.kind !== undefined ||
+				p.parentId !== undefined ||
 				p.subject !== undefined ||
 				p.description !== undefined ||
 				p.activeForm !== undefined ||
@@ -124,9 +194,11 @@ export function reduce(state: TodoState, p: TodoParams): Outcome {
 			if (!mutable) {
 				return fail(
 					state,
-					"update requires at least one mutable field: subject, description, activeForm, status, owner, metadata, addBlockedBy, or removeBlockedBy",
+					"update requires at least one mutable field: subject, kind, parentId, description, activeForm, status, owner, metadata, addBlockedBy, or removeBlockedBy",
 				);
 			}
+			if ((p.kind ?? current.kind) === "group" && p.status && p.status !== "deleted") return fail(state, "group status is derived from its children");
+			if (current.kind === "group" && p.kind === "task") return fail(state, "groups cannot be converted to tasks; move their children instead");
 			if (p.status && p.status !== current.status && !TRANSITIONS[current.status].includes(p.status)) {
 				return fail(state, `illegal transition ${current.status} → ${p.status}`);
 			}
@@ -144,6 +216,9 @@ export function reduce(state: TodoState, p: TodoParams): Outcome {
 			blockedBy = [...blockedBy, ...adding];
 			const next: Todo = { ...current };
 			if (p.subject !== undefined) next.subject = p.subject;
+			if (p.kind !== undefined) next.kind = p.kind;
+			if (p.parentId === null) delete next.parentId;
+			else if (p.parentId !== undefined) next.parentId = p.parentId;
 			if (p.description !== undefined) next.description = p.description;
 			if (p.activeForm !== undefined) next.activeForm = p.activeForm;
 			if (p.status !== undefined) next.status = p.status;
@@ -177,8 +252,12 @@ export function reduce(state: TodoState, p: TodoParams): Outcome {
 				state,
 				text: shown
 					.map((t) => {
-						let line = `[${t.status}] #${t.id} ${sanitize(t.subject)}`;
-						if (t.status === "in_progress" && t.activeForm) line += ` (${sanitize(t.activeForm)})`;
+						const progress = groupProgress(state, t.id);
+						let line = t.kind === "group"
+							? `[group ${t.status}] #${t.id} ${sanitize(t.subject)} (${progress.done}/${progress.total})`
+							: `[${t.status}] #${t.id} ${sanitize(t.subject)}`;
+						if (t.parentId !== undefined) line += ` (parent: #${t.parentId})`;
+						if (t.kind !== "group" && t.status === "in_progress" && t.activeForm) line += ` (${sanitize(t.activeForm)})`;
 						if (t.blockedBy?.length) line += ` ⛓ ${t.blockedBy.map((b) => `#${b}`).join(",")}`;
 						return line;
 					})
@@ -191,6 +270,11 @@ export function reduce(state: TodoState, p: TodoParams): Outcome {
 			if (!t) return fail(state, `#${p.id} not found`);
 			const blocks = state.tasks.filter((o) => o.blockedBy?.includes(t.id)).map((o) => `#${o.id}`);
 			const lines = [`#${t.id} [${t.status}] ${sanitize(t.subject)}`];
+			if (t.kind === "group") {
+				const { done, total } = groupProgress(state, t.id);
+				lines.push(`  group: ${done}/${total} completed (derived)`, `  children: ${state.tasks.filter((c) => c.parentId === t.id && c.status !== "deleted").map((c) => `#${c.id}`).join(", ") || "none"}`);
+			}
+			if (t.parentId !== undefined) lines.push(`  parent: #${t.parentId}`);
 			if (t.description) lines.push(`  description: ${sanitize(t.description)}`);
 			if (t.activeForm) lines.push(`  activeForm: ${sanitize(t.activeForm)}`);
 			if (t.blockedBy?.length) lines.push(`  blockedBy: ${t.blockedBy.map((b) => `#${b}`).join(", ")}`);
@@ -208,18 +292,28 @@ export function reduce(state: TodoState, p: TodoParams): Outcome {
 				text: `Deleted #${t.id}: ${sanitize(t.subject)}`,
 			};
 		}
-		case "clear":
-			return { state: { tasks: [], nextId: 1 }, text: `Cleared ${state.tasks.length} tasks` };
+		case "clear": {
+			const groups = state.tasks.filter((t) => t.kind === "group").length;
+			return {
+				state: { tasks: [], nextId: 1 },
+				text: `Cleared ${state.tasks.length - groups} tasks${groups ? ` and ${groups} ${groups === 1 ? "group" : "groups"}` : ""}`,
+			};
+		}
 	}
 }
 
 /** The latest todo state recorded on a branch, or the empty list. */
-export function replay(entries: Array<{ type?: string; message?: { role?: string; toolName?: string; details?: unknown } }>): TodoState {
+export function replay(entries: Array<{ type?: string; customType?: string; data?: unknown; message?: { role?: string; toolName?: string; details?: unknown } }>): TodoState {
 	for (let i = entries.length - 1; i >= 0; i--) {
-		const m = entries[i]?.message;
+		const entry = entries[i];
+		if (entry?.type === "custom" && entry.customType === "pi-custom:todo-state") {
+			const d = entry.data as TodoState | undefined;
+			if (Array.isArray(d?.tasks) && typeof d.nextId === "number") return deriveGroups(d);
+		}
+		const m = entry?.message;
 		if (entries[i]?.type !== "message" || m?.role !== "toolResult" || m.toolName !== "todo") continue;
 		const d = m.details as { tasks?: unknown; nextId?: unknown } | undefined;
-		if (Array.isArray(d?.tasks) && typeof d?.nextId === "number") return { tasks: d.tasks as Todo[], nextId: d.nextId };
+		if (Array.isArray(d?.tasks) && typeof d?.nextId === "number") return deriveGroups({ tasks: d.tasks as Todo[], nextId: d.nextId });
 	}
 	return { tasks: [], nextId: 1 };
 }
@@ -235,13 +329,96 @@ const GLYPH: Record<Exclude<TodoStatus, "deleted">, [string, string]> = {
 	completed: ["✓", "success"],
 };
 
-/**
- * The widget above the editor: a heading, then the list, cutting completed
- * tasks first when it runs out of rows. `hidden` holds completed ids from an
- * earlier turn, which fade out once the next turn starts.
- */
-// With a width, each task wraps under its subject instead of running off the
-// edge to be cut.
+export interface TodoWidgetRow {
+	text: string;
+	groupId?: number;
+}
+
+/** Logical rows retain group hit targets even when their text wraps. */
+export function widgetRows(
+	state: TodoState,
+	hidden: Set<number>,
+	maxLines: number,
+	theme: WidgetTheme,
+	showAll = false,
+	width?: number,
+	collapsedGroups = new Set<number>(),
+): TodoWidgetRow[] {
+	type Row = { task: Todo; parent?: Todo };
+	const live = state.tasks.filter((t) => t.status !== "deleted");
+	const blocks: Row[][] = [];
+	for (const root of live.filter((t) => t.parentId === undefined)) {
+		if (root.kind !== "group") {
+			if (!hidden.has(root.id)) blocks.push([{ task: root }]);
+			continue;
+		}
+		const children = live.filter((t) => t.parentId === root.id);
+		const visible = children.filter((t) => !hidden.has(t.id));
+		if (children.length && !visible.length) continue;
+		if (hidden.has(root.id) && !visible.some((t) => t.status !== "completed")) continue;
+		blocks.push([{ task: root }, ...(collapsedGroups.has(root.id) ? [] : visible.map((task) => ({ task, parent: root })))]);
+	}
+	const visible = blocks.flat();
+	if (!visible.length) return [];
+	const leaves = live.filter((t) => t.kind !== "group");
+	const done = leaves.filter((t) => t.status === "completed").length;
+	const open = visible.some(({ task }) => task.status !== "completed");
+	const lines: TodoWidgetRow[] = [{ text: `${theme.fg(open ? "accent" : "dim", open ? "●" : "○")} Todos (${done}/${leaves.length})` }];
+	const budget = showAll ? visible.length : Math.max(3, maxLines) - 1;
+	const overflow = visible.length > budget;
+	const selected: Row[] = [];
+	let remaining = overflow ? budget - 1 : budget;
+	const ordered = overflow ? [...blocks].sort((a, b) => Number(a[0].task.status === "completed") - Number(b[0].task.status === "completed")) : blocks;
+	for (const block of ordered) {
+		// A group header always precedes its children, even when the budget cuts the block.
+		if (!remaining) break;
+		const rows = overflow && block.length > 1
+			? [block[0], ...block.slice(1).sort((a, b) => Number(a.task.status === "completed") - Number(b.task.status === "completed"))]
+			: block;
+		const taken = rows.slice(0, remaining);
+		selected.push(...taken);
+		remaining -= taken.length;
+	}
+	const roots = selected.filter((row) => !row.parent);
+	const showIds = live.some((t) => t.kind === "group" || t.blockedBy?.length);
+	for (const row of selected) {
+		const t = row.task;
+		const root = row.parent ?? t;
+		const lastRoot = roots.at(-1)?.task === root && !overflow;
+		const siblings = selected.filter((r) => r.parent === row.parent);
+		const last = row.parent ? siblings.at(-1) === row : lastRoot;
+		const branch = row.parent ? (lastRoot ? "   " : "│  ") : "";
+		const group = t.kind === "group";
+		const [glyph, slot] = group ? [collapsedGroups.has(t.id) ? "▸" : "▾", "accent"] : GLYPH[t.status as keyof typeof GLYPH];
+		const subject = sanitize(t.subject);
+		const body = group ? theme.fg("accent", subject)
+			: t.status === "in_progress" ? theme.fg("accent", subject)
+			: t.status === "completed" ? theme.fg("muted", theme.strikethrough ? theme.strikethrough(subject) : subject)
+			: theme.fg("text", subject);
+		let text = `${showIds ? theme.fg("dim", `#${t.id} `) : ""}${body}`;
+		if (group) {
+			const { done, total } = groupProgress(state, t.id);
+			text += theme.fg("muted", ` (${done}/${total})`);
+		} else {
+			if (t.status === "in_progress" && t.activeForm) text += theme.fg("muted", ` (${sanitize(t.activeForm)})`);
+			if (t.blockedBy?.length) text += theme.fg("muted", ` ⛓ ${t.blockedBy.map((b) => `#${b}`).join(",")}`);
+		}
+		const prefix = `${theme.fg("dim", branch + (last ? "└─" : "├─"))} ${theme.fg(slot, glyph)} `;
+		const indent = theme.fg("dim", branch + (last ? " " : "│") + "    ");
+		const parts = width === undefined ? [text] : wrapTextWithAnsi(text, Math.max(1, width - (row.parent ? 8 : 5)));
+		parts.forEach((part, i) => lines.push({ text: (i === 0 ? prefix : indent) + part, ...(group ? { groupId: t.id } : {}) }));
+	}
+	if (overflow) {
+		const rest = visible.filter((row) => !selected.includes(row));
+		const tasks = rest.filter(({ task }) => task.kind !== "group");
+		const groups = rest.length - tasks.length;
+		const completed = tasks.filter(({ task }) => task.status === "completed").length;
+		const summary = tasks.length ? `+${tasks.length} more (${completed} completed, ${tasks.length - completed} unfinished)` : `+${groups} more groups`;
+		lines.push({ text: theme.fg("dim", `└─ ${summary}`) });
+	}
+	return lines;
+}
+
 export function widgetLines(
 	state: TodoState,
 	hidden: Set<number>,
@@ -249,45 +426,7 @@ export function widgetLines(
 	theme: WidgetTheme,
 	showAll = false,
 	width?: number,
+	collapsedGroups = new Set<number>(),
 ): string[] {
-	const visible = state.tasks.filter((t) => t.status !== "deleted" && !hidden.has(t.id));
-	if (visible.length === 0) return [];
-	const done = state.tasks.filter((t) => t.status === "completed").length;
-	const total = state.tasks.filter((t) => t.status !== "deleted").length;
-	const open = visible.some((t) => t.status !== "completed");
-	const lines = [`${theme.fg(open ? "accent" : "dim", open ? "●" : "○")} Todos (${done}/${total})`];
-	const budget = showAll ? visible.length : Math.max(1, Math.max(3, maxLines) - 1);
-	let rows = visible;
-	if (rows.length > budget) {
-		const unfinished = rows.filter((t) => t.status !== "completed");
-		rows = unfinished.length >= budget ? unfinished.slice(0, budget - 1) : [...unfinished, ...rows.filter((t) => t.status === "completed")].slice(0, budget - 1);
-	}
-	const showIds = visible.some((t) => t.blockedBy?.length);
-	rows.forEach((t, i) => {
-		const last = i === rows.length - 1 && rows.length === visible.length;
-		const [glyph, slot] = GLYPH[t.status as keyof typeof GLYPH];
-		const subject = sanitize(t.subject);
-		const body =
-			t.status === "in_progress"
-				? theme.fg("accent", subject)
-				: t.status === "completed"
-					? theme.fg("muted", theme.strikethrough ? theme.strikethrough(subject) : subject)
-					: theme.fg("text", subject);
-		let text = `${showIds ? theme.fg("dim", `#${t.id} `) : ""}${body}`;
-		if (t.status === "in_progress" && t.activeForm) text += theme.fg("muted", ` (${sanitize(t.activeForm)})`);
-		if (t.blockedBy?.length) text += theme.fg("muted", ` ⛓ ${t.blockedBy.map((b) => `#${b}`).join(",")}`);
-		const prefix = `${theme.fg("dim", last ? "└─" : "├─")} ${theme.fg(slot, glyph)} `;
-		if (width === undefined) {
-			lines.push(prefix + text);
-			return;
-		}
-		const indent = `${last ? " " : theme.fg("dim", "│")}    `;
-		wrapTextWithAnsi(text, Math.max(1, width - 5)).forEach((part, j) => lines.push((j === 0 ? prefix : indent) + part));
-	});
-	if (rows.length < visible.length) {
-		const rest = visible.filter((t) => !rows.includes(t));
-		const c = rest.filter((t) => t.status === "completed").length;
-		lines.push(theme.fg("dim", `└─ +${rest.length} more (${c} completed, ${rest.length - c} pending)`));
-	}
-	return lines;
+	return widgetRows(state, hidden, maxLines, theme, showAll, width, collapsedGroups).map((row) => row.text);
 }

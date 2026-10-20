@@ -1,0 +1,218 @@
+--- a/packages/agent/src/agent.ts
++++ b/packages/agent/src/agent.ts
+@@ -166,6 +166,15 @@
+ 		const drained = this.peek();
+ 		this.messages = this.messages.slice(drained.length);
+ 		return drained;
++	}
++
++	all(): AgentMessage[] {
++		return this.messages.slice();
++	}
++
++	remove(message: AgentMessage): void {
++		const index = this.messages.indexOf(message);
++		if (index !== -1) this.messages.splice(index, 1);
+ 	}
+ 
+ 	clear(): void {
+@@ -324,6 +333,17 @@
+ 	/** Returns true when either queue still contains pending messages. */
+ 	hasQueuedMessages(): boolean {
+ 		return this.steeringQueue.hasItems() || this.followUpQueue.hasItems();
++	}
++
++	/** Snapshot all pending content, including image attachments, in delivery order. */
++	getQueuedMessages(): AgentMessage[] {
++		return [...this.steeringQueue.all(), ...this.followUpQueue.all()];
++	}
++
++	/** Remove an exact queued message once a replacement run has prepared it. */
++	removeQueuedMessage(message: AgentMessage): void {
++		this.steeringQueue.remove(message);
++		this.followUpQueue.remove(message);
+ 	}
+ 
+ 	/** Preview the messages selected for the next turn without consuming them. */
+--- a/packages/coding-agent/src/core/agent-session.ts
++++ b/packages/coding-agent/src/core/agent-session.ts
+@@ -392,6 +392,7 @@
+ 
+ 	/** Tracks pending steering messages for UI display. Removed when delivered. */
+ 	private _steeringMessages: string[] = [];
++	private readonly _submittedQueueMessages = new WeakSet<AgentMessage>();
+ 	/** Tracks pending follow-up messages for UI display. Removed when delivered. */
+ 	private _followUpMessages: string[] = [];
+ 	/** Messages queued to be included with the next user prompt as context ("asides"). */
+@@ -1122,7 +1123,7 @@
+ 		if (event.type === "message_start" && event.message.role === "user") {
+ 			this._overflowRecoveryAttempted = false;
+ 			const messageText = contentText(event.message.content, "");
+-			if (messageText) {
++			if (!this._submittedQueueMessages.delete(event.message)) {
+ 				// Check steering queue first
+ 				const steeringIndex = this._steeringMessages.indexOf(messageText);
+ 				if (steeringIndex !== -1) {
+@@ -1829,12 +1830,16 @@
+ 	 * starting another, and an abort requested meanwhile aborts the run as soon as it exists.
+ 	 * @param onStarted Called once the run's messages are prepared, before the first request.
+ 	 */
+-	private async _startRun(trigger: BeforeAgentStartTrigger, onStarted?: () => void): Promise<void> {
++	private async _startRun(trigger: BeforeAgentStartTrigger, onStarted?: (messages: AgentMessage[]) => void, queuedMessages: AgentMessage[] = []): Promise<void> {
+ 		this._isAgentRunActive = true;
+ 		this._agentRunAbortRequested = false;
+ 		let messages: AgentMessage[];
+ 		try {
+ 			messages = await this._prepareRun(trigger);
++			if (queuedMessages.length) {
++				// Keep the submitted queue together, ahead of extension context.
++				messages.splice(messages.findIndex((message) => message.role === "user") + 1, 0, ...queuedMessages);
++			}
+ 		} catch (error) {
+ 			this._isAgentRunActive = false;
+ 			this._flushPendingBashMessages();
+@@ -1846,7 +1851,7 @@
+ 		// have while idle. No run exists yet, so they cannot split a tool call from its result.
+ 		this._flushPendingBashMessages();
+ 		this._flushPendingCustomMessages();
+-		onStarted?.();
++		onStarted?.(messages);
+ 
+ 		// Compaction before the prompt may have scheduled a retry; the new prompt replaces it.
+ 		this._failedResponse = undefined;
+@@ -2432,6 +2437,31 @@
+ 		this.agent.clearAllQueues();
+ 		this._emitQueueUpdate();
+ 		return { steering, followUp };
++	}
++
++	/** Start from already-processed queued input, without round-tripping through the editor. */
++	async sendQueuedMessagesNow(): Promise<void> {
++		if (!this.isIdle) return;
++		const queued = this.agent.getQueuedMessages().filter((message) => message.role === "user");
++		const first = queued[0];
++		if (!first || first.role !== "user") return;
++		const content = typeof first.content === "string" ? [{ type: "text" as const, text: first.content }] : first.content;
++		const prompt = content.filter((part) => part.type === "text").map((part) => part.text).join("\n");
++		const images = content.filter((part) => part.type === "image");
++		// Consume only after preparation succeeds. New arrivals and extension
++		// messages remain queued; captured user messages are submitted together.
++		await this._startRun({ messageType: "user", prompt, images }, (messages) => {
++			for (const message of queued) {
++				this.agent.removeQueuedMessage(message);
++				const text = contentText(message.content, "");
++				const queue = this._steeringMessages.includes(text) ? this._steeringMessages : this._followUpMessages;
++				const index = queue.indexOf(text);
++				if (index !== -1) queue.splice(index, 1);
++			}
++			// message_start must not consume a newer queue entry with identical text.
++			for (const message of messages) if (message.role === "user") this._submittedQueueMessages.add(message);
++			this._emitQueueUpdate();
++		}, queued.slice(1));
+ 	}
+ 
+ 	/** Number of pending messages (includes both steering and follow-up) */
+--- a/packages/coding-agent/src/core/keybindings.ts
++++ b/packages/coding-agent/src/core/keybindings.ts
+@@ -67,6 +67,10 @@
+ 	"app.message.followUp": {
+ 		defaultKeys: windowsKeybindings ? "ctrl+q" : "alt+enter",
+ 		description: "Queue follow-up message",
++	},
++	"app.message.sendNow": {
++		defaultKeys: "ctrl+enter",
++		description: "Interrupt and send queued messages now (without submitting the draft)",
+ 	},
+ 	"app.message.dequeue": {
+ 		defaultKeys: windowsKeybindings ? "alt+q" : "alt+up",
+--- a/packages/coding-agent/src/modes/interactive/interactive-mode.ts
++++ b/packages/coding-agent/src/modes/interactive/interactive-mode.ts
+@@ -1042,6 +1042,7 @@
+ 					rawKeyHint("!", "to run bash"),
+ 					rawKeyHint("!!", "to run bash (no context)"),
+ 					hint("app.message.followUp", "to queue follow-up"),
++					hint("app.message.sendNow", "to send queued messages now"),
+ 					hint("app.message.dequeue", "to edit all queued messages"),
+ 					hint("app.clipboard.pasteImage", "to paste files on macOS, images, or text"),
+ 					rawKeyHint("drop files", "to attach"),
+@@ -3068,6 +3069,8 @@
+ 		// Set up handlers on defaultEditor - they use this.editor for text access
+ 		// so they work correctly regardless of which editor is active
+ 		this.defaultEditor.onEscape = () => {
++			this.sendNowPending = false;
++			this.sendNowGeneration++;
+ 			if (this.session.isStreaming) {
+ 				this.restoreQueuedMessagesToEditor({ abort: true });
+ 			} else if (this.session.isBashRunning) {
+@@ -3114,6 +3117,7 @@
+ 			() => void this.handleCopyCommand({ flashConfirmation: true, preferSelection: true }),
+ 		);
+ 		this.defaultEditor.onAction("app.message.followUp", () => this.handleFollowUp());
++		this.defaultEditor.onAction("app.message.sendNow", () => this.handleSendQueuedNow());
+ 		this.defaultEditor.onAction("app.message.dequeue", () => this.handleDequeue());
+ 		this.defaultEditor.onAction("app.session.new", () => this.handleClearCommand());
+ 		this.defaultEditor.onAction("app.session.tree", () => this.showTreeSelector());
+@@ -4486,6 +4490,35 @@
+ 		}
+ 	}
+ 
++	private sendNowPending = false;
++	private sendNowGeneration = 0;
++
++	private async handleSendQueuedNow(): Promise<void> {
++		if (this.sendNowPending || this.session.isCompacting || !this.session.pendingMessageCount) return;
++		this.sendNowPending = true;
++		const generation = ++this.sendNowGeneration;
++		const steering = globalThis as Record<symbol, unknown>;
++		const key = Symbol.for("pi-custom.steering");
++		try {
++			// /goal and permissions must distinguish steering from cancellation.
++			steering[key] = true;
++			try {
++				await this.session.abort();
++			} finally {
++				steering[key] = false;
++			}
++			if (!this.sendNowPending || generation !== this.sendNowGeneration) return;
++			this.sendNowPending = false;
++			await this.session.sendQueuedMessagesNow();
++		} catch (error) {
++			this.showError(`Could not send queued messages: ${error instanceof Error ? error.message : String(error)}`);
++		} finally {
++			if (generation === this.sendNowGeneration) this.sendNowPending = false;
++			this.updatePendingMessagesDisplay();
++			this.ui.requestRender();
++		}
++	}
++
+ 	private async handleFollowUp(): Promise<void> {
+ 		const text = (this.editor.getExpandedText?.() ?? this.editor.getText()).trim();
+ 		if (!text) return;
+@@ -4740,15 +4773,16 @@
+ 		if (steeringMessages.length > 0 || followUpMessages.length > 0) {
+ 			this.pendingMessagesContainer.addChild(new Spacer(1));
+ 			for (const message of steeringMessages) {
+-				const text = theme.fg("dim", `Steering: ${message}`);
++				const text = theme.fg("dim", `Steering: ${message || "[image attachment]"}`);
+ 				this.pendingMessagesContainer.addChild(new TruncatedText(text, 1, 0));
+ 			}
+ 			for (const message of followUpMessages) {
+-				const text = theme.fg("dim", `Follow-up: ${message}`);
++				const text = theme.fg("dim", `Follow-up: ${message || "[image attachment]"}`);
+ 				this.pendingMessagesContainer.addChild(new TruncatedText(text, 1, 0));
+ 			}
+ 			const dequeueHint = this.getAppKeyDisplay("app.message.dequeue");
+-			const hintText = theme.fg("dim", `↳ ${dequeueHint} to edit all queued messages`);
++			const sendHint = this.session.isCompacting ? "" : ` · ${this.getAppKeyDisplay("app.message.sendNow")} to send now`;
++			const hintText = theme.fg("dim", `↳ ${dequeueHint} to edit all queued messages${sendHint}`);
+ 			this.pendingMessagesContainer.addChild(new TruncatedText(hintText, 1, 0));
+ 		}
+ 	}
+@@ -6906,6 +6940,7 @@
+ | \`${copyMessage}\` | Copy selection or last assistant message |
+ | \`${followUp}\` | Queue follow-up message |
+ | \`${dequeue}\` | Restore queued messages |
++| \`${this.getAppKeyDisplay("app.message.sendNow")}\` | Interrupt and send queued messages (preserve draft) |
+ | \`${pasteImage}\` | Paste files on macOS, images, or text from clipboard |
+ | \`/\` | Slash commands |
+ | \`!\` | Run bash command |

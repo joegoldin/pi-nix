@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { registerGoal } from "./goal.ts";
-import { registerSteerNow } from "../extras/steer.ts";
+import { registerSteeringGuard, STEERING } from "../extras/steer.ts";
 
 function harness() {
 	const handlers = new Map<string, Function>();
@@ -13,7 +13,6 @@ function harness() {
 
 function interruptedGoal(queued: boolean, sendNow = false, stopReason = "aborted") {
 	const handlers = new Map<string, Function[]>();
-	const shortcuts = new Map<string, { handler: Function }>();
 	let input: Function;
 	let pending = queued;
 	let idle = false;
@@ -23,11 +22,10 @@ function interruptedGoal(queued: boolean, sendNow = false, stopReason = "aborted
 	const pi = {
 		on: (name: string, handler: Function) => handlers.set(name, [...(handlers.get(name) ?? []), handler]),
 		registerTool() {}, registerCommand() {}, sendMessage() {},
-		registerShortcut: (key: string, shortcut: { handler: Function }) => shortcuts.set(key, shortcut),
 		appendEntry: (_type: string, data: unknown) => { saved = data; },
 		sendUserMessage: (text: string) => sent.push(text),
 	};
-	registerSteerNow(pi as never);
+	registerSteeringGuard(pi as never);
 	registerGoal(pi as never, () => ({ goalTurnLimit: 0, goalNoProgressTurns: 0 }) as never);
 	const goal = { id: "g1", text: "Finish the work", status: "active", iteration: 0, tokensUsed: 0, baselineTokens: 0, timeUsedSeconds: 0 };
 	const ctx = {
@@ -44,7 +42,8 @@ function interruptedGoal(queued: boolean, sendNow = false, stopReason = "aborted
 	const emit = (name: string, event = {}) => { for (const handler of handlers.get(name) ?? []) handler(event, ctx); };
 	emit("session_start");
 	emit("before_agent_start", { prompt: "Work on the goal" });
-	if (sendNow) shortcuts.get("ctrl+enter")!.handler(ctx);
+	// Native queue controls set this marker before aborting without restoring the editor.
+	if (sendNow) (globalThis as Record<symbol, unknown>)[STEERING] = true;
 	else { input!("\x1b"); ctx.abort(); }
 	emit("agent_end", { messages: [{ role: "assistant", stopReason }] });
 	const status = saved.goal.status;
@@ -58,8 +57,8 @@ test("Escape with queued guidance keeps the goal active while restoring the edit
 	expect(interruptedGoal(true)).toEqual({ status: "active", sent: [], editor: "queued guidance\n\ndraft" });
 });
 
-test("send-now guidance keeps the goal active and sends the queue", () => {
-	expect(interruptedGoal(true, true)).toEqual({ status: "active", sent: ["queued guidance"], editor: "draft" });
+test("native send-now marker keeps the goal active without restoring the draft", () => {
+	expect(interruptedGoal(true, true)).toEqual({ status: "active", sent: [], editor: "draft" });
 });
 
 test("Escape without queued guidance still pauses the goal", () => {

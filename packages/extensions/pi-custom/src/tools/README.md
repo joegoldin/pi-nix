@@ -18,27 +18,45 @@ async subagent runs only.
 
 ## Todo list (`todo.ts`, `todo-state.ts`)
 
-The `todo` tool creates, updates, lists and deletes tasks with status,
-dependencies (`blockedBy`) and owners. The list is drawn above the editor
-(ctrl+shift+t folds it) and `/todos` prints it. Long tasks are cut at the
-edge; clicking the list shows every task in full, wrapped, and clicking again
-puts it back. State travels in each todo
-result, so it follows branches and compaction with nothing written to disk.
+The `todo` tool tracks tasks and optional top-level groups. Groups contain
+one level of tasks, never other groups or grandchildren. `kind: "group"`
+creates a group or converts an existing umbrella task; `parentId` attaches a
+task, and `parentId: null` detaches it. Group progress is derived from live
+children, with empty groups still pending. Counts include only tasks, not
+groups. Dependencies (`blockedBy`) connect tasks independently of grouping.
+Move or delete all live children before deleting a group; deletion never
+silently cascades.
 
-For substantial multi-step work, the model is prompted to populate the list
-without being asked: one independently verifiable milestone per task, with
-separate acceptance checks where platforms or features can pass independently.
-A whole-project umbrella task is replaced by concrete milestones, not kept as
-a second active copy. Descriptions hold acceptance criteria, evidence and
-blockers. Small edits and conversation do not need a list; explicit opt-outs
-still apply. This is progress tracking, not permission to expand scope or
-produce an unsolicited design plan.
+The list above the editor shows group counts and indented tasks. Click a
+group header or use `/todos <group-id>` to collapse/expand it; groups start
+expanded. Click a task to toggle wrapped text. Ctrl+Shift+T folds the whole
+list; `/todos` displays the full list. Truncation preserves parent context
+and prioritizes unfinished work. Completed tasks fade on the next turn.
 
-Pi's custom system prompt omits tool `promptGuidelines`. Before each run, the
-todo extension supplies only the missing guidelines when the tool is active;
-default prompts are not duplicated. Goal kickoff, continuation and resume also
-ask the model to reconcile the existing list rather than start it over. This
-is model guidance, not an automatic task splitter or a tool-execution gate.
+Starting a task returns conflicting active tasks to pending. Simultaneous
+work requires distinct explicit owners, not several unowned in-progress
+rows. On settlement, including interruption, or session/branch restoration,
+unfinished tasks return to pending; completion is never inferred. Descriptions
+retain acceptance criteria, evidence, blockers and next actions. Running
+background jobs retain their own lifecycle; record their IDs in the task
+rather than using an idle agent's status as proof that work is running.
+
+State travels in tool-result details; automatic idle resets append a
+`pi-custom:todo-state` session entry. The latest branch-local snapshot wins
+on replay and compaction. Older flat todo sessions remain readable.
+
+Substantial multi-step work gets one independently verifiable outcome per
+task without waiting to be asked. Useful umbrella goals become groups, not
+extra active tasks. Small requests stay flat or need no list; explicit
+opt-outs still apply. Tracking does not authorize extra scope, delegation,
+publication, or an unsolicited design plan. Group completion alone is not
+proof that a `/goal` is satisfied; final audits belong in explicit tasks.
+
+Pi's custom system prompt omits tool `promptGuidelines`. Before each run,
+the extension supplies only missing guidelines when the tool is active.
+Goal kickoff, continuation and resume reinforce the same task/group semantics
+and reconciliation of the existing list. Nesting and activity cleanup are
+enforced by code; useful task decomposition remains model guidance.
 
 Replaces rpiv-todo.
 

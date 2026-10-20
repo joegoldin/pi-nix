@@ -160,3 +160,174 @@ describe("the list above the editor", () => {
 		expect(sanitize("a\x1b[31mred\x1b[0m\nb")).toBe("ared b");
 	});
 });
+
+describe("one-level groups", () => {
+	const grouped = () => run(
+		{ action: "create", subject: "Mac acceptance", kind: "group" },
+		{ action: "create", subject: "Clipboard", parentId: 1 },
+		{ action: "create", subject: "Notifications", parentId: 1 },
+	).state;
+
+	it("preserves parent links and derives progress without counting groups", () => {
+		let state = grouped();
+		expect(state.tasks[1].parentId).toBe(1);
+		state = reduce(state, { action: "update", id: 2, status: "completed" }).state;
+		expect(state.tasks[0].status).toBe("in_progress");
+		expect(widgetLines(state, new Set(), 12, plain).join("\n")).toContain("Todos (1/2)");
+		expect(reduce(state, { action: "get", id: 1 }).text).toContain("1/2");
+		state = reduce(state, { action: "update", id: 3, status: "completed" }).state;
+		expect(state.tasks[0].status).toBe("completed");
+		state = reduce(state, { action: "create", subject: "Launch", parentId: 1 }).state;
+		expect(state.tasks[0].status).toBe("in_progress");
+	});
+
+	it("enforces one level on create and update", () => {
+		const state = grouped();
+		for (const params of [
+			{ action: "create", subject: "Nested", kind: "group", parentId: 1 },
+			{ action: "create", subject: "Grandchild", parentId: 2 },
+			{ action: "create", subject: "Missing", parentId: 99 },
+			{ action: "update", id: 1, parentId: 1 },
+			{ action: "update", id: 2, kind: "group" },
+			{ action: "update", id: 3, parentId: 2 },
+		] as const) {
+			const out = reduce(state, params);
+			expect(out.error).toBeDefined();
+			expect(out.state).toBe(state);
+		}
+	});
+
+	it("does not accept manual group completion or delete populated groups", () => {
+		const state = grouped();
+		for (const action of [{ action: "update", id: 1, status: "completed" }, { action: "update", id: 1, status: "deleted" }, { action: "delete", id: 1 }] as const) {
+			expect(reduce(state, action).error).toBeDefined();
+		}
+	});
+
+	it("supports moving and detaching children, then deleting empty groups", () => {
+		let state = grouped();
+		state = reduce(state, { action: "create", subject: "Release", kind: "group" }).state;
+		state = reduce(state, { action: "update", id: 2, parentId: 4 }).state;
+		state = reduce(state, { action: "update", id: 3, parentId: null }).state;
+		expect(state.tasks[1].parentId).toBe(4);
+		expect(state.tasks[2].parentId).toBeUndefined();
+		expect(state.tasks[0].status).toBe("pending");
+		state = reduce(state, { action: "delete", id: 1 }).state;
+		expect(reduce(state, { action: "create", subject: "Orphan", parentId: 1 }).error).toBeDefined();
+	});
+
+	it("keeps hierarchy separate from task dependencies", () => {
+		const state = grouped();
+		expect(reduce(state, { action: "update", id: 3, addBlockedBy: [2] }).error).toBeUndefined();
+		expect(reduce(state, { action: "create", subject: "Ship", blockedBy: [1] }).error).toBeDefined();
+		expect(reduce(state, { action: "update", id: 2, addBlockedBy: [1] }).error).toBeDefined();
+		expect(reduce(state, { action: "update", id: 1, addBlockedBy: [2] }).error).toBeDefined();
+	});
+
+	it("converts an umbrella task to a group without permitting a third level", () => {
+		const { state } = run({ action: "create", subject: "Whole project" }, { action: "update", id: 1, kind: "group" });
+		expect(state.tasks[0].kind).toBe("group");
+		expect(reduce(state, { action: "create", subject: "Test", parentId: 1 }).error).toBeUndefined();
+		const nested = reduce(state, { action: "create", subject: "Test", parentId: 1 }).state;
+		expect(reduce(nested, { action: "update", id: 1, kind: "task" }).error).toBeDefined();
+	});
+
+	it("lists groups and parent context even with a status filter", () => {
+		const state = grouped();
+		expect(reduce(state, { action: "list" }).text).toContain("[group pending] #1 Mac acceptance (0/2)");
+		expect(reduce(state, { action: "list", status: "pending" }).text).toContain("parent: #1");
+		expect(reduce(state, { action: "get", id: 2 }).text).toContain("parent: #1");
+	});
+
+	it("replays both flat legacy lists and grouped state", () => {
+		const recorded = { ...grouped(), tasks: grouped().tasks.map(t => ({ ...t, status: "completed" as const })) };
+		const restored = replay([{ type: "message", message: { role: "toolResult", toolName: "todo", details: recorded } }]);
+		expect(restored.tasks[1].parentId).toBe(1);
+		expect(restored.tasks[0].status).toBe("completed");
+		const flat = run({ action: "create", subject: "Old task" }).state;
+		expect(replay([{ type: "message", message: { role: "toolResult", toolName: "todo", details: flat } }])).toEqual(flat);
+	});
+});
+
+describe("active task ownership", () => {
+	it("returns previous work to pending when a new task starts", () => {
+		const { state, texts } = run(
+			{ action: "create", subject: "First" }, { action: "create", subject: "Second" },
+			{ action: "update", id: 1, status: "in_progress" }, { action: "update", id: 2, status: "in_progress" },
+		);
+		expect(state.tasks.map(t => t.status)).toEqual(["pending", "in_progress"]);
+		expect(texts.at(-1)).toContain("#1");
+	});
+
+	it("allows parallel work only for distinct explicit owners", () => {
+		let state = run(
+			{ action: "create", subject: "Linux", owner: "linux-worker" },
+			{ action: "create", subject: "Mac", owner: "mac-worker" },
+			{ action: "update", id: 1, status: "in_progress" },
+			{ action: "update", id: 2, status: "in_progress" },
+		).state;
+		expect(state.tasks.map(t => t.status)).toEqual(["in_progress", "in_progress"]);
+		state = reduce(state, { action: "update", id: 2, owner: "linux-worker" }).state;
+		expect(state.tasks.map(t => t.status)).toEqual(["pending", "in_progress"]);
+	});
+});
+
+describe("grouped widget", () => {
+	const state = () => run(
+		{ action: "create", subject: "Mac acceptance", kind: "group" },
+		{ action: "create", subject: "Clipboard", parentId: 1 },
+		{ action: "create", subject: "Notifications", parentId: 1 },
+		{ action: "create", subject: "Publish" },
+	).state;
+	it("renders a group header and indented children without an active-task glyph on the group", () => {
+		const lines = widgetLines(state(), new Set(), 12, plain);
+		expect(lines).toContain("├─ ▾ #1 Mac acceptance (0/2)");
+		expect(lines).toContain("│  ├─ ○ #2 Clipboard");
+		expect(lines).toContain("│  └─ ○ #3 Notifications");
+		expect(lines[0]).toBe("● Todos (0/3)");
+	});
+	it("collapses individual groups without changing progress or standalone tasks", () => {
+		const lines = widgetLines(state(), new Set(), 12, plain, false, undefined, new Set([1]));
+		expect(lines.join("\n")).toContain("▸ #1 Mac acceptance (0/2)");
+		expect(lines.join("\n")).not.toContain("Clipboard");
+		expect(lines.join("\n")).toContain("Publish");
+		expect(lines[0]).toBe("● Todos (0/3)");
+	});
+	it("keeps parent context when truncating and never exceeds the unwrapped row budget", () => {
+		const lines = widgetLines(state(), new Set(), 4, plain);
+		expect(lines.length).toBeLessThanOrEqual(4);
+		expect(lines.join("\n")).toContain("Mac acceptance");
+		expect(lines.join("\n")).toContain("Clipboard");
+		expect(lines.at(-1)).toContain("more");
+	});
+	it("does not hide a reopened group behind its previous completed state", () => {
+		const lines = widgetLines(state(), new Set([1]), 12, plain);
+		expect(lines.join("\n")).toContain("Mac acceptance");
+		expect(lines.join("\n")).toContain("Clipboard");
+	});
+	it("keeps derived group counts when completed children fade", () => {
+		const s = reduce(state(), { action: "update", id: 2, status: "completed" }).state;
+		const lines = widgetLines(s, new Set([2]), 12, plain);
+		expect(lines.join("\n")).toContain("Mac acceptance (1/2)");
+		expect(lines.join("\n")).not.toContain("Clipboard");
+	});
+});
+
+it("keeps a group heading even in the smallest row budget", () => {
+	const { state } = run({ action: "create", subject: "Group", kind: "group" }, { action: "create", subject: "One", parentId: 1 }, { action: "create", subject: "Two", parentId: 1 });
+	const lines = widgetLines(state, new Set(), 3, plain);
+	expect(lines.length).toBe(3);
+	expect(lines[1]).toContain("Group");
+});
+
+it("retains legacy tombstone metadata updates", () => {
+	const { state } = run({ action: "create", subject: "Old task" }, { action: "delete", id: 1 });
+	const result = reduce(state, { action: "update", id: 1, description: "Superseded by another task" });
+	expect(result.error).toBeUndefined();
+	expect(result.state.tasks[0].status).toBe("deleted");
+});
+
+it("reports cleared tasks separately from groups", () => {
+	const { state } = run({ action: "create", subject: "Group", kind: "group" }, { action: "create", subject: "One", parentId: 1 }, { action: "create", subject: "Two", parentId: 1 });
+	expect(reduce(state, { action: "clear" }).text).toBe("Cleared 2 tasks and 1 group");
+});

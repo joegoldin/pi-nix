@@ -65,6 +65,8 @@ describe("prompts", () => {
 			expect(prompt).toContain("When the todo tool is available");
 			expect(prompt).toContain("separately verifiable milestones");
 			expect(prompt).toContain("existing list");
+			expect(prompt).toContain("one level of children");
+			expect(prompt).toContain("pending");
 		}
 	});
 	it("carries the objective as data and the id as a guard", () => {

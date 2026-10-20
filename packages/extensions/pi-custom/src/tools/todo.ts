@@ -1,25 +1,29 @@
 // The todo tool, its list above the editor, and /todos.
 //
-// State lives in the todo tool's own result details, so it follows the
-// branch: on session start, compaction and tree navigation the list is
-// replayed from the last todo result on the current branch. Nothing is
-// written anywhere else.
+// State follows the branch in tool results and automatic idle-reset entries.
+// Start, compaction and tree navigation replay the latest snapshot; no separate
+// task file needs synchronizing.
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Text, type TuiMouseEvent, type TuiMouseEventResult, truncateToWidth } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import { reduce, replay, type Todo, type TodoParams, type TodoState, widgetLines } from "./todo-state.ts";
+import {
+	groupProgress, pauseActive, reduce, replay,
+	type Todo, type TodoParams, type TodoState, type TodoWidgetRow,
+	widgetLines, widgetRows,
+} from "./todo-state.ts";
 
 const WIDGET_KEY = "pi-custom:todos";
 const MAX_WIDGET_LINES = 12;
 
 const GUIDELINES = [
 	"Use `todo` proactively for substantial multi-step work: multiple deliverables, platforms, implementation stages, or verification gates. Do not wait to be asked. After enough initial inspection to identify the work, populate the list before substantive implementation. Skip single-step edits, quick lookups, and conversation; respect an explicit request not to use todos.",
-	"Each task must describe one independently verifiable outcome, not the whole request. Split implementation, distinct platform/feature acceptance checks, and authorized release work when they can succeed or fail separately. For example, use 'Verify Linux packaging' and 'Verify Mac clipboard' rather than 'Implement everything and verify Linux and Mac'. Replace an umbrella task with its concrete milestones; do not keep a duplicate whole-goal task active alongside them. Avoid one task per shell command.",
+	"Each task must describe one independently verifiable outcome, not the whole request. Split implementation, distinct platform/feature acceptance checks, and authorized release work when they can succeed or fail separately. For example, use 'Verify Linux packaging' and 'Verify Mac clipboard' rather than 'Implement everything and verify Linux and Mac'. When an umbrella goal helps organize the work, convert it to a group (kind: group) and attach concrete child tasks with parentId. Otherwise replace it with the milestones; never keep a duplicate whole-goal task active alongside them. Avoid one task per shell command.",
+	"Grouping is optional and limited to one level: top-level groups contain tasks, never other groups or grandchildren. Keep small lists flat. Group progress is derived from live children and groups are excluded from task totals; do not mark a group in_progress/completed yourself. Put any final audit in a child task. Hierarchy does not imply blockedBy dependencies, which must reference tasks, not groups. Set parentId to null to detach a task; move or delete children before deleting a group.",
 	"A todo list is execution bookkeeping, not an opt-in design exercise or written plan. Maintain it without asking permission to track already authorized work. It does not authorize extra scope, delegation, commits, or publishing.",
 	"Keep the list aligned with remaining work as requirements change. On resuming after compaction or a long interruption, inspect the existing todos with list/get and reconcile them with current evidence instead of creating duplicates or trusting stale completion claims. Use descriptions for acceptance criteria, verification evidence, and concrete blockers; do not bury distinct milestones in one description.",
-	"Mark a task in_progress before working on it and completed as soon as its acceptance criteria are verified; never batch completions at the end. Normally keep one task in_progress; use several only for genuinely concurrent work with distinct owners. Work waiting on a blocker stays unfinished: record the blocker and next action, and leave it pending when you move to other work. Create a separate blocker-resolution task only if it is actionable work.",
+	"Mark a task in_progress before working on it and completed as soon as its acceptance criteria are verified; never batch completions at the end. Starting a task returns other active tasks to pending unless they have distinct explicit owners for genuinely concurrent work. Settling or restoring a session pauses unfinished tasks so they do not look active forever. Before yielding, record next actions, blockers, and any running background job IDs in descriptions; job status is separate from active agent work. Work waiting on a blocker stays unfinished: record the blocker and next action, and leave it pending when you move to other work. Create a separate blocker-resolution task only if it is actionable work.",
 	"A timeout, failed test, partial implementation, or unperformed manual/remote check is not completion. Keep that milestone unfinished with the evidence and blocker recorded; completed implementation must not hide outstanding verification.",
 	"Task status is a 4-state machine: pending → in_progress → completed, plus deleted as a tombstone. Pass activeForm (present-continuous label, e.g. 'researching existing tool') when marking in_progress.",
 	'To change a task\'s status, call update with the task id and the target status, e.g. {"action":"update","id":3,"status":"completed"} or {"action":"update","id":3,"status":"in_progress","activeForm":"writing tests"}. status is the field that changes the task; an update without a mutable field (status or another) is rejected.',
@@ -42,13 +46,23 @@ export function registerTodo(pi: ExtensionAPI): void {
 	const fading = new Set<number>();
 	const hidden = new Set<number>();
 	let collapsed = false;
+	const collapsedGroups = new Set<number>();
 	// A click on the list shows every task in full, wrapped; another puts it back.
 	let wrapped = false;
 	let ctxRef: ExtensionContext | undefined;
 	let requestRender: (() => void) | undefined;
 
-	function load(ctx: ExtensionContext): void {
+	function pauseWork(ctx: ExtensionContext): void {
+		if (!state.tasks.some((t) => t.kind !== "group" && t.status === "in_progress")) return;
+		state = pauseActive(state);
+		pi.appendEntry("pi-custom:todo-state", state);
+		show(ctx);
+	}
+
+	function load(ctx: ExtensionContext, pause = false): void {
 		state = replay(ctx.sessionManager.getBranch() as never);
+		collapsedGroups.clear();
+		if (pause) pauseWork(ctx);
 		fading.clear();
 		hidden.clear();
 		show(ctx);
@@ -70,22 +84,26 @@ export function registerTodo(pi: ExtensionAPI): void {
 			WIDGET_KEY,
 			(tui, theme) => {
 				requestRender = () => tui.requestRender();
+				let rows: TodoWidgetRow[] = [];
 				return {
 					render: (width: number) => {
-						const lines = collapsed
-							? [
-									widgetLines(state, hidden, MAX_WIDGET_LINES, theme as never)[0] ?? "",
-									theme.fg("dim", "└─ ctrl+shift+t to expand"),
-								]
-							: wrapped
-								? widgetLines(state, hidden, MAX_WIDGET_LINES, theme as never, true, width)
-								: widgetLines(state, hidden, MAX_WIDGET_LINES, theme as never, ctxRef?.ui.getToolsExpanded() ?? false);
-						return [...lines, ""].map((l) => truncateToWidth(l, width, "…"));
+						rows = widgetRows(
+							state, hidden, MAX_WIDGET_LINES, theme as never,
+							wrapped || (ctxRef?.ui.getToolsExpanded() ?? false), wrapped ? width : undefined, collapsedGroups,
+						);
+						if (collapsed) rows = rows.length ? [rows[0], { text: theme.fg("dim", "└─ ctrl+shift+t to expand") }] : [];
+						return [...rows.map((row) => row.text), ""].map((line) => truncateToWidth(line, width, "…"));
 					},
 					handleMouse: (event: TuiMouseEvent): TuiMouseEventResult | undefined => {
 						if (event.type !== "click" || event.button !== "left") return undefined;
 						if (collapsed) collapsed = false;
-						else wrapped = !wrapped;
+						else {
+							const groupId = rows[event.y]?.groupId;
+							if (groupId !== undefined) {
+								if (collapsedGroups.has(groupId)) collapsedGroups.delete(groupId);
+								else collapsedGroups.add(groupId);
+							} else wrapped = !wrapped;
+						}
 						return { handled: true, render: true };
 					},
 					invalidate() {},
@@ -99,12 +117,14 @@ export function registerTodo(pi: ExtensionAPI): void {
 		name: "todo",
 		label: "Todo",
 		description:
-			"Track substantial multi-step work proactively as separate, verifiable milestones, not one umbrella goal. Actions: create (new task), update (change status/fields/dependencies), list (all tasks, optionally filtered by status), get (single task details), delete (tombstone), clear (reset all). Status: pending → in_progress → completed, plus deleted tombstone. Keep progress, verification evidence, and blockers current; skip trivial single-step work.",
+			"Track substantial multi-step work proactively as separate, verifiable tasks, optionally under one level of groups with derived progress. Actions: create (new task), update (change status/fields/dependencies), list (all tasks, optionally filtered by status), get (single task details), delete (tombstone), clear (reset all). Task status: pending → in_progress → completed, plus deleted tombstone. Starting work pauses conflicting active tasks; session settlement pauses unfinished work. Keep progress, verification evidence, and blockers current; skip trivial single-step work.",
 		promptSnippet: "Track separate verifiable milestones and keep multi-step progress current",
 		promptGuidelines: GUIDELINES,
 		parameters: Type.Object({
 			action: StringEnum(["create", "update", "list", "get", "delete", "clear"] as const),
-			subject: Type.Optional(Type.String({ description: "Task subject line (required for create)" })),
+			subject: Type.Optional(Type.String({ description: "Task or group subject line (required for create)" })),
+			kind: Type.Optional(StringEnum(["task", "group"] as const, { description: "Create a task (default) or top-level group; update can convert an umbrella task to a group. Groups cannot become tasks." })),
+			parentId: Type.Optional(Type.Union([Type.Number(), Type.Null()], { description: "Task parent group id (create/update). Groups cannot have parents; only one nesting level. Use null to detach." })),
 			description: Type.Optional(Type.String({ description: "Long-form task description" })),
 			activeForm: Type.Optional(
 				Type.String({ description: "Present-continuous spinner label shown while status is in_progress (e.g. 'writing tests')" }),
@@ -134,6 +154,11 @@ export function registerTodo(pi: ExtensionAPI): void {
 		async execute(_id, params) {
 			const outcome = reduce(state, params as TodoParams);
 			state = outcome.state;
+			if (params.action === "clear") {
+				collapsedGroups.clear();
+				hidden.clear();
+				fading.clear();
+			}
 			return {
 				content: [{ type: "text" as const, text: outcome.text }],
 				details: { action: params.action, params, tasks: state.tasks, nextId: state.nextId, ...(outcome.error ? { error: outcome.error } : {}) },
@@ -157,6 +182,10 @@ export function registerTodo(pi: ExtensionAPI): void {
 			if (d?.error) return new Text(theme.fg("error", `Error: ${d.error}`), 0, 0);
 			if (d && ["create", "update", "delete"].includes(d.action ?? "")) {
 				const task = d.params?.id !== undefined ? d.tasks?.find((t) => t.id === d.params?.id) : d.tasks?.at(-1);
+				if (task?.kind === "group" && task.status !== "deleted") {
+					const { done, total } = groupProgress({ tasks: d.tasks ?? [], nextId: 0 }, task.id);
+					return new Text(theme.fg("muted", `group · ${done}/${total} completed`), 0, 0);
+				}
 				const mark = task ? STATUS_MARK[task.status] : undefined;
 				if (mark) return new Text(theme.fg(mark[1] as never, `${mark[0]} ${mark[2]}`), 0, 0);
 			}
@@ -165,13 +194,30 @@ export function registerTodo(pi: ExtensionAPI): void {
 	});
 
 	pi.registerCommand("todos", {
-		description: "Show all todos on the current branch, grouped by status",
-		handler: async (_args, ctx) => {
+		description: "Show all todos; /todos <group-id> collapses or expands one group",
+		handler: async (args, ctx) => {
 			if (!ctx.hasUI) {
 				ctx.ui.notify("/todos requires interactive mode", "error");
 				return;
 			}
 			const live = state.tasks.filter((t) => t.status !== "deleted");
+			if (args.trim()) {
+				const id = /^\d+$/.test(args.trim()) ? Number(args.trim()) : NaN;
+				if (!live.some((t) => t.id === id && t.kind === "group")) {
+					ctx.ui.notify("Usage: /todos [live group id]", "error");
+					return;
+				}
+				if (collapsedGroups.has(id)) collapsedGroups.delete(id);
+				else collapsedGroups.add(id);
+				collapsed = false;
+				for (const t of live) if (t.id === id || t.parentId === id) hidden.delete(t.id);
+				show(ctx);
+				return;
+			}
+			if (live.some((t) => t.kind === "group")) {
+				ctx.ui.notify(widgetLines(state, new Set(), MAX_WIDGET_LINES, { fg: (_slot, text) => text }, true).join("\n"), "info");
+				return;
+			}
 			if (live.length === 0) {
 				ctx.ui.notify("No todos yet. Ask the agent to add some!", "info");
 				return;
@@ -226,14 +272,23 @@ export function registerTodo(pi: ExtensionAPI): void {
 	pi.on("session_start", (_event, ctx) => {
 		ctxRef = ctx;
 		requestRender = undefined;
-		load(ctx);
+		load(ctx, true);
 	});
 	pi.on("session_compact", (_event, ctx) => load(ctx));
-	pi.on("session_tree", (_event, ctx) => load(ctx));
+	pi.on("session_tree", (_event, ctx) => load(ctx, true));
+	pi.on("agent_settled", (_event, ctx) => {
+		if (ctx.isIdle()) pauseWork(ctx);
+	});
 
 	pi.on("tool_execution_end", (event, ctx) => {
 		if (event.toolName !== "todo" || event.isError) return;
-		for (const t of state.tasks) if (t.status === "completed") fading.add(t.id);
+		for (const t of state.tasks) {
+			if (t.status === "completed") fading.add(t.id);
+			else {
+				fading.delete(t.id);
+				hidden.delete(t.id);
+			}
+		}
 		show(ctx);
 	});
 

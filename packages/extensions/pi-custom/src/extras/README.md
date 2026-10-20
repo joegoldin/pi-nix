@@ -51,4 +51,11 @@ keys.
 | `clipboard.ts` | Clipboard command resolution |
 | `gitenv.ts` | Git editor overrides |
 | `title.ts` | The working tab title |
-| `steer.ts` | Ctrl+Enter with messages queued: interrupt and send them; Escape only aborts |
+| `steer.ts` | Preserve the goal when Escape restores queued guidance; native Pi owns queue display and send-now |
+
+Ctrl+Enter interrupts and sends already queued messages through Pi's native
+queue controls, preserving attachments and the unsubmitted editor draft.
+The native hint beside Alt+Up advertises it; there is no second extension
+queue widget. Alt+Enter retains its normal follow-up behavior. Send-now is
+unavailable during compaction. Escape cancels a pending send-now request and
+keeps its normal restore-to-editor behavior.
