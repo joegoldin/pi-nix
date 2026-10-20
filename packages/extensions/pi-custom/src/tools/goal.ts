@@ -153,6 +153,15 @@ export function registerGoal(pi: ExtensionAPI, config: () => UiConfig): void {
 		}
 	}
 
+	function wakeFromWait(): void {
+		if (!goal || goal.status !== "active" || !goal.waiting) return;
+		// Actual model work consumes the old wait, including background/custom
+		// wakes and queued delivery between turns of the same run. Unlike user
+		// steering, external activity must not reset the safety counters.
+		clearWait();
+		persist();
+	}
+
 	function scheduleWait(): void {
 		if (waitTimer) clearTimeout(waitTimer);
 		waitTimer = undefined;
@@ -636,12 +645,15 @@ export function registerGoal(pi: ExtensionAPI, config: () => UiConfig): void {
 		runAutomatic = "prompt" in event && event.prompt.includes(`<!-- ${CONTINUATION_MARKER}:`);
 		runToolAttempted = false;
 		if (!goal || goal.status !== "active") return undefined;
+		wakeFromWait();
 		if (!runAutomatic) continuationWanted = false;
 		const content = activeContract(goal);
 		if (lastContract === content) return undefined;
 		lastContract = content;
 		return { message: { customType: CONTRACT_TYPE, content, display: false, details: { version: 2, state: "active", goalId: goal.id } } };
 	});
+
+	pi.on("turn_start", () => wakeFromWait());
 
 	pi.on("tool_call", (event) => {
 		runToolAttempted = true;

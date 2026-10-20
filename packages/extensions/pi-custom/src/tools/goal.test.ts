@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import { registerGoal } from "./goal.ts";
 import { registerSteeringGuard, STEERING } from "../extras/steer.ts";
 
@@ -89,4 +89,114 @@ test("background completion still receives the active goal contract", () => {
 	const result = h.get("before_agent_start")!({ type: "before_agent_start" });
 	expect(result.message.content).toContain("active-goal");
 	expect(result.message.content).toContain("Verify the fix");
+});
+
+function waitingGoal(status = "active", resumeAt?: number) {
+	const handlers = new Map<string, Function>();
+	const tools = new Map<string, any>();
+	const initial = {
+		id: "waiting-goal", text: "Verify the build", status, iteration: 2,
+		startedAt: Date.now(), updatedAt: Date.now(), tokensUsed: 0, baselineTokens: 0,
+		timeUsedSeconds: 12, automaticModelTurns: 3, toolFreeRepeatCount: 1,
+		waiting: { reason: "Build A completion", ...(resumeAt === undefined ? {} : { resumeAt }) },
+	};
+	let saved: any = structuredClone(initial);
+	const sent: string[] = [];
+	const ctx = {
+		isIdle: () => true, hasPendingMessages: () => false,
+		ui: { setStatus() {}, notify() {} },
+		sessionManager: { getBranch: () => [{ type: "custom", customType: "goal-state", data: { goal: initial } }] },
+	};
+	registerGoal({
+		on: (name: string, handler: Function) => handlers.set(name, handler),
+		registerTool: (tool: any) => tools.set(tool.name, tool), registerCommand() {}, sendMessage() {},
+		appendEntry: (_name: string, data: any) => { saved = structuredClone(data.goal); },
+		sendUserMessage: (text: string) => sent.push(text),
+	} as never, () => ({ goalTurnLimit: 100, goalNoProgressTurns: 10 }) as never);
+	const emit = (name: string, event = {}) => handlers.get(name)?.(event, ctx);
+	emit("session_start");
+	return { emit, ctx, sent, saved: () => saved, wait: (reason = "Build B completion") => tools.get("goal_wait").execute("call", { goal_id: initial.id, reason }, undefined, undefined, ctx) };
+}
+
+test("a background wake consumes the old wait so the new run can wait again", async () => {
+	const h = waitingGoal();
+	try {
+		h.emit("before_agent_start", { type: "before_agent_start", messageType: "custom" });
+		expect(h.saved().waiting).toBeUndefined();
+		expect(h.saved().activeStartedAt).toBeNumber();
+		expect(h.saved().automaticModelTurns).toBe(3);
+		expect(h.saved().toolFreeRepeatCount).toBe(1);
+		const result = await h.wait();
+		expect(result.details.rejected).toBeUndefined();
+		expect(result.terminate).toBe(true);
+		expect(h.saved().waiting.reason).toBe("Build B completion");
+		h.emit("agent_end", { messages: [{ role: "assistant", stopReason: "stop" }] });
+		h.emit("agent_settled");
+		expect(h.sent).toEqual([]);
+	} finally { h.emit("session_shutdown"); }
+});
+
+test("a woken goal continues automatically if the new run does not wait again", () => {
+	const h = waitingGoal();
+	try {
+		h.emit("before_agent_start", { type: "before_agent_start", messageType: "custom" });
+		h.emit("agent_end", { messages: [{ role: "assistant", stopReason: "stop" }] });
+		h.emit("agent_settled");
+		expect(h.sent).toHaveLength(1);
+		expect(h.sent[0]).toContain("waiting-goal");
+	} finally { h.emit("session_shutdown"); }
+});
+
+test("merely settling a waiting goal does not wake it or allow duplicate waits", async () => {
+	const h = waitingGoal();
+	try {
+		h.emit("agent_settled");
+		expect(h.sent).toEqual([]);
+		expect((await h.wait()).details.rejected).toBe("goal is already waiting");
+	} finally { h.emit("session_shutdown"); }
+});
+
+test("background activity does not reactivate a paused goal", () => {
+	const h = waitingGoal("paused");
+	try {
+		h.emit("before_agent_start", { type: "before_agent_start", messageType: "custom" });
+		expect(h.saved().status).toBe("paused");
+		expect(h.saved().waiting).toBeDefined();
+		expect(h.sent).toEqual([]);
+	} finally { h.emit("session_shutdown"); }
+});
+
+test("an extension-sourced user-message run also consumes the wait", () => {
+	const h = waitingGoal();
+	try {
+		h.emit("input", { source: "extension", text: "The build finished" });
+		expect(h.saved().waiting).toBeDefined();
+		h.emit("before_agent_start", { messageType: "user", prompt: "The build finished" });
+		expect(h.saved().waiting).toBeUndefined();
+		expect(h.saved().automaticModelTurns).toBe(3);
+	} finally { h.emit("session_shutdown"); }
+});
+
+test("external wake cancels the old safety deadline instead of leaving a second wake armed", () => {
+	const clear = spyOn(globalThis, "clearTimeout");
+	const h = waitingGoal("active", Date.now() + 60_000);
+	try {
+		h.emit("before_agent_start", { messageType: "custom" });
+		expect(clear).toHaveBeenCalledTimes(1);
+		expect(h.saved().waiting).toBeUndefined();
+	} finally { h.emit("session_shutdown"); clear.mockRestore(); }
+});
+
+test("a queued wake between turns in the same run consumes the previous wait", async () => {
+	const h = waitingGoal();
+	try {
+		h.emit("before_agent_start", { messageType: "custom" });
+		expect((await h.wait("First job wake")).terminate).toBe(true);
+		// The session may drain an already queued notification with agent.continue(),
+		// which emits turn_start but not another before_agent_start.
+		h.emit("turn_start", { turnIndex: 1 });
+		expect(h.saved().waiting).toBeUndefined();
+		expect(h.saved().automaticModelTurns).toBe(3);
+		expect((await h.wait("Second job wake")).terminate).toBe(true);
+	} finally { h.emit("session_shutdown"); }
 });

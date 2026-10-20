@@ -78,6 +78,13 @@ it takes. A goal turn that ends without `goal_complete`, `goal_blocked` or
 replies (both in `/ui`), or when the token budget runs out. Completion claims
 are checked before they are accepted.
 
+A new run or turn consumes an active goal's previous wait, including background
+notifications, extension messages, and queued delivery within the same run.
+The old deadline is cancelled;
+the run can establish a new wait or continue normally. Merely settling or
+appending context does not wake a goal, and external activity does not reset
+safety counters or reactivate paused goals.
+
 Replaces pi-goal.
 
 ## Side questions (`btw.ts`)
