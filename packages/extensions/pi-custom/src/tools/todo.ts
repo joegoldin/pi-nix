@@ -15,9 +15,12 @@ const WIDGET_KEY = "pi-custom:todos";
 const MAX_WIDGET_LINES = 12;
 
 const GUIDELINES = [
-	"Use `todo` for complex work with 3+ steps, when the user gives you a list of tasks, or immediately after receiving new instructions to capture requirements. Skip it for single trivial tasks and purely conversational requests.",
-	"When starting a task from the todo list, mark it in_progress BEFORE beginning work. Mark it completed IMMEDIATELY when done — never batch completions. Exactly one task in_progress at a time.",
-	"Never mark a task completed if tests are failing, the implementation is partial, or you hit unresolved errors — keep it in_progress and create a new task for the blocker instead.",
+	"Use `todo` proactively for substantial multi-step work: multiple deliverables, platforms, implementation stages, or verification gates. Do not wait to be asked. After enough initial inspection to identify the work, populate the list before substantive implementation. Skip single-step edits, quick lookups, and conversation; respect an explicit request not to use todos.",
+	"Each task must describe one independently verifiable outcome, not the whole request. Split implementation, distinct platform/feature acceptance checks, and authorized release work when they can succeed or fail separately. For example, use 'Verify Linux packaging' and 'Verify Mac clipboard' rather than 'Implement everything and verify Linux and Mac'. Replace an umbrella task with its concrete milestones; do not keep a duplicate whole-goal task active alongside them. Avoid one task per shell command.",
+	"A todo list is execution bookkeeping, not an opt-in design exercise or written plan. Maintain it without asking permission to track already authorized work. It does not authorize extra scope, delegation, commits, or publishing.",
+	"Keep the list aligned with remaining work as requirements change. On resuming after compaction or a long interruption, inspect the existing todos with list/get and reconcile them with current evidence instead of creating duplicates or trusting stale completion claims. Use descriptions for acceptance criteria, verification evidence, and concrete blockers; do not bury distinct milestones in one description.",
+	"Mark a task in_progress before working on it and completed as soon as its acceptance criteria are verified; never batch completions at the end. Normally keep one task in_progress; use several only for genuinely concurrent work with distinct owners. Work waiting on a blocker stays unfinished: record the blocker and next action, and leave it pending when you move to other work. Create a separate blocker-resolution task only if it is actionable work.",
+	"A timeout, failed test, partial implementation, or unperformed manual/remote check is not completion. Keep that milestone unfinished with the evidence and blocker recorded; completed implementation must not hide outstanding verification.",
 	"Task status is a 4-state machine: pending → in_progress → completed, plus deleted as a tombstone. Pass activeForm (present-continuous label, e.g. 'researching existing tool') when marking in_progress.",
 	'To change a task\'s status, call update with the task id and the target status, e.g. {"action":"update","id":3,"status":"completed"} or {"action":"update","id":3,"status":"in_progress","activeForm":"writing tests"}. status is the field that changes the task; an update without a mutable field (status or another) is rejected.',
 	"Use blockedBy to express dependencies (A is blocked by B). On create, pass blockedBy as the initial set. On update, use addBlockedBy / removeBlockedBy (additive merge — do not resend the full array). Cycles are rejected.",
@@ -96,8 +99,8 @@ export function registerTodo(pi: ExtensionAPI): void {
 		name: "todo",
 		label: "Todo",
 		description:
-			"Manage a task list for tracking multi-step progress. Actions: create (new task), update (change status/fields/dependencies), list (all tasks, optionally filtered by status), get (single task details), delete (tombstone), clear (reset all). Status: pending → in_progress → completed, plus deleted tombstone. Use this to plan and track multi-step work like research, design, and implementation.",
-		promptSnippet: "Manage a task list to track multi-step progress",
+			"Track substantial multi-step work proactively as separate, verifiable milestones, not one umbrella goal. Actions: create (new task), update (change status/fields/dependencies), list (all tasks, optionally filtered by status), get (single task details), delete (tombstone), clear (reset all). Status: pending → in_progress → completed, plus deleted tombstone. Keep progress, verification evidence, and blockers current; skip trivial single-step work.",
+		promptSnippet: "Track separate verifiable milestones and keep multi-step progress current",
 		promptGuidelines: GUIDELINES,
 		parameters: Type.Object({
 			action: StringEnum(["create", "update", "list", "get", "delete", "clear"] as const),
@@ -209,6 +212,15 @@ export function registerTodo(pi: ExtensionAPI): void {
 			collapsed = !collapsed;
 			requestRender?.();
 		},
+	});
+
+	pi.on("before_agent_start", (event) => {
+		if (!pi.getActiveTools().includes("todo")) return;
+		// Pi omits tool promptGuidelines when --system-prompt is supplied.
+		// Restore only missing rules, so default prompts and repeated runs dedupe.
+		const missing = GUIDELINES.filter((rule) => !event.systemPrompt.includes(rule));
+		if (missing.length === 0) return;
+		return { systemPrompt: `${event.systemPrompt}\n\n## Task progress\n${missing.map((rule) => `- ${rule}`).join("\n")}` };
 	});
 
 	pi.on("session_start", (_event, ctx) => {

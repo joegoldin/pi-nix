@@ -1,7 +1,7 @@
 // /goal's words and pure rules: the prompts, the hidden goal contract, the
 // command grammar, budgets and formats, and the checks that decide whether a
-// completion claim holds up. The model-facing text is pi-goal's, verbatim,
-// so a goal reads the same as it always has.
+// completion claim holds up. Task tracking supplements the objective; it
+// never replaces the evidence needed to complete it.
 
 import { createHash } from "node:crypto";
 
@@ -39,6 +39,7 @@ export function rules(label: string): string {
 	return `Goal-mode rules:
 - Preserve the full objective across turns; do not redefine success around a narrower, safer, smaller, merely compatible, or easier-to-test result.
 - Derive concrete requirements from the objective and any referenced files, plans, specifications, issues, or user instructions.
+- When the todo tool is available and the user has not opted out of task tracking, track multi-step goals as separately verifiable milestones, including outstanding acceptance checks, not one task repeating the full objective. On continuation or resume, reconcile the existing list with current evidence and update it as work finishes or blockers change. A completed todo list alone is not proof that the goal is complete.
 - Treat the current worktree, command output, tests, runtime behavior, PR state, rendered artifacts, and external state as authoritative. Previous conversation, plans, and summaries are context, not proof; inspect the current state before relying on them.
 - Keep working until ${label} is completely resolved end-to-end. Do not stop at analysis, a plan, TODO list, partial fixes, or suggested next steps.
 - Autonomously implement and verify the work. If a tool fails, try reasonable alternatives instead of yielding early.

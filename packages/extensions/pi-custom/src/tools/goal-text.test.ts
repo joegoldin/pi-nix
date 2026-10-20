@@ -10,6 +10,7 @@ import {
 	kickoffPrompt,
 	parseBudget,
 	parseCommand,
+	resumePrompt,
 	statusText,
 } from "./goal-text.ts";
 
@@ -59,6 +60,13 @@ describe("the command", () => {
 });
 
 describe("prompts", () => {
+	it("keeps multi-step goals in concrete todos across kickoff, continuation and resume", () => {
+		for (const prompt of [kickoffPrompt(goal()), activeContract(goal()), continuationPrompt(goal(), "nonce"), resumePrompt(goal(), "paused")]) {
+			expect(prompt).toContain("When the todo tool is available");
+			expect(prompt).toContain("separately verifiable milestones");
+			expect(prompt).toContain("existing list");
+		}
+	});
 	it("carries the objective as data and the id as a guard", () => {
 		const p = kickoffPrompt(goal({ text: "a <b> & c" }));
 		expect(p).toStartWith("Goal mode is active. Complete this goal fully:");

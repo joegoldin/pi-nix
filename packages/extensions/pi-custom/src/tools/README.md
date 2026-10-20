@@ -25,6 +25,21 @@ edge; clicking the list shows every task in full, wrapped, and clicking again
 puts it back. State travels in each todo
 result, so it follows branches and compaction with nothing written to disk.
 
+For substantial multi-step work, the model is prompted to populate the list
+without being asked: one independently verifiable milestone per task, with
+separate acceptance checks where platforms or features can pass independently.
+A whole-project umbrella task is replaced by concrete milestones, not kept as
+a second active copy. Descriptions hold acceptance criteria, evidence and
+blockers. Small edits and conversation do not need a list; explicit opt-outs
+still apply. This is progress tracking, not permission to expand scope or
+produce an unsolicited design plan.
+
+Pi's custom system prompt omits tool `promptGuidelines`. Before each run, the
+todo extension supplies only the missing guidelines when the tool is active;
+default prompts are not duplicated. Goal kickoff, continuation and resume also
+ask the model to reconcile the existing list rather than start it over. This
+is model guidance, not an automatic task splitter or a tool-execution gate.
+
 Replaces rpiv-todo.
 
 ## Questions (`ask.ts`, `ask-state.ts`)
