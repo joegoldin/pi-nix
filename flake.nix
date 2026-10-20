@@ -93,6 +93,7 @@
             };
             patches = [
               ./coding-agent/jump-to-last-user.patch
+              ./coding-agent/user-message-timestamps.patch
             ];
           };
 

@@ -1,0 +1,66 @@
+--- a/packages/coding-agent/src/modes/interactive/components/user-message.ts
++++ b/packages/coding-agent/src/modes/interactive/components/user-message.ts
+@@ -1,4 +1,4 @@
+-import { Container, Markdown, type MarkdownTheme } from "@earendil-works/pi-tui";
++import { Container, Markdown, type MarkdownTheme, visibleWidth } from "@earendil-works/pi-tui";
+ import type { MarkdownTransformer } from "../../../core/extensions/types.ts";
+ import { getMarkdownTheme, theme } from "../theme/theme.ts";
+ import { createMarkdownTransform } from "./markdown-transform.ts";
+@@ -14,6 +14,7 @@
+ 	private text: string;
+ 	private markdownTheme: MarkdownTheme;
+ 	private outputPad: number;
++	private timestamp?: number;
+ 	private markdownTransformers: readonly MarkdownTransformer[];
+ 
+ 	constructor(
+@@ -21,11 +22,13 @@
+ 		markdownTheme: MarkdownTheme = getMarkdownTheme(),
+ 		outputPad = 1,
+ 		markdownTransformers: readonly MarkdownTransformer[] = [],
++		timestamp?: number,
+ 	) {
+ 		super();
+ 		this.text = text;
+ 		this.markdownTheme = markdownTheme;
+ 		this.outputPad = outputPad;
++		this.timestamp = timestamp;
+ 		this.markdownTransformers = markdownTransformers;
+ 		this.rebuild();
+ 	}
+@@ -64,6 +67,17 @@
+ 			return lines;
+ 		}
+ 
++		// Use the saved message time, including when replaying history. The top
++		// padding already belongs to this message, so no transcript row is added.
++		const date = this.timestamp === undefined ? undefined : new Date(this.timestamp);
++		if (date && Number.isFinite(date.getTime())) {
++			const time = date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
++			const left = width - visibleWidth(time) - this.outputPad;
++			if (left >= this.outputPad) {
++				lines[0] = theme.bg("userMessageBg", " ".repeat(left) + theme.fg("dim", time) + " ".repeat(this.outputPad));
++			}
++		}
++
+ 		lines[0] = OSC133_ZONE_START + lines[0];
+ 		lines[lines.length - 1] = OSC133_ZONE_END + OSC133_ZONE_FINAL + lines[lines.length - 1];
+ 		return lines;
+--- a/packages/coding-agent/src/modes/interactive/interactive-mode.ts
++++ b/packages/coding-agent/src/modes/interactive/interactive-mode.ts
+@@ -3960,6 +3960,7 @@
+ 								this.getMarkdownThemeWithSettings(),
+ 								this.outputPad,
+ 								this.getMarkdownTransformers(),
++								message.timestamp,
+ 							);
+ 							this.chatContainer.addChild(userComponent);
+ 						}
+@@ -3969,6 +3970,7 @@
+ 							this.getMarkdownThemeWithSettings(),
+ 							this.outputPad,
+ 							this.getMarkdownTransformers(),
++							message.timestamp,
+ 						);
+ 						this.chatContainer.addChild(userComponent);
+ 					}

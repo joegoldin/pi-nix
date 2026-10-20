@@ -368,6 +368,10 @@ rather than from a pin:
 | `ext-pi-foreign-skills` | `packages/extensions/pi-foreign-skills` | Skills from other agents' directories |
 | `ext-pi-permissions` | `packages/extensions/pi-permissions` | Permissions and auto mode in one extension: policy rules, the classifier as a chain link that asks before it blocks, subagent prompt forwarding |
 
+User-message blocks show their saved send time in local `4:24 PM` format,
+right-aligned in the existing top padding. Restored history uses the original
+timestamp; messages without one are left unchanged.
+
 pi-custom and pi-permissions vendor their dependencies through a `bun.lock`:
 FFF's native file index for pi-custom; tree-sitter, zod and unbash for
 pi-permissions' engines. The others have none. Their tests run under
