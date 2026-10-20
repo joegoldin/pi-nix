@@ -357,6 +357,11 @@ default. Permission extensions see proxy calls, not each underlying MCP tool's
 native identity. Existing built-in OAuth sign-ins require the adapter's import
 flow; the two clients do not share subsequent sign-ins or sign-outs.
 
+Pi-lens includes every grammar in its pinned upstream manifest, plus its vendored
+CUE grammar. Nix fetches and verifies them at build time; language support does
+not depend on downloading grammars into the read-only store during a session.
+The extension updater refreshes the grammar manifest alongside the pi-lens pin.
+
 Five more are first-party, built from `packages/extensions/` in this repo
 rather than from a pin:
 

@@ -26,6 +26,7 @@ pkgs.runCommand "pi-nix-update-app-tests" { } ''
   grep -q 'dist-tags' "$script"
   grep -q 'bun2nix' "$script"
   grep -q 'cp "packages/extensions/$slug/bun.lock" "$work/bun.lock"' "$script"
+  grep -Fq 'cp "$work/scripts/grammars.lock.json" "packages/extensions/$slug/grammars.lock.json"' "$script"
   # Without --os/--cpu the generated bun.nix omits every non-host platform
   # variant and the Darwin build of ext-heyhuynhgiabuu-pi-pretty fails.
   grep -q -- "--os='\*'" "$script"
