@@ -74,6 +74,7 @@ import type {
   DecisionKind,
   DenialRecord,
   EffectiveConfig,
+  ScenarioApproval,
 } from "./types.ts";
 import { safeJson, truncateMiddle } from "./utils.ts";
 
@@ -124,6 +125,7 @@ function projectIsTrusted(
 export type PiAutomodeOptions = {
   /** Shared session ledger, owned by pi-permissions rather than this classifier. */
   approvals?: {
+    context?(toolName: string, cwd: string): readonly ScenarioApproval[];
     scope(toolName: string, input: unknown, cwd: string): string | undefined;
     has(toolName: string, input: unknown, cwd: string): boolean;
     remember(toolName: string, input: unknown, cwd: string): void;
@@ -966,6 +968,7 @@ export function createPiAutomode(options: PiAutomodeOptions = {}) {
         cfg,
         serializeClassifierAction(event.toolName, input),
         loadedContext,
+        canReuseApproval ? options.approvals?.context?.(event.toolName, ctx.cwd) ?? [] : [],
       );
       logClassifierIo(decision, logCtx);
       if (decision.decision === "allow") {

@@ -527,6 +527,110 @@ test("lowercase y stores a bounded approval shared by subsequent calls", async (
   expect(ledger.grantList()).toHaveLength(1);
 });
 
+test("y supplies the approved scenario when classifying a different command", async () => {
+  const ledger = new PermissionLedger();
+  const term = terminalUi();
+  const seen = [];
+  const input = { command: "ssh torrent 'diagnose --output /tmp/check-a.txt'" };
+  const h = await realHost(
+    () => ({ askOnBlock: { enabled: true, timeoutSeconds: 1 } }),
+    async (_ctx, _config, _action, _project, approvals) => {
+      seen.push(approvals);
+      return approvals?.some((approval) => approval.input.command === input.command)
+        ? { decision: "allow", tier: "explicit_intent", reason: "Same approved diagnostic operation" }
+        : { decision: "block", tier: "soft_deny", reason: "Remote write needs authorization" };
+    },
+    { hasUI: true, mode: "tui", ui: term.ui },
+    {
+      scope: (name, args, cwd) => approvalScope(name, args, cwd)?.label,
+      has: (name, args, cwd) => ledger.isSimilarlyGranted(name, args, cwd),
+      remember: (name, args, cwd) => ledger.approveSimilar(name, args, cwd),
+      context: (name, cwd) => ledger.scenarioApprovals(name, cwd),
+    },
+  );
+  await h.emit("tool_call", { ...event, input });
+  const first = h.service.links.get("pi-automode")(details, {}, log);
+  while (term.mounted.length === 0) await new Promise((r) => setTimeout(r, 5));
+  term.press("y");
+  expect(await first).toEqual({ kind: "allow" });
+  await h.emit("tool_call", {
+    ...event, toolCallId: "variant",
+    input: { command: "ssh torrent 'diagnose --output /tmp/check-b.txt --verbose'" },
+  });
+  const result = await h.service.links.get("pi-automode")({ ...details, toolCallId: "variant" }, {}, log);
+  expect(seen[0]).toEqual([]);
+  expect(seen[1]).toHaveLength(1);
+  expect(seen[1][0]).toMatchObject({ input, cwd: "/tmp/project" });
+  expect(result).toEqual({ kind: "allow" });
+  expect(term.mounted).toHaveLength(1);
+  expect(h.classifierCalls()).toBe(2);
+});
+
+test("Y allows once without recording a scenario even when one is offered", async () => {
+  const ledger = new PermissionLedger();
+  const term = terminalUi();
+  const h = await realHost(
+    () => ({ askOnBlock: { enabled: true, timeoutSeconds: 1 } }),
+    async () => ({ decision: "block", tier: "soft_deny", reason: "Needs approval" }),
+    { hasUI: true, mode: "tui", ui: term.ui },
+    {
+      scope: (name, input, cwd) => approvalScope(name, input, cwd)?.label,
+      has: (name, input, cwd) => ledger.isSimilarlyGranted(name, input, cwd),
+      remember: (name, input, cwd) => ledger.approveSimilar(name, input, cwd),
+      context: (name, cwd) => ledger.scenarioApprovals(name, cwd),
+    },
+  );
+  await h.emit("tool_call", event);
+  const pending = h.service.links.get("pi-automode")(details, {}, log);
+  while (term.mounted.length === 0) await new Promise((r) => setTimeout(r, 5));
+  term.press("Y");
+  expect(await pending).toEqual({ kind: "allow" });
+  expect(ledger.grantList()).toEqual([]);
+});
+
+test("scenario context never overrides the classifier's refusal of a variant", async () => {
+  const ledger = new PermissionLedger();
+  ledger.approveSimilar("bash", { command: "ssh torrent diagnose" }, "/tmp/project");
+  for (const tier of ["soft_deny", "hard_deny", "none"]) {
+    const seen = [];
+    const h = await realHost(
+      () => ({}),
+      async (_ctx, _config, _action, _project, approvals) => {
+        seen.push(approvals);
+        return { decision: "block", tier, reason: "Outside approved scope or failed classification" };
+      },
+      {},
+      {
+        scope: (name, input, cwd) => approvalScope(name, input, cwd)?.label,
+        has: (name, input, cwd) => ledger.isSimilarlyGranted(name, input, cwd),
+        remember() { throw new Error("must not grant"); },
+        context: (name, cwd) => ledger.scenarioApprovals(name, cwd),
+      },
+    );
+    await h.emit("tool_call", { ...event, input: { command: "ssh other-host diagnose" } });
+    expect((await h.service.links.get("pi-automode")(details, {}, log)).kind).toBe("deny");
+    expect(seen[0]).toHaveLength(1);
+  }
+});
+
+test("accepted explicit ask rules do not inherit scenario approvals", async () => {
+  const h = await realHost(
+    () => ({ permissionAsk: [parseToolPattern("bash(*)")] }),
+    async (_ctx, _config, _action, _project, approvals) => {
+      expect(approvals).toEqual([]);
+      return { decision: "block", tier: "soft_deny", reason: "Separate review required" };
+    },
+    { hasUI: true, ui: { ...statusUi, confirm: async () => true } },
+    {
+      has: () => true, scope: () => "same task", remember() {},
+      context() { throw new Error("explicit ask must not inherit scope context"); },
+    },
+  );
+  await h.emit("tool_call", event);
+  expect((await h.service.links.get("pi-automode")(details, {}, log)).kind).toBe("deny");
+  expect(h.classifierCalls()).toBe(1);
+});
+
 test("a remembered scope never clears hard denials or classifier failures", async () => {
   for (const tier of ["hard_deny", "none"]) {
     const h = await realHost(
@@ -542,7 +646,10 @@ test("a remembered scope never clears hard denials or classifier failures", asyn
 });
 
 test("a remembered scope cannot bypass an explicit deny or protected write", async () => {
-  const approvals = { has: () => true, scope: () => "same file", remember() {} };
+  const approvals = {
+    has: () => true, scope: () => "same file", remember() {},
+    context() { throw new Error("denied or protected calls must not inherit scope context"); },
+  };
   const denied = await realHost(() => ({ permissionDeny: [parseToolPattern("bash(*)")] }), undefined, {}, approvals);
   expect((await denied.emit("tool_call", event))?.block).toBe(true);
   const protectedHost = await realHost(

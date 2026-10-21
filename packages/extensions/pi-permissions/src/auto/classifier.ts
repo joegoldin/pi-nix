@@ -28,6 +28,7 @@ import type {
   ClassifyResult,
   EffectiveClassifierReasoningLevel,
   EffectiveConfig,
+  ScenarioApproval,
 } from "./types.ts";
 
 export function buildClassifierPrompt(config: EffectiveConfig): string {
@@ -377,6 +378,20 @@ export function serializeClassifierAction(
   input: Record<string, unknown>,
 ): string {
   return JSON.stringify({ toolName, input });
+}
+
+export function buildClassifierContext(
+  loadedContext: string,
+  transcript: string,
+  approvals: readonly ScenarioApproval[] = [],
+): string {
+  // Reference commands remain JSON data, including any apparent section delimiters.
+  const scopes = JSON.stringify(approvals).replaceAll("<", "\\u003c");
+  return `<loaded-project-instructions>\n${
+    loadedContext || "(none)"
+  }\n</loaded-project-instructions>\n\n<classifier-transcript>\n${
+    transcript || "(none)"
+  }\n</classifier-transcript>\n\n<verified-permission-scopes>\n${scopes}\n</verified-permission-scopes>`;
 }
 
 export function buildClassifierActionMessage(action: string): UserMessage {
@@ -846,6 +861,7 @@ export const defaultClassifyAction: ClassifyAction = async (
   config,
   action,
   loadedContext,
+  approvals = [],
 ): Promise<ClassifyResult> => {
   const resolution = await resolveClassifier(ctx, config);
   if (!resolution.classifier || !resolution.completionPlan) {
@@ -864,11 +880,7 @@ export const defaultClassifyAction: ClassifyAction = async (
     maxUserTokens: config.maxUserTranscriptTokens,
     maxToolTokens: config.maxToolTranscriptTokens,
   });
-  const contextText = `<loaded-project-instructions>\n${
-    loadedContext || "(none)"
-  }\n</loaded-project-instructions>\n\n<classifier-transcript>\n${
-    transcript || "(none)"
-  }\n</classifier-transcript>`;
+  const contextText = buildClassifierContext(loadedContext, transcript, approvals);
   const contextMessage: UserMessage = {
     role: "user",
     content: [{ type: "text", text: contextText }],

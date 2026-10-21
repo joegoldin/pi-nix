@@ -94,6 +94,8 @@ test("background completion still receives the active goal contract", () => {
 function waitingGoal(status = "active", resumeAt?: number) {
 	const handlers = new Map<string, Function>();
 	const tools = new Map<string, any>();
+	const commands = new Map<string, any>();
+	const notices: string[] = [];
 	const initial = {
 		id: "waiting-goal", text: "Verify the build", status, iteration: 2,
 		startedAt: Date.now(), updatedAt: Date.now(), tokensUsed: 0, baselineTokens: 0,
@@ -104,18 +106,18 @@ function waitingGoal(status = "active", resumeAt?: number) {
 	const sent: string[] = [];
 	const ctx = {
 		isIdle: () => true, hasPendingMessages: () => false,
-		ui: { setStatus() {}, notify() {} },
+		ui: { setStatus() {}, notify: (text: string) => notices.push(text) },
 		sessionManager: { getBranch: () => [{ type: "custom", customType: "goal-state", data: { goal: initial } }] },
 	};
 	registerGoal({
 		on: (name: string, handler: Function) => handlers.set(name, handler),
-		registerTool: (tool: any) => tools.set(tool.name, tool), registerCommand() {}, sendMessage() {},
+		registerTool: (tool: any) => tools.set(tool.name, tool), registerCommand: (name: string, command: any) => commands.set(name, command), sendMessage() {},
 		appendEntry: (_name: string, data: any) => { saved = structuredClone(data.goal); },
 		sendUserMessage: (text: string) => sent.push(text),
 	} as never, () => ({ goalTurnLimit: 100, goalNoProgressTurns: 10 }) as never);
 	const emit = (name: string, event = {}) => handlers.get(name)?.(event, ctx);
 	emit("session_start");
-	return { emit, ctx, sent, saved: () => saved, wait: (reason = "Build B completion") => tools.get("goal_wait").execute("call", { goal_id: initial.id, reason }, undefined, undefined, ctx) };
+	return { emit, ctx, sent, tools, commands, notices, saved: () => saved, wait: (reason = "Build B completion", waiting_for: string | undefined = "background") => tools.get("goal_wait").execute("call", { goal_id: initial.id, reason, waiting_for }, undefined, undefined, ctx) };
 }
 
 test("a background wake consumes the old wait so the new run can wait again", async () => {
@@ -198,5 +200,39 @@ test("a queued wake between turns in the same run consumes the previous wait", a
 		expect(h.saved().waiting).toBeUndefined();
 		expect(h.saved().automaticModelTurns).toBe(3);
 		expect((await h.wait("Second job wake")).terminate).toBe(true);
+	} finally { h.emit("session_shutdown"); }
+});
+
+test("wait recaps identify who must act, persist that distinction, and keep it in /goal status", async () => {
+	for (const [kind, label, reason] of [
+		["user", "Goal waiting for you", "Run the signing command from your clipboard, then paste the notarization result here."],
+		["background", "Goal waiting for a background task", "The Mac build is running. I'll continue when it finishes."],
+		["external", "Goal waiting for an external event", "The service is recovering. I'll check once at the scheduled time."],
+	]) {
+		const h = waitingGoal();
+		try {
+			h.emit("before_agent_start", { messageType: "custom" });
+			const result = await h.wait(reason, kind);
+			expect(result.content[0].text).toStartWith(label);
+			expect(result.content[0].text).toContain(reason);
+			expect(h.saved().waiting.waitingFor).toBe(kind);
+			if (kind === "background") expect(result.content[0].text).toContain("No action needed from you");
+			if (kind === "user") expect(result.content[0].text).not.toContain("No action needed from you");
+			await h.commands.get("goal").handler("status", h.ctx);
+			expect(h.notices.at(-1)).toContain(label);
+			expect(h.notices.at(-1)).toContain(reason);
+		} finally { h.emit("session_shutdown"); }
+	}
+});
+
+test("new waits require an ownership category and user-facing tool field guidance", async () => {
+	const h = waitingGoal();
+	try {
+		h.emit("before_agent_start", { messageType: "custom" });
+		expect(h.tools.get("goal_wait").parameters.required).toContain("waiting_for");
+		expect(h.tools.get("goal_wait").parameters.properties.waiting_for.anyOf.map((item: any) => item.const)).toEqual(["user", "background", "external"]);
+		for (const [name, field] of [["goal_wait", "reason"], ["goal_blocked", "reason"], ["goal_complete", "summary"]]) {
+			expect(h.tools.get(name).parameters.properties[field].description).toContain('"you"');
+		}
 	} finally { h.emit("session_shutdown"); }
 });

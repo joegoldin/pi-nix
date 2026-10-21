@@ -94,12 +94,27 @@ function fakeCtx(stateDir: string) {
 	const statuses: Array<[string, string | undefined]> = [];
 	const pastes: string[] = [];
 	const notices: Array<[string, string | undefined]> = [];
+	const editor = {
+		text: "",
+		focused: true,
+		handlers: new Set<(data: string) => { consume?: boolean; data?: string } | undefined>(),
+	};
 	const theme = { fg: (slot: string, text: string) => `<${slot}>${text}</${slot}>` };
 	const ctx: VoiceContext = {
 		cwd: stateDir,
 		mode: "tui",
 		hasUI: true,
 		ui: {
+			getEditorText: () => editor.text,
+			setEditorText: (text: string) => {
+				editor.text = text;
+			},
+			onEditorInput: (handler: (data: string) => { consume?: boolean; data?: string } | undefined) => {
+				editor.handlers.add(handler);
+				return () => {
+					editor.handlers.delete(handler);
+				};
+			},
 			setWidget: (key: string, content: unknown, opts?: unknown) => {
 				widgets.push([key, content, opts]);
 			},
@@ -115,10 +130,38 @@ function fakeCtx(stateDir: string) {
 			theme,
 		},
 	};
-	return { widgets, statuses, pastes, notices, theme, ctx };
+	function input(data: string): boolean {
+		if (!editor.focused) return false;
+		for (const handler of editor.handlers) {
+			const result = handler(data);
+			if (result?.consume) return true;
+			data = result?.data ?? data;
+		}
+		if (data === " " || data === "\x1b[32;1:1u") editor.text += " ";
+		return false;
+	}
+	return { widgets, statuses, pastes, notices, theme, ctx, editor, input };
 }
 
 describe("VoiceSession", () => {
+	it("shares one graceful stop across repeated requests", async () => {
+		process.env.PI_VOICE_RECORD_BIN = fakeRecordBin();
+		process.env.CLAUDE_CONFIG_DIR = tmp();
+		try {
+			const { ctx, pastes } = fakeCtx(tmp());
+			const session = new VoiceSession(ctx);
+			session.start();
+			const first = session.stop();
+			const second = session.stop();
+			await second;
+			expect(pastes).toHaveLength(1);
+			expect(first).toBe(second);
+		} finally {
+			delete process.env.PI_VOICE_RECORD_BIN;
+			delete process.env.CLAUDE_CONFIG_DIR;
+		}
+	});
+
 	it("streams events into UI state and pastes the final text", async () => {
 		const stateDir = tmp();
 		process.env.PI_VOICE_RECORD_BIN = fakeRecordBin();
@@ -284,6 +327,124 @@ describe("VoiceSession", () => {
 });
 
 describe("extension entrypoint", () => {
+	it("starts with one Space in an empty editor and stops with one Space", async () => {
+		const stateDir = tmp();
+		process.env.PI_VOICE_RECORD_BIN = fakeRecordBin();
+		process.env.CLAUDE_CONFIG_DIR = stateDir;
+		const pi = fakePi();
+		register(pi);
+		const { ctx, editor, input, pastes } = fakeCtx(stateDir);
+		try {
+			await pi.emit("session_start", {}, ctx);
+			expect(editor.handlers.size).toBe(1);
+			expect(input(" ")).toBe(true);
+			expect(editor.text).toBe("");
+			await waitFor(() => expect(voiceBlock(stateDir).enabled).toBe(true));
+			expect(input("\x1b[32;1:2u")).toBe(true);
+			expect(input("\x1b[32;1:3u")).toBe(false);
+			expect(voiceBlock(stateDir).enabled).toBe(true);
+			expect(input(" ")).toBe(true);
+			expect(input(" ")).toBe(true);
+			await waitFor(() => expect(pastes).toEqual(["So the thing is, we shipped it."]));
+			expect(editor.text).toBe("");
+			await pi.emit("session_shutdown", {}, ctx);
+			expect(editor.handlers.size).toBe(0);
+		} finally {
+			await pi.emit("session_shutdown", {}, ctx);
+			delete process.env.PI_VOICE_RECORD_BIN;
+			delete process.env.CLAUDE_CONFIG_DIR;
+		}
+	});
+
+	it("keeps ordinary input and modal spaces away from dictation", async () => {
+		const stateDir = tmp();
+		process.env.PI_VOICE_RECORD_BIN = fakeRecordBin();
+		process.env.CLAUDE_CONFIG_DIR = stateDir;
+		const pi = fakePi();
+		register(pi);
+		const { ctx, editor, input } = fakeCtx(stateDir);
+		try {
+			await pi.emit("session_start", {}, ctx);
+			editor.text = "draft";
+			expect(input(" ")).toBe(false);
+			expect(input(" ")).toBe(false);
+			expect(editor.text).toBe("draft  ");
+			editor.text = "";
+			editor.focused = false;
+			expect(input(" ")).toBe(false);
+			expect(input(" ")).toBe(false);
+			editor.focused = true;
+			expect(input("\x1b[200~")).toBe(false);
+			expect(input(" ")).toBe(false);
+			expect(input(" ")).toBe(false);
+			expect(input("\x1b[201~")).toBe(false);
+			expect(existsSync(join(stateDir, "settings.local.json"))).toBe(false);
+		} finally {
+			await pi.emit("session_shutdown", {}, ctx);
+			delete process.env.PI_VOICE_RECORD_BIN;
+			delete process.env.CLAUDE_CONFIG_DIR;
+		}
+	});
+
+	it("replaces the input subscription and clears paste state on session change", async () => {
+		process.env.PI_VOICE_RECORD_BIN = fakeRecordBin();
+		process.env.CLAUDE_CONFIG_DIR = tmp();
+		const pi = fakePi();
+		register(pi);
+		const { ctx, editor, input } = fakeCtx(tmp());
+		try {
+			await pi.emit("session_start", {}, ctx);
+			input("\x1b[200~");
+			editor.text = "";
+			await pi.emit("session_start", {}, ctx);
+			expect(editor.handlers.size).toBe(1);
+			expect(input(" ")).toBe(true);
+			expect(editor.text).toBe("");
+		} finally {
+			await pi.emit("session_shutdown", {}, ctx);
+			delete process.env.PI_VOICE_RECORD_BIN;
+			delete process.env.CLAUDE_CONFIG_DIR;
+		}
+	});
+
+	it("does not install editor gestures outside TUI or without editor-hook support", async () => {
+		process.env.CLAUDE_CONFIG_DIR = tmp();
+		try {
+			for (const mode of ["rpc", "print", "legacy"]) {
+				const pi = fakePi();
+				register(pi);
+				const { ctx, editor } = fakeCtx(tmp());
+				if (mode === "legacy") delete ctx.ui.onEditorInput;
+				else ctx.mode = mode;
+				await pi.emit("session_start", {}, ctx);
+				expect(editor.handlers.size).toBe(0);
+				await pi.emit("session_shutdown", {}, ctx);
+			}
+		} finally {
+			delete process.env.CLAUDE_CONFIG_DIR;
+		}
+	});
+
+	it("Space also stops a recording started with /voice without changing a draft", async () => {
+		process.env.PI_VOICE_RECORD_BIN = fakeRecordBin();
+		process.env.CLAUDE_CONFIG_DIR = tmp();
+		const pi = fakePi();
+		register(pi);
+		const { ctx, editor, input, pastes } = fakeCtx(tmp());
+		try {
+			await pi.emit("session_start", {}, ctx);
+			await pi.commands.get("voice")?.handler("", ctx);
+			editor.text = "existing draft";
+			expect(input(" ")).toBe(true);
+			await waitFor(() => expect(pastes).toHaveLength(1));
+			expect(editor.text).toBe("existing draft");
+		} finally {
+			await pi.emit("session_shutdown", {}, ctx);
+			delete process.env.PI_VOICE_RECORD_BIN;
+			delete process.env.CLAUDE_CONFIG_DIR;
+		}
+	});
+
 	it("registers /voice and the lifecycle hooks pi publishes", () => {
 		const pi = fakePi();
 		register(pi);

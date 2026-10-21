@@ -854,6 +854,8 @@ let
     PI_CUSTOM_GIT_EDITOR.value = custom.gitEditorCommand;
   };
 
+  fastModeEntrypoints = lib.optionals cfg.fastMode.enable cfg.fastMode.package.passthru.piEntrypoint;
+
   customEntrypoints = lib.optionals custom.enable custom.package.passthru.piEntrypoint;
 
   customJailPermissions =
@@ -1743,6 +1745,21 @@ in
       '';
     };
 
+    fastMode = {
+      enable = lib.mkOption {
+        type = lib.types.bool;
+        default = cfg.custom.enable;
+        defaultText = lib.literalExpression "custom.enable";
+        description = "Load the first-party /fast command. Priority starts off in each new session.";
+      };
+      package = lib.mkOption {
+        type = lib.types.package;
+        default = self.packages.${system}.ext-pi-fast;
+        defaultText = lib.literalExpression "pi-nix's packages.ext-pi-fast";
+        description = "The pi-fast extension package.";
+      };
+    };
+
     custom = {
       enable = lib.mkEnableOption ''
         pi-custom, this setup's first-party extension.
@@ -2171,7 +2188,8 @@ in
       ++ notificationEntrypoints
       ++ voiceEntrypoints
       ++ foreignSkillsEntrypoints
-      ++ customEntrypoints;
+      ++ customEntrypoints
+      ++ fastModeEntrypoints;
     skills = extSkills;
     promptTemplates = extPrompts;
     settings = extSettings;

@@ -21,6 +21,7 @@ let
         ext-pi-permissions
         ext-pi-notify
         ext-pi-custom
+        ext-pi-fast
         ;
     };
     inputs.agent-statusline = self.inputs.agent-statusline;

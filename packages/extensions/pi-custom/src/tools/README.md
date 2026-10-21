@@ -78,6 +78,15 @@ it takes. A goal turn that ends without `goal_complete`, `goal_blocked` or
 replies (both in `/ui`), or when the token budget runs out. Completion claims
 are checked before they are accepted.
 
+Goal guidance tells the model to address you directly, separate verified results
+from remaining work, and put any action you need to take first. `goal_wait`
+requires `waiting_for` (`user`, `background` or `external`), so its notice,
+`/goal status` and footer distinguish waiting for you from waiting for a task or
+event. Background and external waits explicitly say no action is needed from you.
+Older saved waits without ownership keep their reason without guessing who must
+act. Updates should name what happens next without promising an automatic resume
+unless a notification or deadline is actually arranged.
+
 A new run or turn consumes an active goal's previous wait, including background
 notifications, extension messages, and queued delivery within the same run.
 The old deadline is cancelled;

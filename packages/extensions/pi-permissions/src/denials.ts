@@ -8,18 +8,22 @@
 import { resolve } from "node:path";
 import { resolvePathForPolicy, resolveToolInputPath } from "./auto/paths.ts";
 import { canonicalJson } from "./ui/call-label.ts";
+import type { ScenarioApproval } from "./auto/types.ts";
 
 export interface ApprovalScope {
 	key: string;
 	label: string;
+	/** Absent on legacy grants, whose displayed scope only covered the exact command. */
+	scenario?: { cwd: string };
 }
 
-/** No fuzzy command matching: the scope shown to the operator is the scope used. */
+/** Variants need classifier review; the key still identifies only an exact reusable scope. */
 export function approvalScope(toolName: string, input: unknown, cwd: string): ApprovalScope | undefined {
 	if (!input || typeof input !== "object" || Array.isArray(input)) return undefined;
 	const args = { ...input as Record<string, unknown> };
 	const directory = resolvePathForPolicy(resolve(cwd)) ?? resolve(cwd);
 	let label: string;
+	let scenario: ApprovalScope["scenario"];
 	if ((toolName === "bash" || toolName === "bg_run") && typeof args.command === "string") {
 		delete args.timeout;
 		if (toolName === "bg_run") {
@@ -27,7 +31,8 @@ export function approvalScope(toolName: string, input: unknown, cwd: string): Ap
 			delete args.name;
 			delete args.description;
 		}
-		label = `Same ${toolName} command in ${directory} (timing and task label may differ)`;
+		scenario = { cwd: directory };
+		label = `Similar shell actions for this task in ${directory}: same targets (hosts, repositories, directories, services and recipients) and side-effect types. Arguments and diagnostic filenames may vary; each action is rechecked`;
 	} else if ((toolName === "edit" || toolName === "write") && typeof args.path === "string") {
 		const path = resolveToolInputPath(toolName, directory, args.path);
 		if (path === undefined) return undefined;
@@ -36,7 +41,7 @@ export function approvalScope(toolName: string, input: unknown, cwd: string): Ap
 		else delete args.content;
 		label = `${toolName} ${args.path} in ${directory} (new contents/edits allowed)`;
 	} else return undefined;
-	return { key: `scope\u0000${directory}\u0000${toolName}\u0000${canonicalJson(args)}`, label: `${label}; until your next instruction or questionnaire answer` };
+	return { key: `scope\u0000${directory}\u0000${toolName}\u0000${canonicalJson(args)}`, label: `${label}; until your next instruction or questionnaire answer`, ...(scenario ? { scenario } : {}) };
 }
 
 export type DenialState = "open" | "approved" | "dismissed";
@@ -121,7 +126,7 @@ export class PermissionLedger {
 	approveSimilar(toolName: string, input: unknown, cwd: string): Grant | undefined {
 		const scope = approvalScope(toolName, input, cwd);
 		if (!scope) return undefined;
-		const grant = { key: scope.key, toolName, input, at: this.now(), scope };
+		const grant = { key: scope.key, toolName, input: structuredClone(input), at: this.now(), scope };
 		this.grants.set(scope.key, grant);
 		return grant;
 	}
@@ -129,6 +134,20 @@ export class PermissionLedger {
 	isSimilarlyGranted(toolName: string, input: unknown, cwd: string): boolean {
 		const scope = approvalScope(toolName, input, cwd);
 		return !!scope && this.grants.has(scope.key);
+	}
+
+	/** Only newly displayed shell scenarios can inform review of different commands. */
+	scenarioApprovals(toolName: string, cwd: string): ScenarioApproval[] {
+		if (toolName !== "bash" && toolName !== "bg_run") return [];
+		const directory = resolvePathForPolicy(resolve(cwd)) ?? resolve(cwd);
+		const approvals: ScenarioApproval[] = [];
+		for (const grant of this.grantList()) {
+			const scope = grant.scope;
+			if (!scope?.scenario || scope.scenario.cwd !== directory) continue;
+			if (grant.toolName !== "bash" && grant.toolName !== "bg_run") continue;
+			approvals.push({ scope: scope.label, cwd: directory, toolName: grant.toolName, input: structuredClone(grant.input), at: grant.at });
+		}
+		return approvals;
 	}
 
 	clearSimilar(): boolean {

@@ -4,7 +4,51 @@ import { DENIAL_LIMIT, grantKey, PermissionLedger } from "./denials.ts";
 const blocked = (command: string, toolCallId = "c1") => ({ toolCallId, toolName: "bash", input: { command }, reason: "no" });
 
 describe("the permission ledger", () => {
-	it("reuses only the displayed command scope in the same cwd", () => {
+	it("makes new shell scope approvals available for classifier review of variants", () => {
+		const ledger = new PermissionLedger(() => 123);
+		const input = { command: "ssh torrent 'diagnose --output /tmp/check-a.txt'" };
+		const grant = ledger.approveSimilar("bash", input, "/work")!;
+		expect(grant.scope?.label).toContain("Similar shell actions");
+		expect(grant.scope?.label).toContain("rechecked");
+		expect(typeof ledger.scenarioApprovals).toBe("function");
+		const approvals = ledger.scenarioApprovals("bg_run", "/work");
+		expect(approvals).toHaveLength(1);
+		expect(approvals[0]).toMatchObject({ toolName: "bash", input, cwd: "/work", at: 123 });
+		expect(ledger.isSimilarlyGranted("bash", { command: "ssh torrent 'diagnose --output /tmp/check-b.txt'" }, "/work")).toBe(false);
+		expect(ledger.scenarioApprovals("bash", "/elsewhere")).toEqual([]);
+		expect(ledger.scenarioApprovals("write", "/work")).toEqual([]);
+		const restored = new PermissionLedger();
+		restored.restore(ledger.snapshot());
+		expect(restored.scenarioApprovals("bash", "/work")).toEqual(approvals);
+		restored.revoke(grant.key);
+		expect(restored.scenarioApprovals("bash", "/work")).toEqual([]);
+		ledger.clearSimilar();
+		expect(ledger.scenarioApprovals("bash", "/work")).toEqual([]);
+	});
+
+	it("does not silently widen old exact-command grants into scenario approvals", () => {
+		const ledger = new PermissionLedger();
+		ledger.approveSimilar("bash", { command: "ssh torrent diagnose" }, "/work");
+		const saved = ledger.snapshot();
+		delete saved.grants[0]!.scope!.scenario;
+		ledger.restore(saved);
+		expect(typeof ledger.scenarioApprovals).toBe("function");
+		expect(ledger.scenarioApprovals("bash", "/work")).toEqual([]);
+		expect(ledger.isSimilarlyGranted("bash", { command: "ssh torrent diagnose" }, "/work")).toBe(true);
+	});
+
+	it("keeps the approved reference call independent of later input mutations", () => {
+		const ledger = new PermissionLedger();
+		const input = { command: "ssh torrent diagnose" };
+		ledger.approveSimilar("bash", input, "/work");
+		input.command = "ssh elsewhere change-service";
+		const context = ledger.scenarioApprovals("bash", "/work");
+		expect(context[0]!.input).toEqual({ command: "ssh torrent diagnose" });
+		(context[0]!.input as { command: string }).command = "different";
+		expect(ledger.scenarioApprovals("bash", "/work")[0]!.input).toEqual({ command: "ssh torrent diagnose" });
+	});
+
+	it("keeps exact command matching separate from scenario review", () => {
 		const l = new PermissionLedger();
 		l.approveSimilar("bash", { command: "nixfmt file.nix", timeout: 30 }, "/work");
 		expect(l.isSimilarlyGranted("bash", { command: "nixfmt file.nix", timeout: 90 }, "/work")).toBe(true);

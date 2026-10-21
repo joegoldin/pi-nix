@@ -146,7 +146,8 @@ This fork adds:
 | `messaging.claude.enable` | bool | `!jail.enable` | Put top-level interactive pi sessions in Claude Code's peer list, and let the intercom tool reach Claude sessions. Off under the jail, which exposes neither Claude's registry nor its sockets. |
 | `messaging.claude.fromMode` | enum | `prompting` | The permission mode asserted to Claude Code. Claude holds a message for approval when this differs from its own. |
 | `voice.enable` | bool | `false` | Dictation through the first-party `pi-voice` extension, over `audiomemo record --stream`. |
-| `voice.package` | package | `ext-pi-voice` | The `pi-voice` derivation. Must satisfy the `mkPiExtension` passthru contract. |
+| `voice.package` | package | `ext-pi-fast` | `packages/extensions/pi-fast` | Session-local OpenAI priority inference toggle |
+| `ext-pi-voice` | The `pi-voice` derivation. Must satisfy the `mkPiExtension` passthru contract. |
 | `voice.audiomemo` | package | *(none)* | The audiomemo package providing `record`. No default: the jail binds this exact derivation's closure. |
 | `voice.device` | `null \| str` | `null` | Device alias or name passed as `-D`. Null defers to audiomemo's own config, whose picker is an interactive TUI. |
 | `voice.extraArgs` | `[str]` | `[ ]` | Further `record` arguments. `--stream` and `-t` are always passed. |
@@ -156,6 +157,29 @@ This fork adds:
 | `voice.configFile` | `null \| str` | `null` | audiomemo's config file, bound read-only into the jail. Without it `record` tries to onboard and dies on `/dev/tty`. |
 | `voice.jailPermissions` | function | read-only | The jail entries voice needs, for a consumer who replaces `jail.permissions` outright. |
 
+### Fast mode
+
+The first-party `pi-fast` plugin provides `/fast`, `/fast on`, `/fast off`,
+and `/fast toggle`. It loads alongside `custom.enable`; `fastMode.enable`
+can enable or disable it independently, and `fastMode.package` selects its
+package. The command starts **off** for a new session. Its preference follows
+the session branch through resume and compaction, rather than changing a
+global setting for future sessions.
+
+When enabled, it adds `service_tier: "priority"` to subsequent requests for
+GPT-5.4, GPT-5.5, GPT-5.6 (including Sol, Terra and Luna), and GPT-6-Astra on
+`openai`/`openai-responses` or `openai-codex`/`openai-codex-responses`.
+Other providers, APIs and models are untouched. The preference stays enabled
+but inactive when switching to an unsupported model. `/fast off` stops adding
+the override; it does not remove settings supplied elsewhere.
+
+Priority can increase API cost or subscription usage and remains subject to
+account availability. It does not change reasoning effort or accelerate a
+request already in flight. The plugin publishes the `pi-fast` status slot as
+`fast` only while applicable. The updated agent-statusline renderer places it
+in the warning color immediately after the model and effort, without a second
+status row; older statuslines show it as a separate status row.
+
 ### Voice
 
 `/voice` starts and stops dictation. pi-voice spawns `audiomemo record
@@ -164,6 +188,15 @@ level, the live partial text, the committed text, and one final transcript.
 The extension draws two rows below the editor: a record dot, a clock, a VU
 bar, a dB readout, and the transcript with the moving partial dimmed. The
 finished text arrives in the editor through `ctx.ui.pasteToEditor`.
+
+In the packaged interactive runtime, press **Space** at a completely empty
+prompt to start recording; press **Space** again to stop. The starting Space
+is consumed without inserting whitespace. Existing drafts (including whitespace),
+pasted text, and Kitty key-repeat/release events do not activate dictation. Space stops recording
+even with a draft present; the transcript is pasted, never submitted.
+The editor-scoped `ctx.ui.onEditorInput` hook runs after raw input listeners
+and focus routing, so dialogs, overlays, and other plugins' modal controls
+keep their keys. Older runtimes without that hook retain `/voice` only.
 
 Every decision about devices, backends, formats, and secrets stays in
 audiomemo. Keys travel as `*_API_KEY_FILE` paths and audiomemo opens the files
@@ -175,7 +208,9 @@ agent-statusline's `voice` widget already reads. The contract is
 harness-independent: any producer that owns the microphone can write it, and
 the same widget lights under pi and under Claude Code. Stopping writes
 `enabled: false` rather than deleting the key, because an absent key lets a
-lower settings layer answer instead.
+lower settings layer answer instead. Before Pi writes its state, the footer
+may show a mode from Claude's settings instead. These mode labels describe
+shared state; they are not Pi keybinding hints.
 
 Inside the jail the microphone is not merely restricted without
 `voice.jailPermissions`: it is absent. `audiomemo record -L` with no audio

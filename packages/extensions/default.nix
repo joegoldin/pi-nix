@@ -43,6 +43,7 @@ let
   # `extensionPackages` treats every extension alike.
   firstParty = {
     ext-pi-notify = bunPkgs.callPackage ./pi-notify { inherit mkPiExtension; };
+    ext-pi-fast = bunPkgs.callPackage ./pi-fast { inherit mkPiExtension; };
     ext-pi-voice = bunPkgs.callPackage ./pi-voice { inherit mkPiExtension; };
     ext-pi-foreign-skills = bunPkgs.callPackage ./pi-foreign-skills { inherit mkPiExtension; };
     ext-pi-custom = bunPkgs.callPackage ./pi-custom { inherit mkPiExtension; };

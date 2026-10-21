@@ -23,7 +23,7 @@ export interface Goal {
 	toolFreeRepeatCount: number;
 	lastToolFreeFingerprint?: string;
 	safetyPauseCause?: "continuation_limit" | "no_progress";
-	waiting?: { reason: string; resumeAt?: number };
+	waiting?: { reason: string; resumeAt?: number; waitingFor?: "user" | "background" | "external" };
 	summary?: string;
 }
 
@@ -35,8 +35,14 @@ function escapeXml(text: string): string {
 	return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+export const GOAL_UPDATE_GUIDANCE = `Write every user-visible goal description, progress update, recap, completion summary, blocker and wait reason for the person using Pi. Address the user as "you", not "the operator"; describe your own work as "I" rather than talking about "the agent".
+Lead with the current result or the next action, not an internal handoff. Separate verified progress from remaining work. If you need the user to act, say "Waiting for you" and put the exact action and how to report completion first. If a background task or external event is pending, name it and say "No action needed from you" when that is true. Say what happens next, but promise automatic continuation only when a completion notification or deadline is actually arranged.
+Keep these updates concise and use plain language. Do not substitute scheduler jargon such as "arranged wake", "wake message" or "publication remains gated" for a direct explanation of what you are waiting for. Keep internal scheduling details in tool metadata unless the user is asking to debug them.`;
+
 export function rules(label: string): string {
 	return `Goal-mode rules:
+${GOAL_UPDATE_GUIDANCE}
+
 - Preserve the full objective across turns; do not redefine success around a narrower, safer, smaller, merely compatible, or easier-to-test result.
 - Derive concrete requirements from the objective and any referenced files, plans, specifications, issues, or user instructions.
 - When the todo tool is available and the user has not opted out of task tracking, track multi-step goals as separately verifiable milestones, including outstanding acceptance checks. Optional top-level groups may organize related tasks, with only one level of children; groups have derived progress, not a separate active-work obligation. Do not keep a whole-goal task active alongside its concrete children. On continuation or resume, reconcile the existing list with current evidence and update it as work finishes or blockers change. Return unattended or blocked tasks to pending with the next action recorded, rather than leaving stale in_progress claims. A completed todo list alone is not proof that the goal is complete.
@@ -113,6 +119,7 @@ This Goal contract supersedes every earlier goal-contract message.
 Do not treat an earlier Goal objective, goal_id, Goal-mode rule, or summary of them as current unless a later Goal contract explicitly reactivates Goal mode.`;
 
 export const BUDGET_WRAP_UP =
+	GOAL_UPDATE_GUIDANCE + "\n\n" +
 	"The active /goal token budget is exhausted. Stop substantive work and do not call substantive tools. Summarize progress, verified results, remaining work, and blockers concisely. Treat completion as unproven. Do not call goal_complete unless authoritative, requirement-by-requirement evidence already proves every requirement is complete. Weak, indirect, or missing evidence is not enough. Budget exhaustion is not completion.";
 
 const CONTRADICTIONS = [
@@ -204,6 +211,21 @@ export function fingerprint(text: string): string {
 	return createHash("sha256").update(meaningful).digest("hex");
 }
 
+export function waitLabel(waiting: NonNullable<Goal["waiting"]>): string {
+	switch (waiting.waitingFor) {
+		case "user": return "waiting for you";
+		case "background": return "waiting for a background task";
+		case "external": return "waiting for an external event";
+		default: return "waiting"; // Older saved goals did not record who must act.
+	}
+}
+
+export function waitMessage(waiting: NonNullable<Goal["waiting"]>): string {
+	const noAction = waiting.waitingFor === "background" || waiting.waitingFor === "external"
+		? "\n\nNo action needed from you." : "";
+	return `Goal ${waitLabel(waiting)}:\n${waiting.reason}${noAction}`;
+}
+
 /** The status-bar text for a goal, or undefined to clear it. */
 export function statusText(goal: Goal | undefined, turnLimit: number | null, now = Date.now()): string | undefined {
 	if (!goal) return undefined;
@@ -224,7 +246,7 @@ export function statusText(goal: Goal | undefined, turnLimit: number | null, now
 		case "budget_limited":
 			return `budget ${formatTokens(goal.tokensUsed)}/${formatTokens(goal.tokenBudget ?? 0)} · ${automatic}`;
 		case "active":
-			if (goal.waiting) return `waiting ${goal.waiting.reason.slice(0, 120)} · ${automatic}`;
+			if (goal.waiting) return `${waitLabel(goal.waiting)}${goal.waiting.waitingFor ? ": " : " "}${goal.waiting.reason.slice(0, 120)} · ${automatic}`;
 			return goal.tokenBudget !== undefined
 				? `active ${formatTokens(goal.tokensUsed)}/${formatTokens(goal.tokenBudget)} · ${automatic}`
 				: `active ${formatDuration(elapsed)} · ${automatic}`;

@@ -1,9 +1,11 @@
 import { describe, expect, it } from "bun:test";
 import {
 	activeContract,
+	BUDGET_WRAP_UP,
 	CONTINUATION_MARKER,
 	continuationPrompt,
 	contradictsCompletion,
+	editedPrompt,
 	fingerprint,
 	formatTokens,
 	type Goal,
@@ -12,6 +14,8 @@ import {
 	parseCommand,
 	resumePrompt,
 	statusText,
+	waitMessage,
+	waitingResumePrompt,
 } from "./goal-text.ts";
 
 const goal = (over: Partial<Goal> = {}): Goal => ({
@@ -60,6 +64,15 @@ describe("the command", () => {
 });
 
 describe("prompts", () => {
+	it("addresses goal recaps to the user across every prompt path", () => {
+		for (const prompt of [kickoffPrompt(goal()), activeContract(goal()), continuationPrompt(goal(), "n"),
+			resumePrompt(goal(), "blocked"), editedPrompt(goal()), waitingResumePrompt(goal(), "build"), BUDGET_WRAP_UP]) {
+			expect(prompt).toContain('Address the user as "you"');
+			expect(prompt).toContain('not "the operator"');
+			expect(prompt).toContain("Waiting for you");
+			expect(prompt).toContain("No action needed from you");
+		}
+	});
 	it("keeps multi-step goals in concrete todos across kickoff, continuation and resume", () => {
 		for (const prompt of [kickoffPrompt(goal()), activeContract(goal()), continuationPrompt(goal(), "nonce"), resumePrompt(goal(), "paused")]) {
 			expect(prompt).toContain("When the todo tool is available");
@@ -115,5 +128,12 @@ describe("status", () => {
 		expect(formatTokens(999)).toBe("999");
 		expect(formatTokens(1000)).toBe("1k");
 		expect(formatTokens(1_500_000)).toBe("1.5m");
+	});
+
+	it("distinguishes user action from background and external waits in the footer", () => {
+		for (const [waitingFor, label] of [["user", "waiting for you"], ["background", "waiting for a background task"], ["external", "waiting for an external event"]] as const) {
+			expect(statusText(goal({ waiting: { reason: "Details", waitingFor } }), null)).toStartWith(label);
+		}
+		expect(waitMessage({ reason: "Please reply" })).toBe("Goal waiting:\nPlease reply");
 	});
 });

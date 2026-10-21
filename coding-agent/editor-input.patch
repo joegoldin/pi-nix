@@ -1,0 +1,103 @@
+--- a/packages/coding-agent/src/core/extensions/types.ts
++++ b/packages/coding-agent/src/core/extensions/types.ts
+@@ -162,6 +162,9 @@
+ 	/** Listen to raw terminal input (interactive mode only). Returns an unsubscribe function. */
+ 	onTerminalInput(handler: TerminalInputHandler): () => void;
+ 
++	/** Listen to input reaching the main editor, after terminal listeners and focus routing. */
++	onEditorInput(handler: TerminalInputHandler): () => void;
++
+ 	/** Set status text in the footer/status bar. Pass undefined to clear. */
+ 	setStatus(key: string, text: string | undefined): void;
+ 
+--- a/packages/coding-agent/src/core/extensions/runner.ts
++++ b/packages/coding-agent/src/core/extensions/runner.ts
+@@ -334,6 +334,7 @@
+ 	input: async () => undefined,
+ 	notify: () => {},
+ 	onTerminalInput: () => () => {},
++	onEditorInput: () => () => {},
+ 	setStatus: () => {},
+ 	setWorkingMessage: () => {},
+ 	setWorkingVisible: () => {},
+--- a/packages/coding-agent/src/modes/interactive/interactive-mode.ts
++++ b/packages/coding-agent/src/modes/interactive/interactive-mode.ts
+@@ -561,6 +561,8 @@
+ 	private extensionSelector: ExtensionSelectorComponent | undefined = undefined;
+ 	private extensionInput: ExtensionInputComponent | undefined = undefined;
+ 	private extensionEditor: ExtensionEditorComponent | undefined = undefined;
++	private extensionEditorInputHandlers = new Set<(data: string) => { consume?: boolean; data?: string } | undefined>();
++	private editorInputWrapped = new WeakSet<EditorComponent>();
+ 	private extensionTerminalInputSubscriptions = new Set<{
+ 		handler: (data: string) => { consume?: boolean; data?: string } | undefined;
+ 		unsubscribe: () => void;
+@@ -2589,6 +2591,31 @@
+ 		this.ui.requestRender();
+ 	}
+ 
++	private wrapEditorInput(editor: EditorComponent): void {
++		if (this.editorInputWrapped.has(editor)) return;
++		this.editorInputWrapped.add(editor);
++		const handleInput = editor.handleInput;
++		editor.handleInput = (data) => {
++			// Terminal listeners and focused dialogs have already had their turn.
++			for (const handler of this.extensionEditorInputHandlers) {
++				const result = handler(data);
++				if (result?.consume) return;
++				data = result?.data ?? data;
++			}
++			handleInput.call(editor, data);
++		};
++	}
++
++	private addExtensionEditorInputListener(
++		handler: (data: string) => { consume?: boolean; data?: string } | undefined,
++	): () => void {
++		this.extensionEditorInputHandlers.add(handler);
++		this.wrapEditorInput(this.editor);
++		return () => {
++			this.extensionEditorInputHandlers.delete(handler);
++		};
++	}
++
+ 	private addExtensionTerminalInputListener(
+ 		handler: (data: string) => { consume?: boolean; data?: string } | undefined,
+ 	): () => void {
+@@ -2610,6 +2637,7 @@
+ 	private clearExtensionTerminalInputListeners(): void {
+ 		for (const subscription of this.extensionTerminalInputSubscriptions) subscription.unsubscribe();
+ 		this.extensionTerminalInputSubscriptions.clear();
++		this.extensionEditorInputHandlers.clear();
+ 	}
+ 
+ 	/**
+@@ -2637,6 +2665,7 @@
+ 			input: (title, placeholder, opts) => this.showExtensionInput(title, placeholder, opts),
+ 			notify: (message, type) => this.showExtensionNotify(message, type),
+ 			onTerminalInput: (handler) => this.addExtensionTerminalInputListener(handler),
++			onEditorInput: (handler) => this.addExtensionEditorInputListener(handler),
+ 			setStatus: (key, text) => this.setExtensionStatus(key, text),
+ 			setWorkingMessage: (message) => {
+ 				this.workingMessage = message;
+@@ -2937,6 +2966,7 @@
+ 			this.editor = this.defaultEditor;
+ 		}
+ 
++		this.wrapEditorInput(this.editor);
+ 		this.editorContainer.addChild(this.editor as Component);
+ 		if (this.activeStatusIndicator) {
+ 			this.statusContainer.clear();
+--- a/packages/coding-agent/src/modes/rpc/rpc-mode.ts
++++ b/packages/coding-agent/src/modes/rpc/rpc-mode.ts
+@@ -162,6 +162,11 @@
+ 
+ 		onTerminalInput(): () => void {
+ 			// Raw terminal input not supported in RPC mode
++			return () => {};
++		},
++
++		onEditorInput(): () => void {
++			// Editor input not supported in RPC mode
+ 			return () => {};
+ 		},
+ 

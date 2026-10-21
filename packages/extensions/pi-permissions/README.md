@@ -41,13 +41,22 @@ as written, is then allowed for the rest of the session past both halves,
 hard denies included, and the agent is told, so it retries. A block's reason
 tells the agent this when there is a terminal UI to open the menu in.
 
-Reusable approvals live in that same ledger and Allowed tab. They cover the
-same shell command and working directory (ignoring timeout and background-task
-labels), or the same edit/write operation on a resolved file path. File contents
-may differ; commands may not. These scopes expire on your next instruction or
-submitted questionnaire answer, or when revoked. They resolve repeat soft denials,
-not hard denials or classifier failures, and never skip deterministic checks,
-explicit ask rules or protected-write checks. Branches restore their own ledger.
+Reusable approvals live in that same ledger and Allowed tab. For shell calls,
+`y` approves similar `bash` or `bg_run` actions for the same task and targets:
+its hosts, repositories, directories, services, recipients and side-effect types.
+Arguments, implementation and diagnostic filenames may vary. The classifier
+receives the displayed scope and complete original call when reviewing each
+variant; sharing a command name or working directory is not enough. New targets,
+additional side effects, greater risk or unclear bounds still need approval.
+For edit/write calls, the scope remains that tool's operation on the same resolved
+file path; contents may differ. Older saved shell grants retain their original
+exact-command scope rather than silently gaining broader authority.
+
+These scopes expire on your next instruction or submitted questionnaire answer,
+or when revoked. They resolve soft denials, not hard denials or classifier
+failures, and never skip deterministic checks, explicit ask rules or
+protected-write checks. Branches restore their own ledger. `Y` records no
+reusable scope.
 
 Questionnaires do not go through the classifier: asking for a decision does not
 execute the proposed action. Explicit deny rules still apply. Successful answers

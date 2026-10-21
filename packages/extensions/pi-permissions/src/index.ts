@@ -169,6 +169,7 @@ export default function piPermissions(pi: ExtensionAPI): void {
 	withPermissionChain(createPiAutomode({
 		onControls: (controls) => (autoControls = controls),
 		approvals: {
+			context: (toolName, cwd) => ledger.scenarioApprovals(toolName, cwd),
 			scope: (toolName, input, cwd) => approvalScope(toolName, input, cwd)?.label,
 			has: (toolName, input, cwd) => ledger.isSimilarlyGranted(toolName, input, cwd),
 			remember: (toolName, input, cwd) => {

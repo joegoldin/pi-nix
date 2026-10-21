@@ -9,6 +9,7 @@ import { type ChildProcessByStdio, spawn } from "node:child_process";
 import { homedir } from "node:os";
 import type { Readable } from "node:stream";
 
+import { VoiceGesture } from "./gesture.ts";
 import { renderVoiceRows, type VoiceTheme, type VoiceUiState, FLOOR_DB } from "./render.ts";
 import { clearVoiceState, pidIsAlive, reconcileStaleState, voiceStatePath, writeVoiceState } from "./state.ts";
 import { createLineSplitter, Meter, parseEvent, readVoiceConfig, type VoiceConfig, type VoiceEvent } from "./voice.ts";
@@ -19,6 +20,8 @@ export interface VoiceContext {
 	mode?: string;
 	hasUI?: boolean;
 	ui: {
+		getEditorText?(): string;
+		onEditorInput?(handler: (data: string) => { consume?: boolean; data?: string } | undefined): () => void;
 		setWidget(key: string, content: unknown, options?: { placement?: string }): void;
 		setStatus(key: string, text: string | undefined): void;
 		pasteToEditor(text: string): void;
@@ -79,6 +82,7 @@ export class VoiceSession {
 	private tui: { requestRender(): void } | undefined;
 	private clock: ReturnType<typeof setInterval> | undefined;
 	private ended: (() => void) | undefined;
+	private stopPromise: Promise<void> | undefined;
 
 	constructor(ctx: VoiceContext) {
 		this.ctx = ctx;
@@ -88,6 +92,10 @@ export class VoiceSession {
 
 	get recording(): boolean {
 		return this.state.recording;
+	}
+
+	get active(): boolean {
+		return this.child !== undefined;
 	}
 
 	start(): void {
@@ -153,7 +161,8 @@ export class VoiceSession {
 	 */
 	stop(): Promise<void> {
 		if (!this.child) return Promise.resolve();
-		return new Promise<void>((resolve) => {
+		if (this.stopPromise) return this.stopPromise;
+		this.stopPromise = new Promise<void>((resolve) => {
 			this.ended = resolve;
 			this.stopRequested = true;
 			if (this.streamOpen) {
@@ -168,6 +177,7 @@ export class VoiceSession {
 			}, STOP_GRACE_MS);
 			this.stopFallback.unref?.();
 		});
+		return this.stopPromise;
 	}
 
 	/** SIGINT, not SIGKILL: audiomemo's --stream handler stops ffmpeg the
@@ -234,6 +244,7 @@ export class VoiceSession {
 	private settle(): void {
 		const done = this.ended;
 		this.ended = undefined;
+		this.stopPromise = undefined;
 		done?.();
 	}
 
@@ -304,24 +315,43 @@ export class VoiceSession {
 
 export default function register(pi: VoiceHost): void {
 	let session: VoiceSession | undefined;
+	let unsubscribe: (() => void) | undefined;
 
 	pi.on("session_start", (_payload: never, ctx: never) => {
 		// A pi that died mid-recording leaves enabled:true behind and the mic
 		// glyph stays lit. Clear it when the process that wrote it is gone.
 		reconcileStaleState(voiceStatePath(env(), homedir()), pidIsAlive);
 		session ??= new VoiceSession(ctx as VoiceContext);
+		unsubscribe?.();
+		unsubscribe = undefined;
+		const context = ctx as VoiceContext;
+		const { ui } = context;
+		if (context.mode !== "tui" || !ui.onEditorInput || !ui.getEditorText) return;
+		const gesture = new VoiceGesture();
+		unsubscribe = ui.onEditorInput((data) => {
+			const action = gesture.feed(data, ui.getEditorText!(), session?.active ?? false);
+			if (!action) return;
+			if (action === "start") {
+				session?.start();
+			} else if (action === "stop") {
+				void session?.stop();
+			}
+			return { consume: true };
+		});
 	});
 
 	pi.on("session_shutdown", async () => {
+		unsubscribe?.();
+		unsubscribe = undefined;
 		await session?.stop();
 		clearVoiceState(voiceStatePath(env(), homedir()));
 	});
 
 	pi.registerCommand("voice", {
-		description: "Start or stop dictation. Speech is pasted into the editor.",
+		description: "Toggle dictation, or press Space in an empty prompt to start and Space to stop. Speech is pasted into the editor.",
 		handler: async (_args: string, ctx: never) => {
 			session ??= new VoiceSession(ctx as VoiceContext);
-			if (session.recording) {
+			if (session.active) {
 				await session.stop();
 			} else {
 				session.start();

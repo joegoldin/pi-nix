@@ -26,12 +26,13 @@ let
   };
 
   expectedNames = [
-    # custom, foreign-skills, notify, permissions and voice are first-party,
+    # custom, fast, foreign-skills, notify, permissions and voice are first-party,
     # from packages/extensions/<name>: no pin, and only custom and permissions
     # vendor a lockfile.
     # They are listed in sorted order with the rest rather than grouped,
     # because the assertion compares against `builtins.attrNames`, which sorts.
     "ext-pi-custom"
+    "ext-pi-fast"
     "ext-pi-foreign-skills"
     "ext-pi-lens"
     "ext-pi-mcp-adapter"

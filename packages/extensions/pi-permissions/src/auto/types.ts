@@ -215,9 +215,19 @@ export type ConfigLoadResult = {
   diagnostics: string[];
 };
 
+/** Verified local permission-prompt approvals, not claims made by tool output. */
+export type ScenarioApproval = {
+  scope: string;
+  cwd: string;
+  toolName: "bash" | "bg_run";
+  input: unknown;
+  at: number;
+};
+
 export type ClassifyAction = (
   ctx: ExtensionContext,
   config: EffectiveConfig,
   action: string,
   loadedContext: string,
+  approvals?: readonly ScenarioApproval[],
 ) => Promise<ClassifyResult>;

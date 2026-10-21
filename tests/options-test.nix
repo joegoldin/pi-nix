@@ -40,6 +40,7 @@ let
         ext-pi-voice
         ext-pi-foreign-skills
         ext-pi-custom
+        ext-pi-fast
         ;
     };
     inputs.agent-statusline = self.inputs.agent-statusline;
@@ -498,10 +499,11 @@ assert !(autoOn.finalConfigFiles ? "automode.json");
 assert builtins.fromJSON (builtins.readFile autoOn.autoMode.configFile) == autoJson;
 # Asking before a classifier block stands is off unless enabled, and its
 # timeout travels with it.
-assert autoJson.autoMode.askOnBlock == {
-  enabled = false;
-  timeoutSeconds = 30;
-};
+assert
+  autoJson.autoMode.askOnBlock == {
+    enabled = false;
+    timeoutSeconds = 30;
+  };
 assert
   (evalPi {
     pi.coding-agent.autoMode = {
@@ -586,6 +588,23 @@ assert
   && lib.hasInfix ''(subpath "/Users/joe/Development")'' profile
   && lib.hasInfix "(deny file-read*" profile
   && lib.hasInfix ''(subpath "/Users/joe/.ssh")'' profile;
+
+# Fast mode is a separate first-party plugin, loaded with custom commands but
+# independently disableable. Loading the command does not turn priority on.
+assert !bare.fastMode.enable;
+assert lib.any (e: lib.hasInfix "pi-fast" e)
+  (evalPi { pi.coding-agent.custom.enable = true; }).extensions;
+assert
+  !(lib.any (e: lib.hasInfix "pi-fast" e)
+    (evalPi {
+      pi.coding-agent = {
+        custom.enable = true;
+        fastMode.enable = false;
+      };
+    }).extensions
+  );
+assert lib.any (e: lib.hasInfix "pi-fast" e)
+  (evalPi { pi.coding-agent.fastMode.enable = true; }).extensions;
 
 # pi-custom is off by default and contributes its entrypoint when enabled. The
 # clipboard crosses the jail as text through a host channel, never as a bound

@@ -36,6 +36,7 @@ import {
 	parseCommand,
 	resumePrompt,
 	statusText,
+	waitMessage,
 	waitingResumePrompt,
 } from "./goal-text.ts";
 
@@ -272,8 +273,9 @@ export function registerGoal(pi: ExtensionAPI, config: () => UiConfig): void {
 		const elapsed = goal.timeUsedSeconds + (goal.activeStartedAt ? (Date.now() - goal.activeStartedAt) / 1000 : 0);
 		return [
 			`Goal: ${goal.text}`,
-			`Status: ${goal.waiting ? "waiting" : goal.status}`,
-			...(goal.waiting ? [`Waiting for: ${goal.waiting.reason}`, ...(goal.waiting.resumeAt ? [`Resumes by: ${new Date(goal.waiting.resumeAt).toISOString()}`] : [])] : []),
+			...(goal.waiting
+				? [waitMessage(goal.waiting), ...(goal.waiting.resumeAt ? [`Next automatic check: ${new Date(goal.waiting.resumeAt).toISOString()}`] : [])]
+				: [`Status: ${goal.status.replaceAll("_", " ")}`]),
 			`Iteration: ${goal.iteration}`,
 			limit === null ? `Automatic work: ${goal.automaticModelTurns} responses · Unlimited` : `Automatic work: ${goal.automaticModelTurns} of ${limit} responses`,
 			`Active time: ${formatDuration(elapsed)}`,
@@ -314,7 +316,7 @@ export function registerGoal(pi: ExtensionAPI, config: () => UiConfig): void {
 				minLength: 1,
 				maxLength: 4000,
 				description:
-					"State what was completed and what evidence verified it. Do not use this tool to report partial progress, blockers, failures, or remaining work.",
+					"Write a concise recap for the user, addressing them as \"you\" rather than \"the operator\". State what I completed and the evidence that verified it. Do not use this tool to report partial progress, blockers, failures, or remaining work.",
 			}),
 		}),
 		async execute(_id, params, _signal, _onUpdate, ctx) {
@@ -356,8 +358,8 @@ export function registerGoal(pi: ExtensionAPI, config: () => UiConfig): void {
 			"Stop an active /goal only when the latest effective Goal contract explicitly says Goal mode is active, supplies the matching current goal_id, and the same evidenced external blocker recurred for at least three consecutive Goal turns. Tool visibility alone does not activate Goal mode. Never call for ordinary clarification, uncertainty, incomplete work, or recoverable failures.",
 		parameters: Type.Object({
 			goal_id: Type.String({ minLength: 1, maxLength: MAX_GOAL_ID, description: "The exact goal_id shown in the current active /goal prompt." }),
-			reason: Type.String({ minLength: 1, maxLength: 1000, description: "The specific user or external action required to unblock the goal." }),
-			evidence: Type.String({ minLength: 1, maxLength: 4000, description: "Concrete evidence from the repeated attempts that proves the impasse." }),
+			reason: Type.String({ minLength: 1, maxLength: 1000, description: "Explain the blocker directly to the user as \"you\", not \"the operator\". Put the exact action needed from them first, or name the external dependency if they cannot resolve it. Say how to continue once it is resolved." }),
+			evidence: Type.String({ minLength: 1, maxLength: 4000, description: "Briefly explain to the user what I tried and what failed, with concrete evidence from the repeated attempts that proves the impasse." }),
 			repeated_turns: Type.Integer({ minimum: 3, description: "Number of separate turns spent trying to resolve this same blocker." }),
 		}),
 		async execute(_id, params, _signal, _onUpdate, ctx) {
@@ -382,7 +384,10 @@ export function registerGoal(pi: ExtensionAPI, config: () => UiConfig): void {
 			"Keep an active /goal quiet only when the latest effective Goal contract explicitly says Goal mode is active, supplies the matching current goal_id, and progress depends on an arranged external wake event or one safety deadline. Tool visibility alone does not activate Goal mode. Call goal_wait alone. Requests below 10000ms are clamped to 10000ms. Never call for ordinary unfinished work.",
 		parameters: Type.Object({
 			goal_id: Type.String({ minLength: 1, maxLength: MAX_GOAL_ID, description: "The exact goal_id shown in the current active /goal prompt." }),
-			reason: Type.String({ minLength: 1, maxLength: 1000, description: "Why the goal is waiting and which external event should wake it." }),
+			waiting_for: Type.Union([Type.Literal("user"), Type.Literal("background"), Type.Literal("external")], {
+				description: "Who must act next: user for an action or reply you need from them; background for a running task; external for another service or event. This controls the user-visible wait heading.",
+			}),
+			reason: Type.String({ minLength: 1, maxLength: 1000, description: "Write directly to the user as \"you\", not \"the operator\". For a user wait, start with the exact action and how to report completion. Otherwise name the pending task or event and explain what happens next. Avoid internal wake/scheduler jargon; the UI adds the wait heading and no-action-needed notice." }),
 			resume_after_ms: Type.Optional(
 				Type.Integer({
 					minimum: 1,
@@ -401,15 +406,16 @@ export function registerGoal(pi: ExtensionAPI, config: () => UiConfig): void {
 			continuationWanted = false;
 			const requested = params.resume_after_ms;
 			const effective = requested === undefined ? undefined : Math.max(MIN_WAIT_MS, requested);
-			goal!.waiting = { reason: params.reason, ...(effective !== undefined ? { resumeAt: Date.now() + effective } : {}) };
+			goal!.waiting = { reason: params.reason.trim(), waitingFor: params.waiting_for, ...(effective !== undefined ? { resumeAt: Date.now() + effective } : {}) };
 			goal!.activeStartedAt = undefined;
 			persist();
 			scheduleWait();
-			notify(`Goal waiting: ${params.reason}`);
-			const clamped = requested !== undefined && effective !== requested ? `\nRequested resume_after_ms ${requested} was clamped to ${effective}.` : "";
+			const message = waitMessage(goal!.waiting);
+			notify(message);
+			const clamped = effective !== undefined && effective !== requested ? `\nThe next automatic check is in ${effective / 1000} seconds (the minimum wait).` : "";
 			return {
-				content: [{ type: "text" as const, text: `Goal waiting: ${params.reason}${clamped}` }],
-				details: { goal, goal_id: params.goal_id, reason: params.reason, resume_after_ms: effective, resume_at: goal!.waiting.resumeAt },
+				content: [{ type: "text" as const, text: `${message}${clamped}` }],
+				details: { goal, goal_id: params.goal_id, reason: params.reason, waiting_for: params.waiting_for, resume_after_ms: effective, resume_at: goal!.waiting.resumeAt },
 				terminate: true,
 			};
 		},

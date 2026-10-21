@@ -95,6 +95,7 @@
               ./coding-agent/jump-to-last-user.patch
               ./coding-agent/user-message-timestamps.patch
               ./coding-agent/native-queue-controls.patch
+              ./coding-agent/editor-input.patch
             ];
           };
 

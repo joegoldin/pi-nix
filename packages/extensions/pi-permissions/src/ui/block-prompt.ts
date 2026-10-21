@@ -23,7 +23,7 @@ export interface BlockAsk {
 	input: unknown;
 	reason: string;
 	timeoutSeconds: number;
-	/** Exact reusable scope; absent when this call cannot safely be generalized. */
+	/** Displayed reusable scope; absent when this call cannot safely be generalized. */
 	scope?: string;
 }
 
