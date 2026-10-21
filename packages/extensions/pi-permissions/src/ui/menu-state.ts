@@ -30,12 +30,13 @@ export interface SettingRows {
 
 export type MenuEffect =
 	| { kind: "approve"; denial: Denial }
+	| { kind: "approve-exact"; denial: Denial }
 	| { kind: "dismiss"; denial: Denial }
 	| { kind: "revoke"; grant: Grant }
 	| { kind: "act"; tab: "auto" | "settings"; row: SettingRow }
 	| { kind: "close" };
 
-export type MenuKey = "up" | "down" | "next" | "prev" | "select" | "approve" | "remove" | "close";
+export type MenuKey = "up" | "down" | "next" | "prev" | "select" | "approve" | "approve-exact" | "remove" | "close";
 
 export class PermissionsMenu {
 	cursor = 0;
@@ -89,13 +90,14 @@ export class PermissionsMenu {
 				return undefined;
 			case "close":
 				return { kind: "close" };
+			case "approve-exact":
 			case "approve":
 			case "select": {
 				if (this.tab === "denied") {
 					const denial = this.denied()[this.cursor];
-					return denial ? { kind: "approve", denial } : undefined;
+					return denial ? { kind: key === "approve-exact" ? "approve-exact" : "approve", denial } : undefined;
 				}
-				if (key === "approve" || this.tab === "granted") return undefined;
+				if (key === "approve" || key === "approve-exact" || this.tab === "granted") return undefined;
 				const row = this.rows()[this.cursor];
 				return row?.actionable ? { kind: "act", tab: this.tab, row } : undefined;
 			}

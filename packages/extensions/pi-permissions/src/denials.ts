@@ -1,8 +1,8 @@
 // What was blocked, and what you have since allowed. index.ts persists the
 // ledger in the session; the prompt and /permissions menu both use it.
 //
-// Exact menu grants retain their existing session-wide override behavior.
-// Scoped prompt grants pass deterministic policy checks, expire on new user
+// Legacy and non-shell menu grants retain their session-wide overrides.
+// Shell menu and scoped prompt grants pass policy checks, expire on new user
 // intent, and can be revoked from the same menu.
 
 import { resolve } from "node:path";
@@ -102,12 +102,14 @@ export class PermissionLedger {
 		return this.denials.filter((d) => d.state === "open");
 	}
 
-	/** Allow this exact call for the session, and mark every open denial of it approved. */
-	approve(id: string): Denial | undefined {
+	/** Menu shell approvals inform classification; legacy/non-shell grants stay exact. */
+	approve(id: string, cwd?: string): Denial | undefined {
 		const denial = this.denials.find((d) => d.id === id);
 		if (!denial) return undefined;
 		const key = grantKey(denial.toolName, denial.input);
-		if (!this.grants.has(key)) this.grants.set(key, { key, toolName: denial.toolName, input: denial.input, at: this.now() });
+		const scoped = cwd && (denial.toolName === "bash" || denial.toolName === "bg_run")
+			? this.approveSimilar(denial.toolName, denial.input, cwd) : undefined;
+		if (!scoped && !this.grants.has(key)) this.grants.set(key, { key, toolName: denial.toolName, input: denial.input, at: this.now() });
 		for (const d of this.denials) {
 			if (d.state === "open" && grantKey(d.toolName, d.input) === key) d.state = "approved";
 		}

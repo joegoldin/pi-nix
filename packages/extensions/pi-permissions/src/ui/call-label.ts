@@ -39,3 +39,17 @@ export function shortReason(reason: string): string {
 	r = r.replace(/^\[pi-permission-system\]\s*/, "");
 	return r.trim();
 }
+
+/** Prefer the call's supplied purpose; never infer shell intent from a command name. */
+export function callExplanation(toolName: string, input: unknown): string {
+	const args = input && typeof input === "object" ? input as Record<string, unknown> : {};
+	if (typeof args.description === "string" && args.description.trim()) return args.description;
+	switch (toolName) {
+		case "bash": return "Run the shell command shown above; no purpose was supplied.";
+		case "bg_run": return `Start a background shell task${typeof args.name === "string" ? `: ${args.name}` : "."}`;
+		case "write": return "Create or overwrite the target file with the supplied content.";
+		case "edit": return "Replace matching text in the target file.";
+		case "read": return "Read the target file's contents.";
+		default: return `Call ${toolName} with the supplied arguments; no explanation was supplied.`;
+	}
+}

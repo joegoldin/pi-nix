@@ -36,9 +36,10 @@ Each tool call passes through, in order:
 4. **You**, at the permission prompt, for whatever the chain defers.
 
 Whatever either half blocks is recorded with the call's full input. In
-`/permissions` you can approve it afterwards: the exact call, tool and input
-as written, is then allowed for the rest of the session past both halves,
-hard denies included, and the agent is told, so it retries. A block's reason
+`/permissions` you can approve it afterwards. Shell approvals enter the same
+bounded scenario ledger used by the classifier, without bypassing deterministic
+restrictions. Non-shell approvals retain the exact-call session override; older
+exact grants are unchanged. The agent is told so it can retry. A block's reason
 tells the agent this when there is a terminal UI to open the menu in.
 
 Reusable approvals live in that same ledger and Allowed tab. For shell calls,
@@ -101,10 +102,16 @@ asking before a classifier block stands.
 `/permissions` is the one place for all of it, a menu in four tabs (Tab and
 Shift+Tab, or ←/→, move between them; Esc closes):
 
-- **Denied**: what was blocked, newest first, with a short reason excerpt.
-  `e` explains the selected denial: the full reason, command, and tool input,
+- **Denied**: what was blocked, newest first: command, command explanation,
+  then denial reason, each on a separate truncated line. A supplied description
+  is preferred; otherwise a tool-action summary explicitly notes missing purpose.
+  `e` expands the full reason, explanation, command, approval scope and tool input,
   wrapped to fit. ↑/↓ (or j/k) scroll; `e` or Esc returns to the list.
-  `a` (or Enter) approves from the list and tells the agent; `x` dismisses it.
+  `a` (or Enter) approves the bounded shell scenario from either view and tells
+  the agent. Capital `A` grants only the exact tool/input for the session: it
+  bypasses the gates for that exact call, survives new instructions, and supplies
+  no reusable scope to the auto classifier. It is not consumed after one retry.
+  `x` dismisses a denial; the Allowed tab can revoke either kind of grant.
 - **Allowed**: what you approved. `x` revokes.
 - **Auto mode**: on or off for this session, the classifier model (opens a
   picker), the ask-before-block setting, this session's counts with a reset,

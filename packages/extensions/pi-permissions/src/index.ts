@@ -10,8 +10,8 @@
 //
 // Around both, this file keeps a ledger (denials.ts): every call either half
 // blocks is recorded with its input, and /permissions lets you approve one
-// afterwards. An approved call passes both halves for the rest of the session,
-// and the agent is told, so it retries.
+// afterwards. Shell approvals inform the classifier through bounded scopes;
+// non-shell calls retain exact session overrides. The agent is told to retry.
 
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -81,7 +81,7 @@ const APPROVED_MESSAGE = "pi-permissions:approved";
 
 /** Said to the agent after a block it can be approved out of. */
 const APPROVABLE =
-	" The user can approve this exact call from /permissions; if they tell you to go ahead, retry it.";
+	" The user can review and approve this call from /permissions; shell approvals inform the classifier without bypassing hard restrictions. If approved and still needed, retry it.";
 
 interface ToolCallEventLike {
 	toolCallId?: string;
@@ -200,8 +200,9 @@ export default function piPermissions(pi: ExtensionAPI): void {
 		unrequire = undefined;
 	});
 
-	function approve(denial: Denial, ctx: ExtensionContext): void {
-		ledger.approve(denial.id);
+	function approve(denial: Denial, ctx: ExtensionContext, exact = false): void {
+		const scope = !exact && (denial.toolName === "bash" || denial.toolName === "bg_run") ? approvalScope(denial.toolName, denial.input, ctx.cwd) : undefined;
+		ledger.approve(denial.id, exact ? undefined : ctx.cwd);
 		persist();
 		const { title, target } = callLabel(denial.toolName, denial.input);
 		const input = JSON.stringify(denial.input);
@@ -210,7 +211,8 @@ export default function piPermissions(pi: ExtensionAPI): void {
 				customType: APPROVED_MESSAGE,
 				content:
 					`The user approved a call that was blocked earlier: ${title}(${target}). ` +
-					`It is now allowed for the rest of this session, exactly as written (tool "${denial.toolName}", input ${input.length > 4000 ? `${input.slice(0, 4000)}…` : input}). ` +
+					(scope ? `Approved scope: ${scope.label}. Deterministic restrictions still apply; variants are reviewed by the auto classifier. ` :
+					`It is now allowed for the rest of this session, exactly as written (tool "${denial.toolName}", input ${input.length > 4000 ? `${input.slice(0, 4000)}…` : input}). `) +
 					"If it is still needed, retry it now.",
 				display: true,
 				details: { toolName: denial.toolName, input: denial.input },
@@ -290,8 +292,9 @@ export default function piPermissions(pi: ExtensionAPI): void {
 	/** Carries out what the menu asks; resolves with "model" when the menu must close for the model picker. */
 	async function carryOut(effect: MenuEffect, ctx: ExtensionCommandContext): Promise<"model" | undefined> {
 		switch (effect.kind) {
+			case "approve-exact":
 			case "approve":
-				approve(effect.denial, ctx);
+				approve(effect.denial, ctx, effect.kind === "approve-exact");
 				return undefined;
 			case "dismiss":
 				ledger.dismiss(effect.denial.id);
@@ -340,6 +343,8 @@ export default function piPermissions(pi: ExtensionAPI): void {
 					});
 				},
 				() => Math.max(8, Math.floor(tui.terminal.rows * 0.6)),
+				Date.now,
+				ctx.cwd,
 			);
 			const framed = framedMenu(view, theme as unknown as MenuTheme);
 			return {

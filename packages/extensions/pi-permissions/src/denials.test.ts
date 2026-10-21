@@ -118,3 +118,20 @@ describe("the permission ledger", () => {
 		expect(restored.list().filter((d) => d.id === c.id)).toHaveLength(1);
 	});
 });
+
+it("menu shell approvals enter the classifier scenario ledger instead of bypassing it", () => {
+	const ledger = new PermissionLedger();
+	const call = { command: "ssh host 'diagnose /tmp/a'" };
+	const denial = ledger.record({ toolName: "bash", toolCallId: "menu", input: call, reason: "Needs approval" });
+	ledger.approve(denial.id, "/tmp");
+	expect(ledger.open()).toHaveLength(0);
+	expect(ledger.isGranted("bash", call)).toBe(false);
+	expect(ledger.scenarioApprovals("bash", "/tmp")).toMatchObject([{ input: call }]);
+	expect(ledger.scenarioApprovals("bash", "/other")).toEqual([]);
+	const restored = new PermissionLedger(); restored.restore(ledger.snapshot());
+	expect(restored.scenarioApprovals("bg_run", "/tmp")).toHaveLength(1);
+	restored.revoke(restored.grantList()[0]!.key);
+	expect(restored.scenarioApprovals("bash", "/tmp")).toEqual([]);
+	ledger.clearSimilar();
+	expect(ledger.scenarioApprovals("bash", "/tmp")).toEqual([]);
+});

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import { visibleWidth } from "@earendil-works/pi-tui";
 import { PermissionLedger } from "../denials.ts";
 import { PermissionsMenuView } from "./menu.ts";
 import { ago, type MenuEffect, PermissionsMenu, type SettingRow } from "./menu-state.ts";
@@ -36,7 +37,7 @@ describe("the /permissions menu", () => {
 		expect(lines[first]).toContain("2m ago");
 		// Input is reserved for the explanation view.
 		expect(lines.some((l) => l.includes('"content": "x"'))).toBe(false);
-		expect(lines).toContain("     System file.");
+		expect(lines).toContain("     Denied: System file.");
 		expect(lines.at(-1)).toContain("e explain");
 	});
 
@@ -50,7 +51,7 @@ describe("the /permissions menu", () => {
 		expect(lines).toContain("Command");
 		expect(lines).toContain("rm -rf build");
 		expect(lines).toContain('  "command": "rm -rf build"');
-		for (const key of ["a", "x", "\r", "\t"]) view.handleInput(key);
+		for (const key of ["x", "\t"]) view.handleInput(key);
 		expect(effects).toHaveLength(0);
 		view.handleInput("\x1b");
 		expect(menu.cursor).toBe(1);
@@ -72,7 +73,7 @@ describe("the /permissions menu", () => {
 		for (let i = 0; i < 150; i++) {
 			const lines = view.render(60);
 			expect(lines.length).toBeLessThanOrEqual(12);
-			expect(lines.every((l) => l.length <= 60)).toBe(true);
+			expect(lines.every((l) => visibleWidth(l) <= 60)).toBe(true);
 			seen += lines.join("\n");
 			view.handleInput("j");
 		}
@@ -157,4 +158,48 @@ describe("the menu's settings tabs", () => {
 		view.handleInput("\t");
 		expect(view.render(80).some((l) => l.includes("Write(/etc/hosts)"))).toBe(true);
 	});
+});
+
+describe("denial summaries and approval keys", () => {
+	it("puts the command explanation and denial reason on separate truncated lines", () => {
+		const { ledger, view } = setup();
+		ledger.record({ toolCallId: "explained", toolName: "bash", input: { command: "git push " + "origin ".repeat(30), description: "Publish these commits. ".repeat(20) + "DESCRIPTION_END" }, reason: "Remote changes need approval. ".repeat(20) + "DENIAL_END" });
+		const rows = view.render(80);
+		const at = rows.findIndex((row) => row.includes("Bash("));
+		expect(rows[at + 1]).toStartWith("     Does: Publish these commits.");
+		expect(rows[at + 2]).toStartWith("     Denied: Remote changes need approval.");
+		for (const row of rows.slice(at, at + 3)) { expect(visibleWidth(row)).toBeLessThanOrEqual(80); expect(row).toContain("…"); }
+		view.handleInput("e");
+		let expanded = "";
+		for (let i = 0; i < 100; i++) { expanded += view.render(80).join("\n"); view.handleInput("j"); }
+		expect(expanded).toContain("DESCRIPTION_END");
+		expect(expanded).toContain("DENIAL_END");
+	});
+	for (const key of ["\r", "a"]) it(`approves the selected denial with ${JSON.stringify(key)}`, () => {
+		const { view, effects } = setup();
+		view.handleInput(key);
+		expect(effects).toMatchObject([{ kind: "approve", denial: { toolCallId: "c2" } }]);
+	});
+});
+
+for (const key of ["\r", "a"]) it(`approves after expanding with ${JSON.stringify(key)}`, () => {
+	const { view, effects } = setup();
+	view.handleInput("e"); view.handleInput(key);
+	expect(effects).toMatchObject([{ kind: "approve", denial: { toolCallId: "c2" } }]);
+});
+
+for (const expanded of [false, true]) it(`capital A approves only the exact call (${expanded ? "expanded" : "list"})`, () => {
+	const { view, effects } = setup();
+	if (expanded) view.handleInput("e");
+	view.handleInput("A");
+	expect(effects).toMatchObject([{ kind: "approve-exact", denial: { toolCallId: "c2" } }]);
+});
+
+it("capital A does nothing on other tabs or an empty denied list", () => {
+	const { view, menu, ledger, effects } = setup();
+	for (const denial of ledger.open()) ledger.dismiss(denial.id);
+	for (const tab of ["denied", "granted", "auto", "settings"] as const) {
+		menu.tab = tab; view.handleInput("A");
+	}
+	expect(effects).toEqual([]);
 });

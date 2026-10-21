@@ -218,3 +218,68 @@ describe("one menu", () => {
 		expect(notes.join("\n")).not.toMatch(/\/(automode|auto-mode|permission-system)\b/);
 	});
 });
+
+describe("menu approval reaches classifier context", () => {
+	for (const key of ["\r", "a"]) it(`persists a reviewed shell scenario from ${JSON.stringify(key)}`, async () => {
+		const { buildClassifierContext } = await import("./auto/classifier.ts");
+		const s = session();
+		const ledger = new PermissionLedger();
+		const input = { command: "ssh host 'diagnose /tmp/a'", description: "Inspect the remote service." };
+		ledger.record({ toolName: "bash", toolCallId: "blocked", input, reason: "Remote access needs approval." });
+		s.entries.push({ type: "custom", customType: "pi-permissions", data: ledger.snapshot() });
+		const ctx = {
+			cwd: "/tmp", mode: "tui", hasUI: true, isIdle: () => true,
+			sessionManager: { getBranch: () => s.entries },
+			ui: { notify() {}, custom: (factory: Function) => new Promise((resolve) => {
+				const view = factory({ terminal: { rows: 40 }, requestRender() {} }, { fg: (_slot: string, text: string) => text, bold: (text: string) => text }, {}, resolve);
+				view.handleInput(key);
+				view.handleInput("\x1b");
+			}) },
+		};
+		piPermissions(s.api());
+		s.handlers.get("session_start")!.at(-1)!({}, ctx);
+		await s.commands.get("permissions")!.handler("", ctx);
+		const restored = new PermissionLedger(); restored.restore(s.entries.at(-1)!.data as PermissionRecord);
+		expect(restored.open()).toEqual([]);
+		expect(restored.isGranted("bash", input)).toBe(false);
+		const approvals = restored.scenarioApprovals("bash", "/tmp");
+		expect(approvals).toHaveLength(1);
+		expect(buildClassifierContext("", "", approvals)).toContain("ssh host 'diagnose /tmp/a'");
+		expect(s.sent[0]!.message.content).toContain("variants are reviewed by the auto classifier");
+		s.handlers.get("input")![0]!({ source: "interactive" }, ctx);
+		const expired = new PermissionLedger(); expired.restore(s.entries.at(-1)!.data as PermissionRecord);
+		expect(expired.scenarioApprovals("bash", "/tmp")).toEqual([]);
+	});
+});
+
+for (const expanded of [false, true]) it(`capital A grants exact session access without classifier scope (${expanded ? "expanded" : "list"})`, async () => {
+	const s = session();
+	const ledger = new PermissionLedger();
+	const input = { command: "ssh host 'diagnose /tmp/a'" };
+	ledger.record({ toolName: "bash", toolCallId: "blocked", input, reason: "Remote access needs approval." });
+	s.entries.push({ type: "custom", customType: "pi-permissions", data: ledger.snapshot() });
+	const ctx = {
+		cwd: "/tmp", mode: "tui", hasUI: true, isIdle: () => true,
+		sessionManager: { getBranch: () => s.entries },
+		ui: { notify() {}, custom: (factory: Function) => new Promise((resolve) => {
+			const view = factory({ terminal: { rows: 40 }, requestRender() {} }, { fg: (_slot: string, text: string) => text, bold: (text: string) => text }, {}, resolve);
+			if (expanded) view.handleInput("e");
+			view.handleInput("A"); view.handleInput("\x1b");
+		}) },
+	};
+	piPermissions(s.api());
+	s.handlers.get("session_start")!.at(-1)!({}, ctx);
+	await s.commands.get("permissions")!.handler("", ctx);
+	const restored = new PermissionLedger(); restored.restore(s.entries.at(-1)!.data as PermissionRecord);
+	expect(restored.open()).toEqual([]);
+	expect(restored.isGranted("bash", input)).toBe(true);
+	expect(restored.isGranted("bash", { command: "ssh host 'diagnose /tmp/b'" })).toBe(false);
+	expect(restored.scenarioApprovals("bash", "/tmp")).toEqual([]);
+	expect(restored.scenarioApprovals("bg_run", "/tmp")).toEqual([]);
+	expect(s.sent[0]!.message.content).toContain("for the rest of this session, exactly as written");
+	for (const toolCallId of ["retry1", "retry2"]) expect(await s.toolCall({ toolName: "bash", toolCallId, input }, ctx)).toBeUndefined();
+	s.handlers.get("input")![0]!({ source: "interactive" }, ctx);
+	expect(await s.toolCall({ toolName: "bash", toolCallId: "after-input", input }, ctx)).toBeUndefined();
+	restored.revoke(restored.grantList()[0]!.key);
+	expect(restored.isGranted("bash", input)).toBe(false);
+});

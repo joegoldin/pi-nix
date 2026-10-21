@@ -4,8 +4,8 @@
 // framed, in the editor's place, with full denial details on demand.
 
 import { matchesKey, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
-import type { Denial, Grant } from "../denials.ts";
-import { callLabel, shortReason } from "./call-label.ts";
+import { approvalScope, type Denial, type Grant } from "../denials.ts";
+import { callExplanation, callLabel, shortReason } from "./call-label.ts";
 import { Framed, type FrameTheme } from "./frame.ts";
 import { ago, type MenuEffect, type MenuKey, type MenuTab, type PermissionsMenu, type SettingRow } from "./menu-state.ts";
 
@@ -25,11 +25,16 @@ export class PermissionsMenuView {
 		private readonly onEffect: (effect: MenuEffect) => void,
 		private readonly height: () => number,
 		private readonly now: () => number = Date.now,
+		private readonly cwd?: string,
 	) {}
 
 	handleInput(data: string): void {
 		if (this.explanation) {
-			if (matchesKey(data, "escape") || data === "q" || data === "e") {
+			if (matchesKey(data, "enter") || data === "a" || data === "A") {
+				this.onEffect({ kind: data === "A" ? "approve-exact" : "approve", denial: this.explanation });
+				this.explanation = undefined;
+				this.menu.settle();
+			} else if (matchesKey(data, "escape") || data === "q" || data === "e") {
 				this.explanation = undefined;
 			} else if (matchesKey(data, "up") || data === "k") {
 				this.explanationTop = Math.max(0, this.explanationTop - 1);
@@ -58,6 +63,7 @@ export class PermissionsMenuView {
 		if (matchesKey(data, "shift+tab") || matchesKey(data, "left")) return "prev";
 		if (matchesKey(data, "enter") || data === " ") return "select";
 		if (data === "a") return "approve";
+		if (data === "A") return "approve-exact";
 		if (data === "x" || data === "d") return "remove";
 		return undefined;
 	}
@@ -120,7 +126,8 @@ export class PermissionsMenuView {
 			const here = i === menu.cursor;
 			if (here) focus = rows.length;
 			rows.push(this.headline(d.toolName, d.input, ago(d.at, this.now()), here, width));
-			rows.push(theme.fg("muted", truncateToWidth(`     ${shortReason(d.reason).replace(/\s+/g, " ")}`, Math.min(width, 125), "…")));
+			rows.push(theme.fg("muted", truncateToWidth(`     Does: ${callExplanation(d.toolName, d.input).replace(/\s+/g, " ")}`, width, "…")));
+			rows.push(theme.fg("muted", truncateToWidth(`     Denied: ${shortReason(d.reason).replace(/\s+/g, " ")}`, width, "…")));
 		});
 		return { rows, focus };
 	}
@@ -129,10 +136,15 @@ export class PermissionsMenuView {
 		const { theme } = this;
 		const wrap = (text: string) => wrapTextWithAnsi(text, Math.max(1, width));
 		const input = denial.input && typeof denial.input === "object" ? (denial.input as Record<string, unknown>) : {};
+		const scope = this.cwd && (denial.toolName === "bash" || denial.toolName === "bg_run") ? approvalScope(denial.toolName, denial.input, this.cwd) : undefined;
 		const body = [
 			theme.bold("Reason"),
 			...wrap(denial.reason).map((line) => theme.fg("muted", line)),
 			"",
+			theme.bold("Command explanation"),
+			...wrap(callExplanation(denial.toolName, denial.input)),
+			"",
+			...(scope ? [theme.bold("Approval scope"), ...wrap(scope.label), ""] : []),
 			...(typeof input.command === "string" ? [theme.bold("Command"), ...wrap(input.command), ""] : []),
 			theme.bold("Tool input"),
 			...wrap(JSON.stringify(denial.input ?? null, null, 2)),
@@ -145,7 +157,7 @@ export class PermissionsMenuView {
 			"",
 			...body.slice(this.explanationTop, this.explanationTop + height),
 			"",
-			theme.fg("dim", `↑/↓ scroll · e or esc back · ${this.explanationTop + 1}–${Math.min(body.length, this.explanationTop + height)}/${body.length}`),
+			theme.fg("dim", truncateToWidth(`enter/a scope · A exact/session · ↑/↓ scroll · e/esc back · ${this.explanationTop + 1}–${Math.min(body.length, this.explanationTop + height)}/${body.length}`, width, "…")),
 		];
 	}
 
@@ -158,6 +170,7 @@ export class PermissionsMenuView {
 			const here = i === menu.cursor;
 			if (here) focus = rows.length;
 			rows.push(this.headline(g.toolName, g.input, `approved ${ago(g.at, this.now())}`, here, width, "success"));
+			if (!g.scope) rows.push(theme.fg("muted", truncateToWidth("     Exact call · session only · not shared with classifier", width, "…")));
 			if (g.scope) rows.push(...wrapTextWithAnsi(`     Session scope: ${g.scope.label}`, Math.max(1, width)).map((line) => theme.fg("muted", line)));
 		});
 		return { rows, focus };
@@ -170,7 +183,7 @@ export class PermissionsMenuView {
 		const name = here ? theme.bold(title) : title;
 		const tail = theme.fg("dim", `  ${when}`);
 		const head = `${pointer}${theme.fg(bullet, "●")} ${name}${target ? theme.fg("muted", `(${target})`) : ""}`;
-		return `${truncateToWidth(head, Math.max(1, width - when.length - 2), "…")}${tail}`;
+		return truncateToWidth(`${truncateToWidth(head, Math.max(1, width - when.length - 2), "…")}${tail}`, width, "…");
 	}
 
 	/** The rows that fit, scrolled so the selected item's first row shows. */
@@ -184,7 +197,7 @@ export class PermissionsMenuView {
 }
 
 const HINTS: Record<MenuTab, string> = {
-	denied: "e explain · a approve and tell the agent · x dismiss · tab next · esc close",
+	denied: "e explain · enter/a scope · A exact/session · x dismiss · tab · esc",
 	granted: "x revoke · tab next · esc close",
 	auto: "enter change · tab next · esc close",
 	settings: "enter toggle · tab next · esc close",
