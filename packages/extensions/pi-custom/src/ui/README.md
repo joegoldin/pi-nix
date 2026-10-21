@@ -53,9 +53,14 @@ completer.
   numbered and highlighted.
 - **Markdown.** `> [!NOTE]`-style callouts and clickable bare URLs, leaving code
   untouched.
-- **Prompt box and shimmer.** Rounded editor with a `❯` coloured by thinking
-  level; a shimmer in a per-session accent colour replaces the spinner while
-  the agent works.
+- **Prompt editing.** Paste the same large block again to expand its collapsed
+  marker in place; further identical repeats leave one copy. Editing or moving
+  to another insertion point resumes normal pasting. Expansion is one undo step.
+- **Prompt box and shimmer.** Fullscreen selection copies prompt text without
+  the rounded outline, `❯`, or layout padding; typed indentation and symbols
+  remain. Terminal-native selection (including Shift-drag bypass) cannot omit
+  visible glyphs: main-screen mode therefore uses a borderless prompt. A shimmer
+  in a per-session accent colour replaces the spinner while the agent works.
 - **`/ui`.** Every setting in one list, saved as you change it.
 - **`/context`.** Where the context window is going: system prompt, tools,
   skills, messages, estimated and scaled to pi's own total.

@@ -1,6 +1,6 @@
 // The prompt box and the working shimmer.
 //
-// The box is pi's own editor with rounded corners, side rules, and a ❯ in the
+// In fullscreen mode the box is pi's own editor with rounded corners, side rules, and a ❯ in the
 // left padding of the first line, coloured by the thinking level so the level
 // is visible where you type. It subclasses pi's CustomEditor rather than
 // wrapping it, so every app keybinding and the embedded working row keep
@@ -12,6 +12,8 @@
 
 import { sliceByColumn, visibleWidth } from "@earendil-works/pi-tui";
 import type { UiTheme } from "./card.ts";
+import { createRepeatPasteEditor, type PasteEditorBase } from "./repeat-paste.ts";
+import { installPromptSelection, type SelectionRow } from "./prompt-selection.ts";
 
 const PROMPT_ICON = "❯";
 // One space either side of the icon.
@@ -31,23 +33,27 @@ export type EditorBase = new (...args: any[]) => {
 	borderColor: Colour;
 };
 
-export function createPromptEditor(Base: EditorBase, promptColour: () => Colour): EditorBase {
-	class PromptEditor extends Base {
+export function createPromptEditor(Base: EditorBase, promptColour: () => Colour, decorated = true): EditorBase {
+	// SAFETY: callers supply the pinned native CustomEditor; real-editor tests cover its private paste adapter.
+	class PromptEditor extends createRepeatPasteEditor(Base as unknown as PasteEditorBase) {
 		private userPadding = 0;
 		private scrolled = false;
 		private topBorder = "";
 		private bottomBorder = "";
+		private selectionRows = new Map<number, SelectionRow>();
+		private boxed = false;
 
 		constructor(...args: any[]) {
 			const [tui, theme, keybindings, options] = args;
 			super(tui, theme, keybindings, { ...(options ?? {}), embedWorkingStatus: true });
 			this.userPadding = super.getPaddingX();
-			super.setPaddingX(this.userPadding + this.promptWidth());
+			this.boxed = installPromptSelection(tui, { component: this, rows: () => this.selectionRows });
+			super.setPaddingX(this.boxed ? this.userPadding + this.promptWidth() : 0);
 		}
 
 		/** The icon's columns, plus one at zero padding: the side rule takes column 0. */
 		private promptWidth(): number {
-			return PROMPT_WIDTH + (this.userPadding === 0 ? 1 : 0);
+			return decorated ? PROMPT_WIDTH + (this.userPadding === 0 ? 1 : 0) : 0;
 		}
 
 		override getPaddingX(): number {
@@ -56,17 +62,18 @@ export function createPromptEditor(Base: EditorBase, promptColour: () => Colour)
 
 		override setPaddingX(padding: number): void {
 			this.userPadding = Math.max(0, padding);
-			super.setPaddingX(this.userPadding + this.promptWidth());
+			super.setPaddingX(this.boxed ? this.userPadding + this.promptWidth() : 0);
 		}
 
 		override renderTopBorder(width: number, hiddenLineCount: number): string {
 			this.scrolled = hiddenLineCount > 0;
-			this.topBorder = this.round(super.renderTopBorder(width, hiddenLineCount), width, "╭", "╮");
+			const border = super.renderTopBorder(width, hiddenLineCount);
+			this.topBorder = this.boxed ? (decorated ? this.round(border, width, "╭", "╮") : border) : border.replaceAll("─", " ");
 			return this.topBorder;
 		}
 
 		override renderBottomBorder(width: number, hiddenLineCount: number): string {
-			this.bottomBorder = this.round(super.renderBottomBorder(width, hiddenLineCount), width, "╰", "╯");
+			this.bottomBorder = this.boxed ? (decorated ? this.round(super.renderBottomBorder(width, hiddenLineCount), width, "╰", "╯") : super.renderBottomBorder(width, hiddenLineCount)) : "";
 			return this.bottomBorder;
 		}
 
@@ -79,6 +86,8 @@ export function createPromptEditor(Base: EditorBase, promptColour: () => Colour)
 			this.topBorder = "";
 			this.bottomBorder = "";
 			const lines = super.render(width);
+			this.selectionRows.clear();
+			if (!this.boxed) return lines;
 			const top = this.topBorder ? lines.indexOf(this.topBorder) : -1;
 			const bottom = this.bottomBorder ? lines.lastIndexOf(this.bottomBorder) : -1;
 			if (top < 0 || bottom <= top) return lines;
@@ -88,7 +97,7 @@ export function createPromptEditor(Base: EditorBase, promptColour: () => Colour)
 			// the prompt.
 			const first = top + 1;
 			const pad = this.userPadding + this.promptWidth();
-			if (!this.scrolled && first < bottom && lines[first]?.startsWith(" ".repeat(pad))) {
+			if (decorated && !this.scrolled && first < bottom && lines[first]?.startsWith(" ".repeat(pad))) {
 				const at = pad - PROMPT_WIDTH;
 				lines[first] = `${lines[first].slice(0, at)} ${promptColour()(PROMPT_ICON)} ${lines[first].slice(pad)}`;
 			}
@@ -96,9 +105,13 @@ export function createPromptEditor(Base: EditorBase, promptColour: () => Colour)
 			// Side rules on every full-width text row between the borders.
 			for (let i = first; i < bottom; i++) {
 				const line = lines[i];
-				if (!line || visibleWidth(line) !== width || !line.startsWith(" ") || !line.endsWith(" ")) continue;
+				if (!decorated || !line || visibleWidth(line) !== width || !line.startsWith(" ") || !line.endsWith(" ")) continue;
 				lines[i] = `${this.borderColor("│")}${line.slice(1, -1)}${this.borderColor("│")}`;
 			}
+			this.selectionRows.set(top, { line: lines[top]!, start: 0, end: 0, skip: true });
+			this.selectionRows.set(bottom, { line: lines[bottom]!, start: 0, end: 0, skip: true });
+			const inset = Math.min(pad, Math.max(0, Math.floor((width - 1) / 2)));
+			for (let i = first; i < bottom; i++) this.selectionRows.set(i, { line: lines[i]!, start: inset, end: width - inset });
 			return lines;
 		}
 	}

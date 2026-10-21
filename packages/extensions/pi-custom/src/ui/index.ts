@@ -313,14 +313,13 @@ export default function piUi(pi: ExtensionAPI): void {
 	/** The pieces that follow a setting while the session runs. */
 	function applyLive(ctx: ExtensionContext): void {
 		if (ctx.mode !== "tui") return;
-		if (config.promptIcon) {
-			const Editor = createPromptEditor(CustomEditor as unknown as EditorBase, () =>
-				ctx.ui.theme.getThinkingBorderColor(pi.getThinkingLevel()),
-			);
-			ctx.ui.setEditorComponent((tui, theme, keybindings) => new Editor(tui, theme, keybindings) as never);
-		} else {
-			ctx.ui.setEditorComponent(undefined);
-		}
+		// SAFETY: the adapter is exercised against the pinned native CustomEditor.
+		const Editor = createPromptEditor(
+			CustomEditor as unknown as EditorBase,
+			() => ctx.ui.theme.getThinkingBorderColor(pi.getThinkingLevel()),
+			config.promptIcon,
+		);
+		ctx.ui.setEditorComponent((tui, theme, keybindings) => new Editor(tui, theme, keybindings) as never);
 		if (config.shimmer) {
 			const accent = sessionAccent(ctx.sessionManager.getSessionId());
 			ctx.ui.setWorkingIndicator({ frames: shimmerFrames("Working…", ctx.ui.theme, accent), intervalMs: 80 });
