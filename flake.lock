@@ -8,7 +8,6 @@
         ]
       },
       "locked": {
-        "__final": true,
         "lastModified": 1792611568,
         "narHash": "sha256-vrqUEgTlHQHl7L3ZjEypP5RcWclvin2Lloe8COEq8LI=",
         "owner": "joegoldin",
