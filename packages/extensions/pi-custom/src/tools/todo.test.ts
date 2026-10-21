@@ -1,27 +1,29 @@
 import { expect, test } from "bun:test";
-import { registerTodo } from "./todo.ts";
+import { registerTodo, type TodoClock } from "./todo.ts";
 
 // Exercise Pi's prompt builder, not a copy of its custom-prompt behavior.
 const { buildSystemPrompt } = await import(new URL("./core/system-prompt.js", import.meta.resolve("@earendil-works/pi-coding-agent")).href);
 
-function harness(active = true) {
+function harness(active = true, clock?: TodoClock) {
 	const handlers = new Map<string, Function>();
 	const commands = new Map<string, any>();
 	const entries: any[] = [];
+	const messages: { message: any; options: any }[] = [];
 	let tool: any;
 	registerTodo({
 		on: (name: string, handler: Function) => handlers.set(name, handler),
 		registerTool: (definition: unknown) => { tool = definition; },
 		registerCommand: (name: string, command: unknown) => commands.set(name, command), registerShortcut() {},
+		sendMessage: (message: unknown, options: unknown) => messages.push({ message, options }),
 		appendEntry: (customType: string, data: unknown) => entries.push({ type: "custom", customType, data }),
 		getActiveTools: () => active ? ["todo"] : [],
-	} as never);
+	} as never, clock);
 	const base = (customPrompt?: string) => buildSystemPrompt({
 		cwd: "/tmp", selectedTools: active ? ["todo"] : [], customPrompt,
 		toolSnippets: { todo: tool.promptSnippet }, toolGuidelines: { todo: tool.promptGuidelines },
 	});
 	const apply = (systemPrompt: string) => handlers.get("before_agent_start")?.({ systemPrompt })?.systemPrompt ?? systemPrompt;
-	return { tool, base, apply, handlers, commands, entries };
+	return { tool, base, apply, handlers, commands, entries, messages };
 }
 
 test("custom system prompts retain proactive milestone-level task guidance", () => {
@@ -53,8 +55,8 @@ test("disabled todo tools do not inject task-tracking instructions", () => {
 	expect(h.apply(original)).toBe(original);
 });
 
-function uiHarness() {
-	const h = harness();
+function uiHarness(clock?: TodoClock) {
+	const h = harness(true, clock);
 	let widget: any;
 	const notices: string[] = [];
 	const ctx = {
@@ -147,4 +149,158 @@ test("clear resets group collapse state when ids are reused", async () => {
 	await h.act({ action: "create", subject: "New", kind: "group" });
 	await h.act({ action: "create", subject: "New child", parentId: 1 });
 	expect(h.widget().render(80).join("\n")).toContain("New child");
+});
+
+function fakeTodoClock() {
+	let now = 0;
+	const jobs = new Map<() => void, number>();
+	const clock: TodoClock = { now: () => now, schedule: (fn, ms) => { jobs.set(fn, now + ms); return () => { jobs.delete(fn); }; } };
+	return { clock, jobs, advance(ms: number) { now += ms; for (const [fn, at] of [...jobs]) if (at <= now) { jobs.delete(fn); fn(); } } };
+}
+
+test("completed rows expire during a long run, but the records and counts survive", async () => {
+	const timer = fakeTodoClock(); const h = uiHarness(timer.clock);
+	await h.act({ action: "create", subject: "Finished work" });
+	await h.act({ action: "create", subject: "Next work" });
+	await h.act({ action: "update", id: 1, status: "completed" });
+	expect(h.widget().render(80).join("\n")).toContain("Finished work");
+	timer.advance(30_000);
+	await h.act({ action: "list" });
+	h.emit("session_compact");
+	timer.advance(30_001);
+	const text = h.widget().render(80).join("\n");
+	expect(text).not.toContain("Finished work");
+	expect(text).toContain("Next work");
+	expect(text).toContain("1/2");
+	expect((await h.act({ action: "get", id: 1 })).details.tasks[0].status).toBe("completed");
+	expect(h.widget().render(80).join("\n")).not.toContain("Finished work");
+	h.widget().handleMouse({ type: "click", button: "left", y: 0 });
+	expect(h.widget().render(80).join("\n")).toContain("Finished work");
+});
+
+test("all-complete and restored lists clean up without a new run; shutdown cancels the timer", async () => {
+	const timer = fakeTodoClock(); const h = uiHarness(timer.clock);
+	await h.act({ action: "create", subject: "Done" });
+	await h.act({ action: "update", id: 1, status: "completed" });
+	timer.advance(60_001);
+	expect(h.widget()).toBeUndefined();
+	expect(timer.jobs.size).toBe(0);
+	h.emit("session_tree");
+	expect(h.widget().render(80).join("\n")).toContain("Done");
+	expect(timer.jobs.size).toBe(1);
+	timer.advance(60_001);
+	expect(h.widget()).toBeUndefined();
+	h.emit("session_tree"); h.emit("session_shutdown");
+	expect(timer.jobs.size).toBe(0);
+});
+
+test("old deadlines do not hide reused task IDs after clearing", async () => {
+	const timer = fakeTodoClock(); const h = uiHarness(timer.clock);
+	await h.act({ action: "create", subject: "Old" });
+	await h.act({ action: "update", id: 1, status: "completed" });
+	timer.advance(30_000);
+	await h.act({ action: "clear" });
+	await h.act({ action: "create", subject: "New" });
+	await h.act({ action: "update", id: 1, status: "completed" });
+	timer.advance(30_001);
+	expect(h.widget().render(80).join("\n")).toContain("New");
+	timer.advance(30_000);
+	expect(h.widget()).toBeUndefined();
+});
+
+test("starting the next run hides completions and cancels their pending deadline", async () => {
+	const timer = fakeTodoClock(); const h = uiHarness(timer.clock);
+	await h.act({ action: "create", subject: "Done" });
+	await h.act({ action: "update", id: 1, status: "completed" });
+	expect(timer.jobs.size).toBe(1);
+	h.emit("agent_start");
+	expect(h.widget()).toBeUndefined();
+	expect(timer.jobs.size).toBe(0);
+});
+
+test("separate completions retain their own deadlines", async () => {
+	const timer = fakeTodoClock(); const h = uiHarness(timer.clock);
+	await h.act({ action: "create", subject: "First" });
+	await h.act({ action: "create", subject: "Second" });
+	await h.act({ action: "update", id: 1, status: "completed" });
+	timer.advance(30_000);
+	await h.act({ action: "update", id: 2, status: "completed" });
+	expect(timer.jobs.size).toBe(1);
+	timer.advance(30_001);
+	expect(h.widget().render(80).join("\n")).not.toContain("First");
+	expect(h.widget().render(80).join("\n")).toContain("Second");
+	timer.advance(30_000);
+	expect(h.widget()).toBeUndefined();
+	expect(timer.jobs.size).toBe(0);
+});
+
+
+test("pruning reminders use completion thresholds, not display expiry, and never start a run", async () => {
+	const timer = fakeTodoClock(); const h = uiHarness(timer.clock);
+	for (let i = 0; i < 10; i++) await h.act({ action: "create", subject: `Task ${i}` });
+	for (let id = 1; id <= 4; id++) await h.act({ action: "update", id, status: "completed" });
+	expect(h.messages).toHaveLength(0);
+	await h.act({ action: "update", id: 5, status: "completed" });
+	expect(h.messages).toHaveLength(0);
+	timer.advance(60_001);
+	expect(h.messages).toHaveLength(1);
+	expect(h.messages[0].message.content).toContain("5 of 10");
+	expect(h.messages[0].message.content).toContain("tombstone");
+	expect(h.messages[0].options).toEqual({ deliverAs: "followUp", triggerTurn: false });
+	await h.act({ action: "list" });
+	h.emit("session_compact");
+	h.emit("tool_execution_end", { toolName: "bash", isError: false });
+	expect(h.messages).toHaveLength(1);
+	timer.advance(600_000);
+	expect(h.messages).toHaveLength(1);
+	h.emit("tool_execution_end", { toolName: "bash", isError: false });
+	expect(h.messages).toHaveLength(1);
+	h.entries.push({ type: "custom_message", customType: h.messages[0].message.customType, details: h.messages[0].message.details });
+	h.emit("agent_settled");
+	timer.advance(60_001);
+	expect(h.messages).toHaveLength(2);
+	expect(h.messages[1].message.content).toContain("required evidence");
+});
+
+test("ten completed tasks trigger maintenance even when most work remains", async () => {
+	const timer = fakeTodoClock(); const h = uiHarness(timer.clock);
+	for (let i = 0; i < 30; i++) await h.act({ action: "create", subject: `Task ${i}` });
+	for (let id = 1; id <= 9; id++) await h.act({ action: "update", id, status: "completed" });
+	expect(h.messages).toHaveLength(0);
+	await h.act({ action: "update", id: 10, status: "completed" });
+	timer.advance(60_001);
+	expect(h.messages).toHaveLength(1);
+});
+
+test("background reminders preserve dependency evidence and wait until prior guidance is consumed", async () => {
+	const timer = fakeTodoClock(); const h = uiHarness(timer.clock);
+	for (let i = 0; i < 5; i++) await h.act({ action: "create", subject: `Evidence ${i}` });
+	await h.act({ action: "create", subject: "Needs evidence", blockedBy: [1, 2, 3, 4, 5] });
+	for (let id = 1; id <= 5; id++) await h.act({ action: "update", id, status: "completed" });
+	expect(h.messages).toHaveLength(0);
+	await h.act({ action: "update", id: 6, removeBlockedBy: [5] });
+	timer.advance(60_001);
+	expect(h.messages).toHaveLength(1);
+	expect(h.messages[0].message.content).toContain("Candidates: #5.");
+	timer.advance(600_000);
+	expect(h.messages).toHaveLength(1);
+	h.entries.push({ type: "custom_message", customType: h.messages[0].message.customType, details: h.messages[0].message.details });
+	h.emit("agent_start");
+	timer.advance(60_001);
+	expect(h.messages).toHaveLength(2);
+	const result = await h.act({ action: "list" });
+	expect(result.details.tasks).toHaveLength(6);
+	expect(result.details.tasks.filter((t: any) => t.status === "completed")).toHaveLength(5);
+});
+
+for (const stop of ["clear", "shutdown"]) test(`background maintenance cancels on ${stop}`, async () => {
+	const timer = fakeTodoClock(); const h = uiHarness(timer.clock);
+	for (let i = 0; i < 5; i++) await h.act({ action: "create", subject: `Done ${i}` });
+	for (let id = 1; id <= 5; id++) await h.act({ action: "update", id, status: "completed" });
+	expect(timer.jobs.size).toBe(2);
+	if (stop === "clear") await h.act({ action: "clear" });
+	else h.emit("session_shutdown");
+	expect(timer.jobs.size).toBe(0);
+	timer.advance(600_001);
+	expect(h.messages).toHaveLength(0);
 });

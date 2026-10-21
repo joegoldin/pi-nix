@@ -5,7 +5,8 @@
 // calls, the last 40k characters) and the question, and no tools. Follow-ups
 // continue the same thread. Nothing reaches the main conversation unless you
 // bring it back with ctrl+r, which puts the latest exchange into your editor
-// as a draft for you to send or not. Threads last for the session.
+// as a draft for you to send or not. Ctrl+Shift+R brings the whole thread.
+// Threads last for the session; their viewport stays bounded above the editor.
 
 import { randomUUID } from "node:crypto";
 import {
@@ -14,7 +15,7 @@ import {
 	getMarkdownTheme,
 } from "@earendil-works/pi-coding-agent";
 import { clampThinkingLevel } from "@earendil-works/pi-ai";
-import { Input, Markdown, matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { Input, Markdown, matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi, type TuiMouseEvent, type TuiMouseEventResult } from "@earendil-works/pi-tui";
 import { Framed } from "../ui/frame.ts";
 
 const CONTEXT_CHARS = 40_000;
@@ -87,35 +88,45 @@ ${question}
 
 /** The latest exchange, framed so the main model reads it as discussion, not as done work. */
 export function bringBackDraft(turn: Turn): string {
+	return discussionDraft(`User:\n${turn.question}\n\nAssistant:\n${turn.answer ?? ""}`);
+}
+
+export function bringBackThreadDraft(turns: readonly Turn[]): string {
+	return discussionDraft(turns.map((turn) => `User:\n${turn.question}\n\nAssistant:\n${turn.answer ?? (turn.error ? `[No answer: ${turn.error}]` : "[No completed answer.]")}`).join("\n\n"));
+}
+
+function discussionDraft(content: string): string {
 	return `The following context was brought back from a /btw side discussion.
 Treat it as discussion context, not as work already completed.
 
 <btw_context>
-User:
-${turn.question}
-
-Assistant:
-${turn.answer ?? ""}
+${content}
 </btw_context>`;
 }
 
-class BtwView {
+export class BtwView {
 	private input = new Input();
 	private busy: AbortController | undefined;
 	private status = "";
+	private top = 0;
+	private maxTop = 0;
+	private pageSize = 1;
+	private followTail = true;
 
 	constructor(
 		private thread: Thread,
 		private theme: { fg(slot: string, text: string): string; bold(text: string): string },
 		private ask: (question: string, signal: AbortSignal) => Promise<void>,
-		private bringBack: () => void,
+		private bringBack: (all: boolean) => void,
 		private close: () => void,
 		private rerender: () => void,
+		private height: () => number = () => 16,
 	) {
 		this.input.focused = true;
 	}
 
 	start(question: string): void {
+		this.followTail = true;
 		const controller = new AbortController();
 		this.busy = controller;
 		this.status = "Answering…";
@@ -133,10 +144,18 @@ class BtwView {
 			this.close();
 			return;
 		}
-		if (matchesKey(data, "ctrl+r")) {
-			if (this.thread.turns.some((t) => t.answer)) this.bringBack();
+		if (matchesKey(data, "ctrl+shift+r")) {
+			if (this.thread.turns.length) { this.busy?.abort(); this.bringBack(true); }
 			return;
 		}
+		if (matchesKey(data, "ctrl+r")) {
+			if (this.thread.turns.some((t) => t.answer)) { this.busy?.abort(); this.bringBack(false); }
+			return;
+		}
+		if (matchesKey(data, "pageUp")) { this.scroll(-this.pageSize); return; }
+		if (matchesKey(data, "pageDown")) { this.scroll(this.pageSize); return; }
+		if (matchesKey(data, "ctrl+home")) { this.scroll(-this.maxTop); return; }
+		if (matchesKey(data, "ctrl+end")) { this.scroll(this.maxTop); return; }
 		if (matchesKey(data, "enter")) {
 			const question = this.input.getValue().trim();
 			if (!question) {
@@ -151,18 +170,40 @@ class BtwView {
 		this.input.handleInput(data);
 	}
 
+	private scroll(delta: number): void {
+		this.top = Math.max(0, Math.min(this.maxTop, this.top + delta));
+		this.followTail = this.top === this.maxTop;
+	}
+
+	handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+		if (event.type !== "wheel") return;
+		this.scroll((event.wheelDelta ?? 0) * 3);
+		return { handled: true, render: true };
+	}
+
 	render(width: number): string[] {
 		const { theme } = this;
-		const out: string[] = [];
+		const transcript: string[] = [];
 		for (const turn of this.thread.turns) {
-			out.push(theme.fg("accent", "❯ ") + theme.bold(turn.question), "");
-			if (turn.error) out.push(theme.fg("error", `Error: ${turn.error}`), "");
-			else if (turn.answer !== undefined) out.push(...new Markdown(turn.answer, 0, 0, getMarkdownTheme()).render(width), "");
+			transcript.push(...wrapTextWithAnsi(turn.question, Math.max(1, width - 2)).map((line, i) =>
+				(i ? "  " : theme.fg("accent", "❯ ")) + theme.bold(line)), "");
+			if (turn.error) transcript.push(...wrapTextWithAnsi(`Error: ${turn.error}`, Math.max(1, width)).map((line) => theme.fg("error", line)), "");
+			else if (turn.answer !== undefined) transcript.push(...new Markdown(turn.answer, 0, 0, getMarkdownTheme()).render(width), "");
 		}
-		if (this.status) out.push(theme.fg("muted", this.status), "");
-		out.push(this.input.render(width)[0] ?? "");
-		out.push(theme.fg("dim", ["Enter to ask", "ctrl+r to bring the latest answer to your prompt", "Esc to close"].join(" · ")));
-		return out.map((l) => (visibleWidth(l) > width ? truncateToWidth(l, width, "…") : l));
+		const height = Math.max(1, Math.floor(this.height()));
+		const historyHeight = Math.max(0, height - 4);
+		this.pageSize = Math.max(1, historyHeight);
+		this.maxTop = Math.max(0, transcript.length - historyHeight);
+		this.top = this.followTail ? this.maxTop : Math.min(this.top, this.maxTop);
+		const range = transcript.length && historyHeight ? `${this.top + 1}–${Math.min(transcript.length, this.top + historyHeight)}/${transcript.length}` : "";
+		// The composer is never part of the scrolling transcript, even on resize.
+		const input = this.input.render(width)[0] ?? "";
+		const status = theme.fg("muted", [this.status, range].filter(Boolean).join(" · "));
+		const keys = theme.fg("dim", "Enter ask · Ctrl+r latest · Ctrl+Shift+r all");
+		const navigation = theme.fg("dim", "PgUp/PgDn or wheel scroll · Ctrl+Home/End · Esc close");
+		const footer = height >= 4 ? [status, input, keys, navigation] : [input, keys, navigation].slice(0, height);
+		return [...transcript.slice(this.top, this.top + historyHeight), ...footer]
+			.map((line) => visibleWidth(line) > width ? truncateToWidth(line, width, "…") : line);
 	}
 
 	invalidate(): void {}
@@ -176,6 +217,11 @@ export function registerBtw(pi: ExtensionAPI): void {
 		const turn: Turn = { question };
 		thread.turns.push(turn);
 		thread.updatedAt = Date.now();
+		const discard = () => {
+			// A closed thread may already have been resumed before cancellation settles.
+			const index = thread.turns.indexOf(turn);
+			if (index >= 0) thread.turns.splice(index, 1);
+		};
 		if (!model) {
 			turn.error = "No model is selected.";
 			return;
@@ -202,7 +248,7 @@ export function registerBtw(pi: ExtensionAPI): void {
 				})
 				.result()) as { stopReason?: string; errorMessage?: string; content?: Array<{ type: string; text?: string }> };
 			if (signal.aborted || response.stopReason === "aborted") {
-				thread.turns.pop();
+				discard();
 				return;
 			}
 			if (response.stopReason === "error") {
@@ -212,7 +258,7 @@ export function registerBtw(pi: ExtensionAPI): void {
 			turn.answer = (response.content ?? []).filter((p) => p.type === "text").map((p) => p.text ?? "").join("\n") || "No response received.";
 			turn.response = response;
 		} catch (err) {
-			if (signal.aborted) thread.turns.pop();
+			if (signal.aborted) discard();
 			else turn.error = (err as Error).message;
 		}
 	}
@@ -222,25 +268,29 @@ export function registerBtw(pi: ExtensionAPI): void {
 		// editor's place, pi restores the editor's earlier text on close and
 		// would overwrite a draft set before then.
 		let draft: string | undefined;
+		let importedAll = false;
 		await ctx.ui.custom<void>((tui, theme, _keybindings, done) => {
 			const view: BtwView = new BtwView(
 				thread,
 				theme,
 				(q, signal) => answer(ctx, thread, q, signal),
-				() => {
+				(all) => {
 					const latest = [...thread.turns].reverse().find((t) => t.answer);
-					if (!latest) return;
-					draft = bringBackDraft(latest);
+					if (!all && !latest) return;
+					importedAll = all;
+					draft = all ? bringBackThreadDraft(thread.turns) : bringBackDraft(latest!);
 					done();
 				},
 				() => done(),
 				() => tui.requestRender(),
+				() => Math.max(1, Math.min(18, Math.floor(tui.terminal.rows * 0.45)) - 2),
 			);
 			if (question) view.start(question);
 			const framed = new Framed(view, "btw · side thread", theme as never);
 			return {
 				render: (w: number) => framed.render(w),
 				invalidate: () => framed.invalidate(),
+				handleMouse: (event: TuiMouseEvent) => view.handleMouse(event),
 				handleInput: (data: string) => {
 					framed.handleInput(data);
 					tui.requestRender();
@@ -250,7 +300,7 @@ export function registerBtw(pi: ExtensionAPI): void {
 		if (draft) {
 			const current = ctx.ui.getEditorText();
 			ctx.ui.setEditorText(current.trim() ? `${current}\n\n${draft}` : draft);
-			ctx.ui.notify("Brought the latest /btw answer into your prompt.", "info");
+			ctx.ui.notify(importedAll ? "Brought the full /btw thread into your prompt." : "Brought the latest /btw answer into your prompt.", "info");
 		}
 	}
 

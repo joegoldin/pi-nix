@@ -349,13 +349,13 @@ export function widgetRows(
 	const blocks: Row[][] = [];
 	for (const root of live.filter((t) => t.parentId === undefined)) {
 		if (root.kind !== "group") {
-			if (!hidden.has(root.id)) blocks.push([{ task: root }]);
+			if (showAll || !hidden.has(root.id)) blocks.push([{ task: root }]);
 			continue;
 		}
 		const children = live.filter((t) => t.parentId === root.id);
-		const visible = children.filter((t) => !hidden.has(t.id));
+		const visible = children.filter((t) => showAll || !hidden.has(t.id));
 		if (children.length && !visible.length) continue;
-		if (hidden.has(root.id) && !visible.some((t) => t.status !== "completed")) continue;
+		if (!showAll && hidden.has(root.id) && !visible.some((t) => t.status !== "completed")) continue;
 		blocks.push([{ task: root }, ...(collapsedGroups.has(root.id) ? [] : visible.map((task) => ({ task, parent: root })))]);
 	}
 	const visible = blocks.flat();
@@ -368,13 +368,15 @@ export function widgetRows(
 	const overflow = visible.length > budget;
 	const selected: Row[] = [];
 	let remaining = overflow ? budget - 1 : budget;
-	const ordered = overflow ? [...blocks].sort((a, b) => Number(a[0].task.status === "completed") - Number(b[0].task.status === "completed")) : blocks;
+	const completedLast = (a: Row, b: Row) => Number(a.task.status === "completed") - Number(b.task.status === "completed");
+	const ordered = [...blocks].sort((a, b) => completedLast(a[0], b[0]));
 	for (const block of ordered) {
 		// A group header always precedes its children, even when the budget cuts the block.
 		if (!remaining) break;
-		const rows = overflow && block.length > 1
-			? [block[0], ...block.slice(1).sort((a, b) => Number(a.task.status === "completed") - Number(b.task.status === "completed"))]
-			: block;
+		const sorted = block.length > 1 ? [block[0], ...block.slice(1).sort(completedLast)] : block;
+		// When compact space is scarce, finished children must not displace
+		// unfinished tasks in a later group or at the top level.
+		const rows = overflow ? sorted.filter(({ task }) => task.status !== "completed") : sorted;
 		const taken = rows.slice(0, remaining);
 		selected.push(...taken);
 		remaining -= taken.length;

@@ -331,3 +331,38 @@ it("reports cleared tasks separately from groups", () => {
 	const { state } = run({ action: "create", subject: "Group", kind: "group" }, { action: "create", subject: "One", parentId: 1 }, { action: "create", subject: "Two", parentId: 1 });
 	expect(reduce(state, { action: "clear" }).text).toBe("Cleared 2 tasks and 1 group");
 });
+
+describe("completed todo ordering", () => {
+	const mixed = () => run(
+		{ action: "create", subject: "Finished root" },
+		{ action: "update", id: 1, status: "completed" },
+		{ action: "create", subject: "Group", kind: "group" },
+		{ action: "create", subject: "Finished child", parentId: 2 },
+		{ action: "update", id: 3, status: "completed" },
+		{ action: "create", subject: "Open child", parentId: 2 },
+		{ action: "create", subject: "Open root" },
+	).state;
+	for (const expanded of [false, true]) it(`puts completed roots and children last (${expanded ? "expanded" : "small compact"})`, () => {
+		const state = mixed(); const before = JSON.stringify(state);
+		const text = widgetLines(state, new Set(), 12, plain, expanded).join("\n");
+		expect(text.indexOf("Open child")).toBeLessThan(text.indexOf("Finished child"));
+		expect(text.indexOf("Open root")).toBeLessThan(text.indexOf("Finished root"));
+		expect(JSON.stringify(state)).toBe(before);
+	});
+	it("does not let completed children consume slots before later unfinished roots", () => {
+		const state = mixed();
+		const lines = widgetLines(state, new Set(), 5, plain);
+		expect(lines.join("\n")).toContain("Open root");
+		expect(lines.join("\n")).not.toContain("Finished child");
+		expect(lines.join("\n")).not.toContain("Finished root");
+		expect(lines[0]).toContain("2/4");
+		expect(lines.at(-1)).toContain("2 completed");
+		expect(lines.length).toBeLessThanOrEqual(5);
+	});
+	it("lets expansion reveal faded completions without losing group progress", () => {
+		const text = widgetLines(mixed(), new Set([1, 3]), 12, plain, true).join("\n");
+		expect(text).toContain("Finished root");
+		expect(text).toContain("Finished child");
+		expect(text).toContain("Group (1/2)");
+	});
+});

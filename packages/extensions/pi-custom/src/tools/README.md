@@ -30,8 +30,31 @@ silently cascades.
 The list above the editor shows group counts and indented tasks. Click a
 group header or use `/todos <group-id>` to collapse/expand it; groups start
 expanded. Click a task to toggle wrapped text. Ctrl+Shift+T folds the whole
-list; `/todos` displays the full list. Truncation preserves parent context
-and prioritizes unfinished work. Completed tasks fade on the next turn.
+list; `/todos` displays the full list. Completed roots and children sort last
+within their respective lists, including when expanded. A compact list that
+needs truncation omits completed rows before budgeting unfinished work; small
+lists can show both. Group counts always include completed children.
+
+Completed rows fade at the next agent run or after 60 seconds, whichever comes
+first. A single deadline timer handles long-running and idle sessions without
+model calls. Reading the list or compacting the session does not renew the
+countdown; clearing, changing branches and shutdown cancel stale deadlines.
+This only hides rows: completed records, dependencies and evidence remain intact.
+Expanded views and `/todos` still expose completed history.
+
+A separate in-process background task asks the model to prune obsolete completed
+records when at least five are complete and they make up half the list, or ten
+are complete regardless of the ratio. After a one-minute delay it queues a
+quiet follow-up message—not steering, a shell process, or a separate model call.
+It never starts an idle agent. Only one reminder may be pending; another can be
+sent after the previous message reaches conversation history and at least ten
+minutes have passed. Reads and compaction do not reset its deadline. Clear,
+branch changes and shutdown cancel pending timers.
+
+The reminder tells the model to review the current list before tombstoning
+obsolete completed tasks, preserving unfinished work, blockers, dependency
+references and required evidence. The background task never deletes tasks itself;
+if every completion is still referenced, it sends no reminder.
 
 Starting a task returns conflicting active tasks to pending. Simultaneous
 work requires distinct explicit owners, not several unowned in-progress
@@ -100,8 +123,17 @@ Replaces pi-goal.
 
 `/btw <question>` asks a side model about the conversation so far (a snapshot of
 its last 40k characters, no tools) without adding anything to it. Follow-ups
-continue the thread; ctrl+r brings the latest exchange back into the editor as a
-draft.
+continue the thread. Ctrl+r brings the latest exchange into the main editor;
+Ctrl+Shift+r brings the whole thread, including visible errors and unanswered
+questions. Both preserve the existing main draft and never submit it. Full-thread
+import requires a terminal that reports Ctrl+Shift+r distinctly (e.g. Kitty keys).
+
+The framed panel occupies at most 18 rows or 45% of terminal height, with the
+composer and controls outside its scrolling transcript. Mouse wheel and
+Page Up/Down scroll; Ctrl+Home/End jump to the beginning/latest messages. New
+answers follow the tail unless you have scrolled up. Resizing recomputes the
+viewport without losing the draft. Bringing back a thread cancels a pending
+side request; a late cancellation cannot remove a newly resumed question.
 
 Replaces pi-btw.
 

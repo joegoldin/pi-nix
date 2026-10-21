@@ -4,6 +4,7 @@
 // Start, compaction and tree navigation replay the latest snapshot; no separate
 // task file needs synchronizing.
 
+import { randomUUID } from "node:crypto";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Text, type TuiMouseEvent, type TuiMouseEventResult, truncateToWidth } from "@earendil-works/pi-tui";
@@ -16,6 +17,23 @@ import {
 
 const WIDGET_KEY = "pi-custom:todos";
 const MAX_WIDGET_LINES = 12;
+const COMPLETED_GRACE_MS = 60_000;
+const MAINTENANCE_COOLDOWN_MS = 10 * 60_000;
+const MAINTENANCE_MESSAGE = "pi-custom:todo-maintenance";
+
+export interface TodoClock {
+	now(): number;
+	schedule(callback: () => void, delay: number): () => void;
+}
+
+const CLOCK: TodoClock = {
+	now: Date.now,
+	schedule(callback, delay) {
+		const timer = setTimeout(callback, delay);
+		timer.unref?.();
+		return () => clearTimeout(timer);
+	},
+};
 
 const GUIDELINES = [
 	"Use `todo` proactively for substantial multi-step work: multiple deliverables, platforms, implementation stages, or verification gates. Do not wait to be asked. After enough initial inspection to identify the work, populate the list before substantive implementation. Skip single-step edits, quick lookups, and conversation; respect an explicit request not to use todos.",
@@ -40,10 +58,14 @@ const STATUS_MARK: Record<string, [string, string, string]> = {
 	deleted: ["⊘", "muted", "deleted"],
 };
 
-export function registerTodo(pi: ExtensionAPI): void {
+export function registerTodo(pi: ExtensionAPI, clock: TodoClock = CLOCK): void {
 	let state: TodoState = { tasks: [], nextId: 1 };
-	// Completed tasks shown during a turn disappear when the next one starts.
-	const fading = new Set<number>();
+	// Display-only deadlines: task history and dependency evidence remain intact.
+	const fading = new Map<number, number>();
+	let cancelCleanup: (() => void) | undefined;
+	let cancelMaintenance: (() => void) | undefined;
+	let lastReminderAt: number | undefined;
+	let pendingReminder: string | undefined;
 	const hidden = new Set<number>();
 	let collapsed = false;
 	const collapsedGroups = new Set<number>();
@@ -51,6 +73,75 @@ export function registerTodo(pi: ExtensionAPI): void {
 	let wrapped = false;
 	let ctxRef: ExtensionContext | undefined;
 	let requestRender: (() => void) | undefined;
+
+	function maintenance() {
+		const live = state.tasks.filter((t) => t.status !== "deleted");
+		const tasks = live.filter((t) => t.kind !== "group");
+		const completed = tasks.filter((t) => t.status === "completed");
+		if (completed.length < 5 || (completed.length < 10 && completed.length * 2 < tasks.length)) return;
+		const referenced = new Set(live.flatMap((t) => t.blockedBy ?? []));
+		const candidates = completed.filter((t) => !referenced.has(t.id)).map((t) => t.id);
+		if (!candidates.length) return;
+		return { completed: completed.length, total: tasks.length, candidates };
+	}
+
+	function scheduleMaintenance(): void {
+		if (!ctxRef || !pi.getActiveTools().includes("todo") || !maintenance() || pendingReminder) {
+			cancelMaintenance?.();
+			cancelMaintenance = undefined;
+			return;
+		}
+		if (cancelMaintenance) return;
+		const delay = Math.max(COMPLETED_GRACE_MS, (lastReminderAt ?? -MAINTENANCE_COOLDOWN_MS) + MAINTENANCE_COOLDOWN_MS - clock.now());
+		cancelMaintenance = clock.schedule(() => {
+			cancelMaintenance = undefined;
+			const current = maintenance();
+			if (!ctxRef || !current || pendingReminder || !pi.getActiveTools().includes("todo")) return;
+			pendingReminder = randomUUID();
+			lastReminderAt = clock.now();
+			pi.sendMessage({
+				customType: MAINTENANCE_MESSAGE, display: false,
+				content: `Todo maintenance: ${current.completed} of ${current.total} tasks are completed. ` +
+					`Candidates: ${current.candidates.slice(0, 20).map((id) => `#${id}`).join(", ")}. ` +
+					"At a convenient boundary, use todo list/get to review the CURRENT list: these candidate IDs may be stale. " +
+					"Use delete to tombstone completed tasks that are no longer needed. Preserve unfinished work, blockers, required evidence, " +
+					"and tasks still referenced by a live blockedBy. Never mark work complete just to prune it, and do not use clear. " +
+					"Remove an obsolete group only after its live children have been removed. This is bookkeeping, not a new task or permission for other actions.",
+				details: { ...current, reminderId: pendingReminder },
+			}, { deliverAs: "followUp", triggerTurn: false });
+		}, delay);
+	}
+
+	function acknowledgeMaintenance(ctx: ExtensionContext): void {
+		// A queued follow-up is not yet on the branch. Only release the slot once
+		// this exact reminder reached conversation history at a run boundary.
+		if (pendingReminder && ctx.sessionManager.getBranch().some((entry) => entry.type === "custom_message" &&
+			entry.customType === MAINTENANCE_MESSAGE && (entry.details as { reminderId?: string } | undefined)?.reminderId === pendingReminder)) {
+			pendingReminder = undefined;
+		}
+		scheduleMaintenance();
+	}
+
+	function cleanCompleted(): void {
+		cancelCleanup?.();
+		cancelCleanup = undefined;
+		const completed = new Set(state.tasks.filter((t) => t.status === "completed").map((t) => t.id));
+		for (const id of hidden) if (!completed.has(id)) hidden.delete(id);
+		for (const id of fading.keys()) if (!completed.has(id)) fading.delete(id);
+		const now = clock.now();
+		for (const id of completed) {
+			if (hidden.has(id)) continue;
+			const deadline = fading.get(id) ?? now + COMPLETED_GRACE_MS;
+			if (deadline <= now) { hidden.add(id); fading.delete(id); }
+			else fading.set(id, deadline);
+		}
+		if (fading.size && ctxRef?.mode === "tui") {
+			cancelCleanup = clock.schedule(() => {
+				cleanCompleted();
+				show(ctxRef);
+			}, Math.min(...fading.values()) - now);
+		}
+	}
 
 	function pauseWork(ctx: ExtensionContext): void {
 		if (!state.tasks.some((t) => t.kind !== "group" && t.status === "in_progress")) return;
@@ -61,16 +152,26 @@ export function registerTodo(pi: ExtensionAPI): void {
 
 	function load(ctx: ExtensionContext, pause = false): void {
 		state = replay(ctx.sessionManager.getBranch() as never);
+		ctxRef = ctx;
 		collapsedGroups.clear();
-		if (pause) pauseWork(ctx);
-		fading.clear();
-		hidden.clear();
+		if (pause) {
+			cancelMaintenance?.();
+			cancelMaintenance = undefined;
+			lastReminderAt = undefined;
+			pendingReminder = undefined;
+			fading.clear();
+			hidden.clear();
+			pauseWork(ctx);
+		}
+		cleanCompleted();
+		scheduleMaintenance();
 		show(ctx);
 	}
 
 	function show(ctx: ExtensionContext | undefined): void {
 		if (!ctx || ctx.mode !== "tui") return;
-		const anything = state.tasks.some((t) => t.status !== "deleted" && !hidden.has(t.id));
+		const expanded = wrapped || ctx.ui.getToolsExpanded();
+		const anything = state.tasks.some((t) => t.status !== "deleted" && (expanded || !hidden.has(t.id)));
 		if (!anything) {
 			ctx.ui.setWidget(WIDGET_KEY, undefined);
 			requestRender = undefined;
@@ -155,6 +256,11 @@ export function registerTodo(pi: ExtensionAPI): void {
 			const outcome = reduce(state, params as TodoParams);
 			state = outcome.state;
 			if (params.action === "clear") {
+				cancelMaintenance?.();
+				cancelMaintenance = undefined;
+				lastReminderAt = undefined;
+				cancelCleanup?.();
+				cancelCleanup = undefined;
 				collapsedGroups.clear();
 				hidden.clear();
 				fading.clear();
@@ -211,6 +317,7 @@ export function registerTodo(pi: ExtensionAPI): void {
 				else collapsedGroups.add(id);
 				collapsed = false;
 				for (const t of live) if (t.id === id || t.parentId === id) hidden.delete(t.id);
+				cleanCompleted();
 				show(ctx);
 				return;
 			}
@@ -277,28 +384,33 @@ export function registerTodo(pi: ExtensionAPI): void {
 	pi.on("session_compact", (_event, ctx) => load(ctx));
 	pi.on("session_tree", (_event, ctx) => load(ctx, true));
 	pi.on("agent_settled", (_event, ctx) => {
-		if (ctx.isIdle()) pauseWork(ctx);
+		if (ctx.isIdle()) {
+			pauseWork(ctx);
+			acknowledgeMaintenance(ctx);
+		}
 	});
 
 	pi.on("tool_execution_end", (event, ctx) => {
 		if (event.toolName !== "todo" || event.isError) return;
-		for (const t of state.tasks) {
-			if (t.status === "completed") fading.add(t.id);
-			else {
-				fading.delete(t.id);
-				hidden.delete(t.id);
-			}
-		}
+		scheduleMaintenance();
+		cleanCompleted();
 		show(ctx);
 	});
 
 	pi.on("agent_start", (_event, ctx) => {
-		for (const id of fading) hidden.add(id);
+		acknowledgeMaintenance(ctx);
+		for (const id of fading.keys()) hidden.add(id);
 		fading.clear();
+		cancelCleanup?.();
+		cancelCleanup = undefined;
 		show(ctx);
 	});
 
 	pi.on("session_shutdown", () => {
+		cancelMaintenance?.();
+		cancelMaintenance = undefined;
+		cancelCleanup?.();
+		cancelCleanup = undefined;
 		ctxRef = undefined;
 		requestRender = undefined;
 	});
