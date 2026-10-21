@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSy
 import { createRequire } from "node:module";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const modules = process.argv[2];
@@ -12,6 +12,14 @@ const require = createRequire(join(agent, "package.json"));
 const manifest = JSON.parse(readFileSync(join(agent, "package.json")));
 assert(existsSync(join(agent, manifest.bin.pi)), "Missing package CLI entry");
 execFileSync("npm", ["--version"], { stdio: "pipe" });
+
+// Detached extension workers need Chord even when the CLI does not import it.
+const chordManifestPath = require.resolve("@earendil-works/chord/package.json");
+const chordManifest = JSON.parse(readFileSync(chordManifestPath));
+assert.equal(chordManifest.version, manifest.version);
+for (const subpath of [".", "./context"]) {
+  await import(pathToFileURL(join(dirname(chordManifestPath), chordManifest.exports[subpath].import)));
+}
 
 for (const name of [
   "typescript", "vitest", "shx", "braces", "node-forge", "@earendil-works/gondolin", "canvas",

@@ -1,0 +1,6 @@
+--- a/scripts/generate-coding-agent-install-lock.mjs
++++ b/scripts/generate-coding-agent-install-lock.mjs
+@@ -253,0 +254,3 @@
++			// Detached extension workers resolve Chord from the host installation,
++			// even when the CLI no longer declares it as a runtime dependency.
++			"@earendil-works/chord": codingAgentPackage.version,
