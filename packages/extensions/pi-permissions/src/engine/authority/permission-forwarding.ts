@@ -1,3 +1,4 @@
+import type { ForwardedToolCall } from "./forwarded-tool-call";
 import { join } from "node:path";
 import type { PromptPayload } from "../presentation/prompt-payload";
 import type { PermissionUiPromptSource } from "../service/permission-events";
@@ -162,6 +163,7 @@ export interface ForwardedAccessIntent extends ForwardedAccessFacts {
 }
 
 export type ForwardedPermissionRequest = {
+  toolCall?: ForwardedToolCall;
   id: string;
   createdAt: number;
   requesterSessionId: string;

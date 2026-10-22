@@ -217,9 +217,10 @@ class QuestionnaireView {
 }
 
 /** RPC clients: the same questions, one select or input dialog at a time. */
-async function askByDialogs(questions: Question[], ui: ExtensionContext["ui"]): Promise<Result> {
+async function askByDialogs(questions: Question[], ui: ExtensionContext["ui"], signal?: AbortSignal): Promise<Result> {
 	const q = new Questionnaire(questions);
 	for (const [i, question] of questions.entries()) {
+		if (signal?.aborted) return { answers: [...q.answers.values()], cancelled: true };
 		const title = `[${question.header}] ${question.question}${question.options
 			.filter((o) => o.preview)
 			.map((o, n) => `\n--- ${n + 1}. ${o.label} preview ---\n${o.preview!.slice(0, 600)}`)
@@ -229,8 +230,9 @@ async function askByDialogs(questions: Question[], ui: ExtensionContext["ui"]): 
 			const raw = await ui.input(
 				`${title}\n\n${list}\n\nEnter the numbers of all that apply, comma-separated (e.g. "1,3"), or type a custom answer as plain text.`,
 				"1,3",
+				{ signal },
 			);
-			if (raw === undefined) return { answers: [...q.answers.values()], cancelled: true };
+			if (signal?.aborted || raw === undefined) return { answers: [...q.answers.values()], cancelled: true };
 			const text = raw.trim();
 			const nums = text.split(",").map((s) => Number(s.trim()));
 			if (text === "" || nums.every((n) => Number.isInteger(n) && n >= 1 && n <= question.options.length)) {
@@ -242,12 +244,12 @@ async function askByDialogs(questions: Question[], ui: ExtensionContext["ui"]): 
 			continue;
 		}
 		const choices = [...question.options.map((o, n) => `${n + 1}. ${o.label} — ${o.description}`), `${question.options.length + 1}. ${TYPE_ROW}`];
-		const picked = await ui.select(title, choices);
+		const picked = await ui.select(title, choices, { signal });
 		const index = picked === undefined ? -1 : choices.indexOf(picked);
-		if (index < 0) return { answers: [...q.answers.values()], cancelled: true };
+		if (signal?.aborted || index < 0) return { answers: [...q.answers.values()], cancelled: true };
 		if (index === question.options.length) {
-			const text = await ui.input(`${title}\n\nType your answer:`, "");
-			if (text === undefined) return { answers: [...q.answers.values()], cancelled: true };
+			const text = await ui.input(`${title}\n\nType your answer:`, "", { signal });
+			if (signal?.aborted || text === undefined) return { answers: [...q.answers.values()], cancelled: true };
 			q.answers.set(i, { questionIndex: i, question: question.question, kind: "custom", answer: text.trim() || null });
 		} else {
 			const o = question.options[index];
@@ -318,7 +320,7 @@ export function registerAsk(pi: ExtensionAPI): void {
 				{ minItems: 1, maxItems: 4, description: "Questions to ask the user (1-4 questions)" },
 			),
 		}),
-		async execute(_id, params, _signal, _onUpdate, ctx) {
+		async execute(_id, params, signal, _onUpdate, ctx) {
 			const questions = normalise(params.questions as Question[]);
 			const reply = (result: Result) => {
 				// Native session entries preserve UI-origin answers across compaction.
@@ -329,6 +331,7 @@ export function registerAsk(pi: ExtensionAPI): void {
 				}
 				return { content: [{ type: "text" as const, text: formatResult(result) }], details: result };
 			};
+			if (signal?.aborted) return reply({ answers: [], cancelled: true });
 			if (!ctx.hasUI) {
 				return {
 					content: [{ type: "text" as const, text: "Error: UI not available (running in non-interactive mode)" }],
@@ -341,20 +344,33 @@ export function registerAsk(pi: ExtensionAPI): void {
 			}
 			// A terminal bell, so a question asked while you look away still finds you.
 			if (process.stdout.isTTY) process.stdout.write("\x07");
-			if (ctx.mode !== "tui") return reply(await askByDialogs(questions, ctx.ui));
+			if (ctx.mode !== "tui") return reply(await askByDialogs(questions, ctx.ui, signal));
 			const q = new Questionnaire(questions);
-			await ctx.ui.custom<void>((tui, theme, _keybindings, done) => {
-				const view = new QuestionnaireView(q, theme as never, () => done());
-				const framed = new Framed(view, "Question", theme as never);
-				return {
-					render: (w: number) => framed.render(w),
-					invalidate: () => framed.invalidate(),
-					handleInput: (data: string) => {
-						framed.handleInput(data);
-						tui.requestRender();
-					},
-				};
-			});
+			let close: (() => void) | undefined;
+			let cancel = () => {};
+			try {
+				await new Promise<void>((resolve, reject) => {
+					cancel = () => { q.finish(true); close?.(); resolve(); };
+					signal?.addEventListener("abort", cancel, { once: true });
+					if (signal?.aborted) { cancel(); return; }
+					void ctx.ui.custom<void>((tui, theme, _keybindings, done) => {
+						close = () => done();
+						// An inline dialog may still be queued when send-now aborts its tool.
+						if (signal?.aborted) { done(); return { render: () => [], invalidate() {} }; }
+						const view = new QuestionnaireView(q, theme as never, close);
+						const framed = new Framed(view, "Question", theme as never);
+						return {
+							render: (w: number) => framed.render(w),
+							invalidate: () => framed.invalidate(),
+							handleInput: (data: string) => {
+								framed.handleInput(data);
+								tui.requestRender();
+							},
+						};
+					}).then(resolve, reject);
+				});
+			} finally { signal?.removeEventListener("abort", cancel); }
+
 			return reply(q.result ?? { answers: [...q.answers.values()], cancelled: true });
 		},
 	});

@@ -1,3 +1,4 @@
+import { asForwardedToolCall } from "../../authority/forwarded-tool-call";
 import type { AccessPath } from "../../access-intent/access-path";
 import type { ToolPathSource } from "../../access-intent/tool-input-path";
 import { classifyToolKind } from "../../access-intent/tool-kind";
@@ -57,11 +58,12 @@ export function buildPathGateLogContext(
  * access facts the ask carries onto the wire.
  */
 export function buildPathGatePromptDetails(
-  tcc: PathGateRequestFacts,
+  tcc: PathGateRequestFacts & Pick<ToolCallContext, "input">,
   path: string,
   accessIntent: ForwardedAccessFacts,
 ): Omit<PromptPermissionDetails, "requestId" | "payload"> {
   return {
+    toolCall: asForwardedToolCall(tcc),
     source: "tool_call",
     agentName: tcc.agentName,
     toolCallId: tcc.toolCallId,

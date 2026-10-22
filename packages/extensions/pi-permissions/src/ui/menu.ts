@@ -1,3 +1,4 @@
+import { directoryScopeLabel } from "../directory-access.ts";
 // The /permissions menu, the one place for permissions: what was blocked, to
 // approve or dismiss; what you approved, to revoke; auto mode; and the
 // permission system's settings. Drawn as pi-custom draws /context and /ui:
@@ -126,6 +127,8 @@ export class PermissionsMenuView {
 			const here = i === menu.cursor;
 			if (here) focus = rows.length;
 			rows.push(this.headline(d.toolName, d.input, ago(d.at, this.now()), here, width));
+			if (d.owner) rows.push(theme.fg("muted", truncateToWidth(`     Child: ${d.owner.agentName} · ${d.owner.sessionId}${d.incomplete ? " · call metadata unavailable" : ""}`, width, "…")));
+			if (d.directories?.length) rows.push(...wrapTextWithAnsi(`     Access scope: ${directoryScopeLabel(d.directories)}`, Math.max(1, width)).map(line => theme.fg("muted", line)));
 			rows.push(theme.fg("muted", truncateToWidth(`     Does: ${callExplanation(d.toolName, d.input).replace(/\s+/g, " ")}`, width, "…")));
 			rows.push(theme.fg("muted", truncateToWidth(`     Denied: ${shortReason(d.reason).replace(/\s+/g, " ")}`, width, "…")));
 		});
@@ -136,8 +139,11 @@ export class PermissionsMenuView {
 		const { theme } = this;
 		const wrap = (text: string) => wrapTextWithAnsi(text, Math.max(1, width));
 		const input = denial.input && typeof denial.input === "object" ? (denial.input as Record<string, unknown>) : {};
-		const scope = this.cwd && (denial.toolName === "bash" || denial.toolName === "bg_run") ? approvalScope(denial.toolName, denial.input, this.cwd) : undefined;
+		const cwd = denial.owner ? denial.owner.cwd : this.cwd;
+		const scope = denial.directories?.length ? { label: directoryScopeLabel(denial.directories) } : cwd && (denial.toolName === "bash" || denial.toolName === "bg_run") ? approvalScope(denial.toolName, denial.input, cwd) : undefined;
 		const body = [
+			...(denial.owner ? [theme.bold("Child owner"), ...wrap(`${denial.owner.agentName} · ${denial.owner.sessionId}`), ""] : []),
+			...(denial.policyDenied ? [...wrap("Explicit rule denial: menu approval cannot override this policy."), ""] : []),
 			theme.bold("Reason"),
 			...wrap(denial.reason).map((line) => theme.fg("muted", line)),
 			"",
@@ -170,8 +176,9 @@ export class PermissionsMenuView {
 			const here = i === menu.cursor;
 			if (here) focus = rows.length;
 			rows.push(this.headline(g.toolName, g.input, `approved ${ago(g.at, this.now())}`, here, width, "success"));
+			if (g.owner) rows.push(theme.fg("muted", truncateToWidth(`     Child only: ${g.owner.agentName} · ${g.owner.sessionId}`, width, "…")));
 			if (!g.scope) rows.push(theme.fg("muted", truncateToWidth("     Exact call · session only · not shared with classifier", width, "…")));
-			if (g.scope) rows.push(...wrapTextWithAnsi(`     Session scope: ${g.scope.label}`, Math.max(1, width)).map((line) => theme.fg("muted", line)));
+			if (g.scope) rows.push(...wrapTextWithAnsi(`     ${g.directory ? "Conversation access" : "Session scope"}: ${g.scope.label}`, Math.max(1, width)).map((line) => theme.fg("muted", line)));
 		});
 		return { rows, focus };
 	}

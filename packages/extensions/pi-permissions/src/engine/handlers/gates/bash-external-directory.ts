@@ -1,3 +1,4 @@
+import { asForwardedToolCall } from "../../authority/forwarded-tool-call";
 import type { BashProgram } from "../../access-intent/bash/program";
 import type { PathNormalizer } from "../../path/path-normalizer";
 import type { ScopedPermissionResolver } from "../../policy/permission-resolver";
@@ -125,6 +126,7 @@ export function describeBashExternalDirectoryGate(
       ),
     ),
     promptDetails: {
+      toolCall: asForwardedToolCall(tcc),
       source: "tool_call",
       agentName: tcc.agentName,
       toolCallId: tcc.toolCallId,

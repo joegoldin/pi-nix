@@ -1,3 +1,4 @@
+import { asForwardedToolCall } from "./forwarded-tool-call";
 import {
   existsSync,
   mkdirSync,
@@ -538,6 +539,7 @@ export function readForwardedPermissionRequest(
       // ones. An older child's `message` is deliberately not salvaged — a
       // skewed ask renders from the fields it does carry (ADR 0011 §9).
       payload: asPromptPayload(parsed.payload),
+      toolCall: asForwardedToolCall(parsed.toolCall),
       source: asUiPromptSource(parsed.source),
       surface: asNullableDisplayString(parsed.surface),
       value: asNullableDisplayString(parsed.value),

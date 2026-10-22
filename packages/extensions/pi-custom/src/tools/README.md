@@ -104,8 +104,14 @@ are checked before they are accepted.
 Goal guidance tells the model to address you directly, separate verified results
 from remaining work, and put any action you need to take first. `goal_wait`
 requires `waiting_for` (`user`, `background` or `external`), so its notice,
-`/goal status` and footer distinguish waiting for you from waiting for a task or
-event. Background and external waits explicitly say no action is needed from you.
+`/goal status` and footer distinguish waiting for your action from waiting for a task or
+event. Required manual steps take priority over an active background task: a test
+waiting for you to click or drag is a user wait. For mixed waits, `reason` states
+your exact action and how to report completion; `background_task` separately names
+the running task, what it is doing or waiting for, and what happens next. Both
+appear in the wait notice and `/goal status`, with abbreviated text in the footer. The UI adds only the heading,
+never an automatic claim that no action is needed; the reason may say that only
+when it is true.
 Older saved waits without ownership keep their reason without guessing who must
 act. Updates should name what happens next without promising an automatic resume
 unless a notification or deadline is actually arranged.

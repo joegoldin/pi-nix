@@ -165,3 +165,14 @@ it("importing during a request aborts it without dropping a newer question after
 	await resumed;
 	expect(h.draft()).toContain("User:\nNew question\n\nAssistant:\nNew answer");
 });
+
+it("keeps BTW controls without the line counter or scrolling hints", () => {
+	const { view } = panel();
+	const text = view.render(100).join("\n");
+	expect(text).not.toMatch(/\d+[–-]\d+\/\d+/);
+	expect(text).not.toContain("PgUp/PgDn");
+	expect(text).not.toContain("wheel scroll");
+	expect(text).not.toContain("Ctrl+Home/End");
+	expect(text).toContain("Enter ask · Ctrl+r latest · Ctrl+Shift+r all");
+	expect(text).toContain("Esc close");
+});

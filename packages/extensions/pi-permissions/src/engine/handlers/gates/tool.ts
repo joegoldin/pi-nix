@@ -1,3 +1,4 @@
+import { asForwardedToolCall } from "../../authority/forwarded-tool-call";
 import type { AccessPath } from "../../access-intent/access-path";
 import { PATH_BEARING_TOOLS } from "../../access-intent/path-surfaces";
 import { getPathBearingToolPath } from "../../access-intent/tool-input-path";
@@ -189,6 +190,7 @@ export function describeToolGate(
     payload,
     sessionApproval: sessionOption.approval,
     promptDetails: {
+      toolCall: asForwardedToolCall(tcc),
       source: "tool_call",
       agentName: tcc.agentName,
       toolCallId: tcc.toolCallId,

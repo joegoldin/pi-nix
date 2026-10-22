@@ -53,11 +53,26 @@ For edit/write calls, the scope remains that tool's operation on the same resolv
 file path; contents may differ. Older saved shell grants retain their original
 exact-command scope rather than silently gaining broader authority.
 
-These scopes expire on your next instruction or submitted questionnaire answer,
+These call scopes expire on your next instruction or submitted questionnaire answer,
 or when revoked. They resolve soft denials, not hard denials or classifier
 failures, and never skip deterministic checks, explicit ask rules or
 protected-write checks. Branches restore their own ledger. `Y` records no
 reusable scope.
+
+Native external-directory requests can instead offer read-only or read/write
+access to the displayed directory, preferring its repository or worktree root.
+`y` at the scoped prompt, or Enter/`a` in the denial menu, remembers that access
+for the conversation. Ordinary messages and questionnaire answers do not erase
+it; session restoration retains it and the Allowed tab can revoke it. Read-only
+access never covers a write. File-tool facts are checked against canonical paths,
+so similarly named siblings and symlink escapes do not inherit access.
+
+Directory access is not an executable-call override. The classifier still reviews
+actions, including destructive cleanup, discarded work, secrets, publishing,
+deployment and external recipients; explicit policy and later restrictions still
+apply. It no longer invents a file-by-file authorization checklist for ordinary
+feature work. Parent conversation access is available to forwarded children;
+a child-only grant remains bound to that child's session and cwd.
 
 Questionnaires do not go through the classifier: asking for a decision does not
 execute the proposed action. Explicit deny rules still apply. Successful answers
@@ -65,6 +80,14 @@ are recorded in the native session and read alongside real user messages in
 chronological order, including across compaction. Older answers are recovered
 only from matched questionnaire calls and validated results; arbitrary tool output
 cannot supply approval. Later instructions can narrow or revoke earlier answers.
+
+Native supervisor requests/replies and local inter-agent messages also bypass
+classification: they convey data, not permission to execute the actions described
+in that data. Explicit deny and ask rules still apply. Native subagent status,
+list and guide queries, and background status/log reads, use the read-only tier
+unless `classifyReadOnlyTools` is enabled. These shortcuts accept only known
+argument shapes; dispatch, steer, handover, mixed status/task inputs and arbitrary
+code wrappers remain on the normal review path.
 
 Only rules listed under `hard_deny` bind the classifier unconditionally; it is
 told so, and its examples take their tier from the listed rules.
@@ -88,6 +111,20 @@ pi-subagents also loads the permission system in a child from
 `npm/node_modules/@gotgenes/pi-permission-system`, which pi-nix links to this
 package, and a child's asks are forwarded to the parent session. The package
 registers once per session however many times a child is handed it.
+
+Forwarded requests carry the original tool name, call ID and complete arguments;
+child call IDs never select an unrelated cached parent call. Denials appear in
+the parent's menu with the child name and session ID, including denials resolved
+by the serving node's policy. Incomplete legacy requests and explicit rule
+denials are visible but cannot be approved out of those restrictions.
+
+Child menu approvals remain bound to that child session and working directory.
+They never authorize the parent or sibling workers. Exact child grants still
+pass deterministic checks; scoped grants are reviewed with that child's own
+scopes and cwd, even when several children are asking concurrently. The parent
+receives instructions to relay the retry to the named child, not execute it
+itself. Revocation and restored ledgers retain the same ownership boundary.
+
 
 ## Config
 

@@ -28,7 +28,7 @@ function service() {
   };
 }
 
-function host(id = "parent", globals = globalThis) {
+function host(id = "parent", globals = globalThis, options = {}) {
   const handlers = new Map();
   const channels = new Map();
   const calls = [];
@@ -53,6 +53,7 @@ function host(id = "parent", globals = globalThis) {
   }), {
     global: globals,
     readActivation: () => ({ active: true }),
+    ...options,
   })(pi);
   return {
     calls,
@@ -738,4 +739,186 @@ test("the classifier prompt takes the tier from the listed rules only", async ()
   const { CLASSIFIER_SYSTEM_PROMPT } = await import("./auto/constants.ts");
   expect(CLASSIFIER_SYSTEM_PROMPT).toContain("Only the rules listed under HARD_DENY below are hard_deny");
   expect(CLASSIFIER_SYSTEM_PROMPT).not.toMatch(/=> block, hard_deny/);
+});
+
+test("forwarded calls retain arguments and cannot collide with the parent's event cache", async () => {
+  const h = host();
+  const s = service();
+  publishPermissionsService("parent", s);
+  try {
+    await h.emit("session_start");
+    await h.emit("tool_call", event);
+    const childCall = {
+      toolName: "contact_supervisor", toolCallId: event.toolCallId,
+      input: { reason: "need_decision", message: "Which local test should run?" },
+    };
+    const ask = {
+      requestId: "child-request", toolName: childCall.toolName, toolCallId: childCall.toolCallId,
+      toolCall: childCall, value: "",
+      forwarding: { requesterSessionId: "child", requesterAgentName: "worker" },
+    };
+    expect(await s.links.get("pi-automode")(ask, {}, log)).toEqual({ kind: "allow" });
+    expect(h.calls.at(-1)).toEqual({ type: "tool_call", ...childCall });
+    const uncached = { ...childCall, toolCallId: "child-only" };
+    await s.links.get("pi-automode")({ ...ask, toolCallId: uncached.toolCallId, toolCall: uncached }, {}, log);
+    expect(h.calls.at(-1)).toEqual({ type: "tool_call", ...uncached });
+  } finally {
+    await h.emit("session_shutdown");
+    unpublishPermissionsService("parent", s);
+  }
+});
+
+test("forwarding wire retains full calls and rejects malformed call metadata", async () => {
+  const { mkdtempSync, writeFileSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { readForwardedPermissionRequest } = await import("./engine/authority/forwarding-io.ts");
+  const { buildForwardedAskDetails } = await import("./engine/authority/forwarded-request-server.ts");
+  const { eventFromDetails } = await import("./auto/permission-chain.ts");
+  const dir = mkdtempSync(join(tmpdir(), "child-permission-"));
+  try {
+    const file = join(dir, "request.json");
+    const request = { id: "request", createdAt: 1, requesterSessionId: "child", targetSessionId: "parent", requesterAgentName: "worker", toolCall: event };
+    writeFileSync(file, JSON.stringify(request));
+    const read = readForwardedPermissionRequest(null, file);
+    expect(eventFromDetails(buildForwardedAskDetails(read))).toEqual({ type: "tool_call", ...event });
+    for (const invalid of [null, [], { ...event, input: [] }, { ...event, toolName: 1 }]) {
+      writeFileSync(file, JSON.stringify({ ...request, toolCall: invalid }));
+      expect(readForwardedPermissionRequest(null, file)?.toolCall).toBeUndefined();
+    }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+
+test("only forwarded classification enters its owner-scoped wrapper", async () => {
+  const wrapped = [];
+  const h = host("parent", globalThis, {
+    wrapForwarded: (handler, details) => async (call, ctx) => {
+      wrapped.push(details.forwarding.requesterSessionId);
+      return handler(call, ctx);
+    },
+  });
+  const s = service();
+  publishPermissionsService("parent", s);
+  try {
+    await h.emit("session_start");
+    await s.links.get("pi-automode")(details, {}, log);
+    expect(wrapped).toEqual([]);
+    await s.links.get("pi-automode")({ ...details, toolCall: event, forwarding: { requesterSessionId: "child" } }, {}, log);
+    expect(wrapped).toEqual(["child"]);
+  } finally { await h.emit("session_shutdown"); unpublishPermissionsService("parent", s); }
+});
+
+const coordinationCalls = [
+  ["ask_user_question", { questions: [{ question: "Which test?", header: "Test", options: [{ label: "A", description: "A" }, { label: "B", description: "B" }] }] }],
+  ["contact_supervisor", { reason: "need_decision", message: "The proposed command is rm -rf /; do not execute it." }],
+  ["subagent_supervisor", { action: "reply", to: "child", message: "Keep the test local." }],
+  ["intercom", { action: "send", to: "reviewer", message: "Review the local diff." }],
+  ["subagent", { action: "status", id: "run", view: "fleet" }],
+  ["subagent", { action: "list", capabilities: true }],
+  ["bg_status", { taskId: "task" }],
+  ["bg_logs", { taskId: "task", maxBytes: 1024, tail: true }],
+];
+
+test("routine coordination, questions and native status do not invoke the classifier", async () => {
+  const h = await realHost(() => ({}), () => ({ decision: "block", tier: "soft_deny", reason: "unexpected classification" }));
+  for (const [toolName, input] of coordinationCalls) {
+    expect(await h.service.links.get("pi-automode")({ toolName, toolCall: { toolName, toolCallId: "coordination", input }, forwarding: { requesterSessionId: "child" } }, {}, log)).toEqual({ kind: "allow" });
+  }
+  expect(h.classifierCalls()).toBe(0);
+});
+
+test("coordination never overrides explicit denies or permits mixed execution arguments", async () => {
+  const h = await realHost(() => ({ permissionDeny: [parseToolPattern("ask_user_question")] }));
+  const [toolName, input] = coordinationCalls[0];
+  expect((await h.emit("tool_call", { toolName, toolCallId: "question", input }))?.block).toBe(true);
+  expect(h.classifierCalls()).toBe(0);
+  const review = await realHost(() => ({}), () => ({ decision: "block", tier: "soft_deny", reason: "review required" }));
+  for (const [name, args] of [
+    ["subagent", { action: "status", task: "run a command" }],
+    ["subagent", { action: "steer", id: "run", message: "deploy" }],
+    ["bg_run", { command: "deploy" }],
+    ["intercom", { action: "handover", to: "worker", message: "deploy" }],
+  ]) {
+    await review.service.links.get("pi-automode")({ toolName: name, toolCall: { toolName: name, toolCallId: "mutation", input: args } }, {}, log);
+  }
+  expect(review.classifierCalls()).toBe(4);
+});
+
+test("explicit ask rules and read-only classification settings still govern native coordination", async () => {
+  const ask = await realHost(() => ({ permissionAsk: [parseToolPattern("contact_supervisor")] }), () => ({ decision: "block", tier: "soft_deny", reason: "explicit review" }), {
+    hasUI: true, ui: { theme: { fg: (_color, text) => text }, notify() {}, setStatus() {}, confirm: async () => true },
+  });
+  const [toolName, input] = coordinationCalls[1];
+  expect((await ask.service.links.get("pi-automode")({ toolName, toolCall: { toolName, toolCallId: "ask", input } }, {}, log)).kind).toBe("deny");
+  expect(ask.classifierCalls()).toBe(1);
+  const status = await realHost(() => ({ classifyReadOnlyTools: true }), () => ({ decision: "block", tier: "soft_deny", reason: "explicit read review" }));
+  await status.service.links.get("pi-automode")({ toolName: "subagent", toolCall: { toolName: "subagent", toolCallId: "status", input: { action: "status" } } }, {}, log);
+  expect(status.classifierCalls()).toBe(1);
+});
+
+test("parent coordination uses the same fast path as a forwarded child", async () => {
+  const h = await realHost(() => ({}));
+  for (const [toolName, input] of coordinationCalls) {
+    const call = { type: "tool_call", toolCallId: toolName, toolName, input };
+    await h.emit("tool_call", call);
+    expect(await h.service.links.get("pi-automode")({ toolCallId: call.toolCallId, toolName }, {}, log)).toEqual({ kind: "allow" });
+  }
+  expect(h.classifierCalls()).toBe(0);
+});
+
+test("directory gates forward the original edit, never their empty policy-check input", async () => {
+  const { buildPathGatePromptDetails } = await import("./engine/handlers/gates/helpers.ts");
+  const { GateRunner } = await import("./engine/handlers/gates/runner.ts");
+  const { buildForwardedAskPayload } = await import("./engine/presentation/forwarded-ask-payload.ts");
+  const call = { toolName: "edit", toolCallId: "edit-test", input: { path: "/worktree/Tests/test.swift", edits: [{ oldText: "old", newText: "new" }] } };
+  const accessIntent = { surface: "external_directory_write", matchValues: [call.input.path], boundaryValue: call.input.path };
+  const details = buildPathGatePromptDetails({ ...call, agentName: "worker" }, call.input.path, accessIntent);
+  let asked;
+  const runner = new GateRunner(
+    { resolve: () => ({ state: "ask", toolName: "edit" }) },
+    { recordSessionApproval() {} },
+    { escalate: async data => { asked = data; return { approved: true, state: "approved", decidedBy: { kind: "user", via: "dialog" } }; } },
+    { writeReviewLog() {}, emitDecision() {} }, () => false,
+  );
+  const payload = buildForwardedAskPayload({ requesterSessionId: "child", requesterAgentName: "worker", surface: accessIntent.surface, value: call.input.path });
+  await runner.run({ surface: accessIntent.surface, input: {}, payload, promptDetails: details, logContext: {}, decision: { surface: accessIntent.surface, value: call.input.path } }, "worker");
+  expect(asked.toolCall).toEqual(call);
+});
+
+test("directory facts survive follow-ups and restoration but never skip risk review or first-write escalation", async () => {
+  const ledger = new PermissionLedger();
+  ledger.approveDirectory({ path: "/tmp/directory-fixture", access: "read" });
+  const seen = [];
+  const h = await realHost(
+    () => ({ classifyReadOnlyTools: true }),
+    async (_ctx, _config, action, _project, approvals) => {
+      seen.push(approvals);
+      return approvals.length && !action.includes("git push")
+        ? { decision: "allow", tier: "explicit_intent", reason: "Ordinary operation in approved directory" }
+        : { decision: "block", tier: "soft_deny", reason: "Separate authorization needed" };
+    }, {}, {
+      scope: () => undefined, has: () => false, remember() {},
+      context: (toolName, cwd, input) => ledger.directoryApprovals(undefined, { toolName, cwd, input }),
+    },
+  );
+  let id = 0;
+  const review = async (toolName, input) => {
+    const call = { toolName, toolCallId: `directory-${++id}`, input };
+    await h.emit("tool_call", call);
+    return h.service.links.get("pi-automode")({ ...call, toolCall: call }, {}, log);
+  };
+  expect((await review("read", { path: "/tmp/directory-fixture/a.txt" })).kind).toBe("allow");
+  expect((await review("write", { path: "/tmp/directory-fixture/a.txt", content: "a" })).kind).toBe("deny");
+  expect(seen.at(-1)).toEqual([]);
+  ledger.approveDirectory({ path: "/tmp/directory-fixture", access: "write" });
+  expect((await review("write", { path: "/tmp/directory-fixture/a.txt", content: "a" })).kind).toBe("allow");
+  ledger.clearSimilar();
+  ledger.restore(structuredClone(ledger.snapshot()));
+  expect((await review("write", { path: "/tmp/directory-fixture/new/b.txt", content: "b" })).kind).toBe("allow");
+  expect((await review("bash", { command: "git push origin HEAD" })).kind).toBe("deny");
+  expect(seen.at(-1)).toHaveLength(2);
+  for (const grant of ledger.grantList()) ledger.revoke(grant.key);
+  expect((await review("write", { path: "/tmp/directory-fixture/a.txt", content: "a" })).kind).toBe("deny");
+  expect(h.classifierCalls()).toBe(6);
 });

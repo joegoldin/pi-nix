@@ -1,3 +1,4 @@
+import { asForwardedToolCall } from "../engine/authority/forwarded-tool-call.ts";
 /**
  * Coexistence with `@gotgenes/pi-permission-system`.
  *
@@ -205,6 +206,8 @@ export function readChainActivation(
 export function eventFromDetails(
   details: Record<string, unknown>,
 ): ToolCallEvent | undefined {
+  const call = asForwardedToolCall(details.toolCall);
+  if (call) return { type: "tool_call", ...call } as ToolCallEvent;
   const facts = (details.payload as { request?: Record<string, unknown> } | undefined)
     ?.request;
   const toolName = str(details.toolName) ?? str(facts?.toolName);
@@ -239,6 +242,8 @@ type ToolCallHandler = (
 const SEEN_LIMIT = 32;
 
 export type PermissionChainOptions = {
+  wrapRequest?: (handler: ToolCallHandler, details: Record<string, unknown>) => ToolCallHandler;
+  wrapForwarded?: (handler: ToolCallHandler, details: Record<string, unknown>) => ToolCallHandler;
   /** Injected in tests so no test needs a real `globalThis` slot. */
   global?: typeof globalThis;
   /** Injected in tests. Production reads the permission system's own file. */
@@ -395,7 +400,7 @@ export function withPermissionChain(
 
     const authorize: AuthorizeFn = async (details, _query, log) => {
       try {
-        const cached = seen.get(str(details.toolCallId) ?? "");
+        const cached = details.forwarding ? undefined : seen.get(str(details.toolCallId) ?? "");
         const event = cached?.event ?? eventFromDetails(details);
         const ctx = cached?.ctx ?? lastCtx;
         if (event === undefined || ctx === undefined || toolCall === undefined) {
@@ -406,7 +411,9 @@ export function withPermissionChain(
           return { kind: "defer" };
         }
 
-        const result = await toolCall(event, wrapCtx(ctx));
+        let handler = details.forwarding && options.wrapForwarded ? options.wrapForwarded(toolCall, details) : toolCall;
+        if (options.wrapRequest) handler = options.wrapRequest(handler, details);
+        const result = await handler(event, wrapCtx(ctx));
         if (result?.block && (result as unknown as Record<symbol, unknown>)[INTERRUPTED]) {
           log.review(AUTHORIZER_NAME, {
             requestId: details.requestId,

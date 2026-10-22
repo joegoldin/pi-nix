@@ -12,6 +12,7 @@ type TranscriptEntry = {
   order: number;
   kind: "user" | "tool";
   text: string;
+  replyContext?: string;
 };
 
 export type ClassifierTranscriptBudgets = {
@@ -92,20 +93,30 @@ function collectTranscriptEntries(ctx: ExtensionContext): TranscriptEntry[] {
   // Native branch order keeps real user instructions and UI decisions in
   // sequence; a compaction summary is not a new operator authorization.
   const contextEntries = ctx.sessionManager.getBranch();
+  let replyContext: string | undefined;
 
   for (const [index, entry] of contextEntries.entries()) {
     if (entry.type !== "message") continue;
     const message = entry.message as { role?: string; content?: unknown };
     if (message.role === "user") {
       const text = flattenUserContent(message.content).trim();
-      if (text) entries.push({ index, order: 0, kind: "user", text });
+      if (text) entries.push({ index, order: 0, kind: "user", text, replyContext });
+      replyContext = undefined;
       continue;
     }
     if (message.role !== "assistant") continue;
+    const text = flattenUserContent(message.content).trim();
+    if (text) replyContext = text;
 
     for (const [order, toolCall] of collectAssistantToolCalls(
       message.content,
     ).entries()) {
+      // goal_wait can end a turn without an assistant text message. Preserve
+      // the assistant's request, never the tool result, as the reply's referent.
+      if (toolCall.name === "goal_wait" && toolCall.input && typeof toolCall.input === "object" &&
+        "waiting_for" in toolCall.input && toolCall.input.waiting_for === "user") {
+        replyContext = `goal_wait request: ${JSON.stringify(toolCall.input)}`;
+      }
       entries.push({
         index,
         order,
@@ -121,7 +132,7 @@ function collectTranscriptEntries(ctx: ExtensionContext): TranscriptEntry[] {
 function selectUserEntries(
   entries: TranscriptEntry[],
   maxTokens: number,
-): { selected: (TranscriptEntry & { truncated: boolean })[]; omitted: boolean } {
+): { selected: (TranscriptEntry & { truncated: boolean; contextOmitted: boolean })[]; omitted: boolean } {
   const users = entries.filter((entry) => entry.kind === "user");
   if (users.length === 0) return { selected: [], omitted: false };
 
@@ -131,8 +142,16 @@ function selectUserEntries(
     : maxTokens;
   const entryCap = Math.min(MAX_USER_ENTRY_TOKENS, anchorBudget);
   const rendered = users.map((entry) => {
-    const truncated = truncateToTokenCap(`User: ${entry.text}`, entryCap);
-    return { ...entry, text: truncated.text, truncated: truncated.truncated };
+    const user = `User: ${entry.text}`;
+    const paired = entry.replyContext
+      ? `Assistant reply context (not authorization): ${JSON.stringify(entry.replyContext)}
+${user}`
+      : user;
+    // Keep a proposal and its restrictions whole. If it cannot fit, preserve
+    // the user's words without turning a clipped proposal into broader consent.
+    const contextOmitted = !!entry.replyContext && approximateTokenCount(paired) > entryCap;
+    const truncated = truncateToTokenCap(contextOmitted ? user : paired, entryCap);
+    return { ...entry, text: truncated.text, truncated: truncated.truncated || contextOmitted, contextOmitted };
   });
   const selectedIndices = new Set<number>();
   let usedTokens = 0;
@@ -195,7 +214,7 @@ function selectToolEntries(
   };
 }
 
-/** Build classifier evidence from user text, UI decisions and assistant calls. */
+/** Build classifier evidence from user text, its reply context, UI decisions and calls. */
 export function buildClassifierTranscript(
   ctx: ExtensionContext,
   budgets: ClassifierTranscriptBudgets,
@@ -240,6 +259,7 @@ export function buildClassifierTranscript(
   }
   return [
     ...selected.map((entry) => entry.text),
+    ...(users.selected.some(entry => entry.contextOmitted) ? ["<assistant_reply_context_omitted />"] : []),
     ...(safeDecisions.length < decisions.length ? ["<operator_decisions_omitted />"] : []),
   ].join("\n");
 }

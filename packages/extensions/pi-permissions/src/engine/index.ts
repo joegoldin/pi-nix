@@ -1,3 +1,4 @@
+import type { ForwardedRequestServerDeps } from "./authority/forwarded-request-server";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getAgentDir, getPackageDir } from "@earendil-works/pi-coding-agent";
 import { warmBashParser } from "./access-intent/bash/parser";
@@ -70,6 +71,7 @@ import { getPermissionsService, type PermissionsService } from "./service";
 
 /** pi-permissions: what the /permissions menu is handed from this half. */
 export interface PermissionSystemHooks {
+  onForwardedDecision?: ForwardedRequestServerDeps["onDecision"];
   onSettings?: (controller: PermissionSystemConfigController) => void;
 }
 
@@ -214,6 +216,7 @@ export default function piPermissionSystemExtension(
   const reporter = new GateDecisionReporter(logger, pi.events);
 
   const requestServer = new ForwardedRequestServer({
+    onDecision: hooks.onForwardedDecision,
     forwardingDir: paths.forwardingDir,
     logger,
     policy: servingPolicy,

@@ -23,7 +23,7 @@ export interface Goal {
 	toolFreeRepeatCount: number;
 	lastToolFreeFingerprint?: string;
 	safetyPauseCause?: "continuation_limit" | "no_progress";
-	waiting?: { reason: string; resumeAt?: number; waitingFor?: "user" | "background" | "external" };
+	waiting?: { reason: string; resumeAt?: number; waitingFor?: "user" | "background" | "external"; backgroundTask?: string };
 	summary?: string;
 }
 
@@ -36,7 +36,8 @@ function escapeXml(text: string): string {
 }
 
 export const GOAL_UPDATE_GUIDANCE = `Write every user-visible goal description, progress update, recap, completion summary, blocker and wait reason for the person using Pi. Address the user as "you", not "the operator"; describe your own work as "I" rather than talking about "the agent".
-Lead with the current result or the next action, not an internal handoff. Separate verified progress from remaining work. If you need the user to act, say "Waiting for you" and put the exact action and how to report completion first. If a background task or external event is pending, name it and say "No action needed from you" when that is true. Say what happens next, but promise automatic continuation only when a completion notification or deadline is actually arranged.
+Lead with the current result or the next action, not an internal handoff. Separate verified progress from remaining work. If you need the user to act, say "Waiting for your action" and put the exact action and how to report completion first. If a background task or external event is pending, name it and say "No action needed from you" when that is true. Say what happens next, but promise automatic continuation only when a completion notification or deadline is actually arranged.
+For goal_wait, any required user action takes priority: set waiting_for to "user" even if a background task is running. A manual test waiting for you to activate a window, drag a control, approve a prompt or report a result is a user wait, not a background wait. For a mixed wait, put the exact user action and how to report completion in reason, and name the concurrent background task, what it is waiting for and what happens next in background_task. Both will be shown separately. The UI cannot infer whether you need help from a task being active; never claim no action is needed while requesting a manual step.
 Keep these updates concise and use plain language. Do not substitute scheduler jargon such as "arranged wake", "wake message" or "publication remains gated" for a direct explanation of what you are waiting for. Keep internal scheduling details in tool metadata unless the user is asking to debug them.`;
 
 export function rules(label: string): string {
@@ -213,7 +214,7 @@ export function fingerprint(text: string): string {
 
 export function waitLabel(waiting: NonNullable<Goal["waiting"]>): string {
 	switch (waiting.waitingFor) {
-		case "user": return "waiting for you";
+		case "user": return "waiting for your action";
 		case "background": return "waiting for a background task";
 		case "external": return "waiting for an external event";
 		default: return "waiting"; // Older saved goals did not record who must act.
@@ -221,9 +222,7 @@ export function waitLabel(waiting: NonNullable<Goal["waiting"]>): string {
 }
 
 export function waitMessage(waiting: NonNullable<Goal["waiting"]>): string {
-	const noAction = waiting.waitingFor === "background" || waiting.waitingFor === "external"
-		? "\n\nNo action needed from you." : "";
-	return `Goal ${waitLabel(waiting)}:\n${waiting.reason}${noAction}`;
+	return `Goal ${waitLabel(waiting)}:\n${waiting.reason}${waiting.backgroundTask ? `\n\nBackground task:\n${waiting.backgroundTask}` : ""}`;
 }
 
 /** The status-bar text for a goal, or undefined to clear it. */
@@ -246,7 +245,7 @@ export function statusText(goal: Goal | undefined, turnLimit: number | null, now
 		case "budget_limited":
 			return `budget ${formatTokens(goal.tokensUsed)}/${formatTokens(goal.tokenBudget ?? 0)} · ${automatic}`;
 		case "active":
-			if (goal.waiting) return `${waitLabel(goal.waiting)}${goal.waiting.waitingFor ? ": " : " "}${goal.waiting.reason.slice(0, 120)} · ${automatic}`;
+			if (goal.waiting) return `${waitLabel(goal.waiting)}${goal.waiting.waitingFor ? ": " : " "}${goal.waiting.reason.slice(0, 120)}${goal.waiting.backgroundTask ? ` · background: ${goal.waiting.backgroundTask.slice(0, 120)}` : ""} · ${automatic}`;
 			return goal.tokenBudget !== undefined
 				? `active ${formatTokens(goal.tokensUsed)}/${formatTokens(goal.tokenBudget)} · ${automatic}`
 				: `active ${formatDuration(elapsed)} · ${automatic}`;

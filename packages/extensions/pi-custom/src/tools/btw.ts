@@ -195,12 +195,11 @@ export class BtwView {
 		this.pageSize = Math.max(1, historyHeight);
 		this.maxTop = Math.max(0, transcript.length - historyHeight);
 		this.top = this.followTail ? this.maxTop : Math.min(this.top, this.maxTop);
-		const range = transcript.length && historyHeight ? `${this.top + 1}–${Math.min(transcript.length, this.top + historyHeight)}/${transcript.length}` : "";
 		// The composer is never part of the scrolling transcript, even on resize.
 		const input = this.input.render(width)[0] ?? "";
-		const status = theme.fg("muted", [this.status, range].filter(Boolean).join(" · "));
+		const status = theme.fg("muted", this.status);
 		const keys = theme.fg("dim", "Enter ask · Ctrl+r latest · Ctrl+Shift+r all");
-		const navigation = theme.fg("dim", "PgUp/PgDn or wheel scroll · Ctrl+Home/End · Esc close");
+		const navigation = theme.fg("dim", "Esc close");
 		const footer = height >= 4 ? [status, input, keys, navigation] : [input, keys, navigation].slice(0, height);
 		return [...transcript.slice(this.top, this.top + historyHeight), ...footer]
 			.map((line) => visibleWidth(line) > width ? truncateToWidth(line, width, "…") : line);

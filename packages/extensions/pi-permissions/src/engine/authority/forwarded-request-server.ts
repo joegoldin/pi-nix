@@ -72,6 +72,7 @@ export interface ServingPolicy {
 
 /** Constructor config for `ForwardedRequestServer`. */
 export interface ForwardedRequestServerDeps {
+  onDecision?: (details: PromptPermissionDetails, decision: PermissionPromptDecision) => void;
   forwardingDir: string;
   logger: DebugReviewLogger;
   /** Recorded-authority resolution for a forwarded `ForwardedAccessIntent`. */
@@ -109,12 +110,13 @@ export interface ForwardedRequestServerDeps {
  * gate surface the rule fired on (what the bounded-delegation checkpoint
  * excludes on).
  */
-function buildForwardedAskDetails(
+export function buildForwardedAskDetails(
   request: ForwardedPermissionRequest,
 ): PromptPermissionDetails {
   const payload = buildForwardedAskPayload(request);
   return {
     requestId: request.id,
+    toolCall: request.toolCall,
     source: request.source ?? "tool_call",
     agentName: request.requesterAgentName || null,
     payload,
@@ -123,6 +125,7 @@ function buildForwardedAskDetails(
     forwarding: {
       requesterAgentName: request.requesterAgentName || null,
       requesterSessionId: request.requesterSessionId || null,
+      requesterCwd: request.accessIntent?.requesterCwd,
     },
     // Carries the child's suggestion so LocalUserAuthorizer can offer the
     // whole-session grant scope; absent for a legacy/version-skew request.
@@ -217,6 +220,7 @@ function buildServedDecisionEvent(
  * 0008).
  */
 export class ForwardedRequestServer implements InboxProcessor {
+  private readonly onDecision: ForwardedRequestServerDeps["onDecision"];
   private readonly forwardingDir: string;
   private readonly logger: DebugReviewLogger;
   private readonly policy: ServingPolicy;
@@ -226,6 +230,7 @@ export class ForwardedRequestServer implements InboxProcessor {
   private readonly registry: SubagentSessionRegistry | undefined;
 
   constructor(deps: ForwardedRequestServerDeps) {
+    this.onDecision = deps.onDecision;
     this.forwardingDir = deps.forwardingDir;
     this.logger = deps.logger;
     this.policy = deps.policy;
@@ -324,6 +329,12 @@ export class ForwardedRequestServer implements InboxProcessor {
       request,
       forwardedPermissionLogDetails,
     );
+
+    try {
+      this.onDecision?.(buildForwardedAskDetails(request), decision);
+    } catch (error) {
+      logPermissionForwardingWarning(this.logger, "Could not record forwarded decision in the menu", error);
+    }
 
     this.recordForwardedDecision(
       request,

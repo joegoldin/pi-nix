@@ -16,7 +16,9 @@ in
   mcp-adapter = import ./mcp-adapter-test.nix args;
   queued-messages = import ./queued-messages-test.nix args;
   editor-input = import ./editor-input-test.nix args;
+  extension-dialogs = import ./extension-dialogs-test.nix args;
   subagent-host-peers = import ./subagent-host-peers-test.nix args;
+  subagent-expanded-output = import ./subagent-expanded-output-test.nix args;
   fast-mode = import ./fast-mode-test.nix args;
   user-message-timestamps = import ./user-message-timestamps-test.nix args;
   pi-lens-grammars = import ./pi-lens-grammars-test.nix args;

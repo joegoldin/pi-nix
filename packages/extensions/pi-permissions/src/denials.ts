@@ -1,3 +1,4 @@
+import { directoryScopeLabel, type DirectoryAccess, type DirectoryApproval } from "./directory-access.ts";
 // What was blocked, and what you have since allowed. index.ts persists the
 // ledger in the session; the prompt and /permissions menu both use it.
 //
@@ -6,7 +7,7 @@
 // intent, and can be revoked from the same menu.
 
 import { resolve } from "node:path";
-import { resolvePathForPolicy, resolveToolInputPath } from "./auto/paths.ts";
+import { extractInputPath, isInside, resolvePathForPolicy, resolveToolInputPath } from "./auto/paths.ts";
 import { canonicalJson } from "./ui/call-label.ts";
 import type { ScenarioApproval } from "./auto/types.ts";
 
@@ -46,7 +47,17 @@ export function approvalScope(toolName: string, input: unknown, cwd: string): Ap
 
 export type DenialState = "open" | "approved" | "dismissed";
 
+export interface PermissionOwner {
+	sessionId: string;
+	agentName: string;
+	cwd?: string;
+}
+
 export interface Denial {
+	directories?: DirectoryAccess[];
+	owner?: PermissionOwner;
+	incomplete?: boolean;
+	policyDenied?: boolean;
 	id: string;
 	/** When it was blocked, epoch milliseconds. */
 	at: number;
@@ -59,6 +70,8 @@ export interface Denial {
 }
 
 export interface Grant {
+	directory?: DirectoryAccess;
+	owner?: PermissionOwner;
 	key: string;
 	toolName: string;
 	input: unknown;
@@ -76,8 +89,12 @@ export interface PermissionRecord {
 /** How many denials are kept, newest first; older ones drop off. */
 export const DENIAL_LIMIT = 50;
 
-export function grantKey(toolName: string, input: unknown): string {
-	return `${toolName}\u0000${canonicalJson(input ?? {})}`;
+export function grantKey(toolName: string, input: unknown, owner?: PermissionOwner): string {
+	return ownerKey(`${toolName}\u0000${canonicalJson(input ?? {})}`, owner);
+}
+
+function ownerKey(key: string, owner?: PermissionOwner): string {
+	return owner ? `child\u0000${owner.sessionId}\u0000${owner.cwd ?? ""}\u0000${key}` : key;
 }
 
 export class PermissionLedger {
@@ -105,13 +122,20 @@ export class PermissionLedger {
 	/** Menu shell approvals inform classification; legacy/non-shell grants stay exact. */
 	approve(id: string, cwd?: string): Denial | undefined {
 		const denial = this.denials.find((d) => d.id === id);
-		if (!denial) return undefined;
-		const key = grantKey(denial.toolName, denial.input);
-		const scoped = cwd && (denial.toolName === "bash" || denial.toolName === "bg_run")
-			? this.approveSimilar(denial.toolName, denial.input, cwd) : undefined;
-		if (!scoped && !this.grants.has(key)) this.grants.set(key, { key, toolName: denial.toolName, input: denial.input, at: this.now() });
+		if (!denial || denial.incomplete || denial.policyDenied || (denial.owner && !denial.owner.sessionId)) return undefined;
+		const key = grantKey(denial.toolName, denial.input, denial.owner);
+		const directories = cwd ? denial.directories : undefined;
+		if (directories?.length) {
+			for (const access of directories) this.approveDirectory(access, denial.owner);
+			denial.state = "approved";
+			return denial;
+		}
+		const directory = denial.owner ? denial.owner.cwd : cwd;
+		const scoped = cwd && directory && (denial.toolName === "bash" || denial.toolName === "bg_run")
+			? this.approveSimilar(denial.toolName, denial.input, directory, denial.owner) : undefined;
+		if (!scoped && !this.grants.has(key)) this.grants.set(key, { key, toolName: denial.toolName, input: denial.input, at: this.now(), ...(denial.owner ? { owner: denial.owner } : {}) });
 		for (const d of this.denials) {
-			if (d.state === "open" && grantKey(d.toolName, d.input) === key) d.state = "approved";
+			if (d.state === "open" && grantKey(d.toolName, d.input, d.owner) === key) d.state = "approved";
 		}
 		return denial;
 	}
@@ -121,29 +145,56 @@ export class PermissionLedger {
 		if (denial?.state === "open") denial.state = "dismissed";
 	}
 
-	isGranted(toolName: string, input: unknown): boolean {
-		return this.grants.has(grantKey(toolName, input));
+	isGranted(toolName: string, input: unknown, owner?: PermissionOwner): boolean {
+		return this.grants.has(grantKey(toolName, input, owner));
 	}
 
-	approveSimilar(toolName: string, input: unknown, cwd: string): Grant | undefined {
-		const scope = approvalScope(toolName, input, cwd);
-		if (!scope) return undefined;
-		const grant = { key: scope.key, toolName, input: structuredClone(input), at: this.now(), scope };
-		this.grants.set(scope.key, grant);
+	approveDirectory(directory: DirectoryAccess, owner?: PermissionOwner): Grant | undefined {
+		if (owner && !owner.sessionId) return undefined;
+		const key = ownerKey(`directory\u0000${directory.access}\u0000${directory.path}`, owner);
+		const grant: Grant = { key, toolName: "directory", input: { ...directory }, directory: { ...directory }, at: this.now(),
+			scope: { key, label: directoryScopeLabel([directory]) }, ...(owner ? { owner: { ...owner } } : {}) };
+		this.grants.set(key, grant);
 		return grant;
 	}
 
-	isSimilarlyGranted(toolName: string, input: unknown, cwd: string): boolean {
+	/** Parent conversation access flows down; a child-only approval never flows up or sideways. */
+	directoryApprovals(owner?: PermissionOwner, call?: { toolName: string; input: Record<string, unknown>; cwd: string }): DirectoryApproval[] {
+		return this.grantList().flatMap(grant => {
+			if (!grant.directory || !grant.scope) return [];
+			if (call && ["read", "write", "edit", "grep", "find", "ls"].includes(call.toolName)) {
+				const raw = extractInputPath(call.toolName, call.input);
+				const path = raw === undefined ? undefined : resolveToolInputPath(call.toolName, call.cwd, raw);
+				const canonical = path === undefined ? undefined : resolvePathForPolicy(path);
+				if (!canonical || !isInside(canonical, grant.directory.path)) return [];
+				if ((call.toolName === "write" || call.toolName === "edit") && grant.directory.access !== "write") return [];
+			}
+			if (grant.owner && (grant.owner.sessionId !== owner?.sessionId || grant.owner.cwd !== owner?.cwd)) return [];
+			return [{ kind: "directory" as const, ...grant.directory, scope: grant.scope.label, at: grant.at }];
+		});
+	}
+
+	approveSimilar(toolName: string, input: unknown, cwd: string, owner?: PermissionOwner): Grant | undefined {
+		if (owner && !owner.sessionId) return undefined;
 		const scope = approvalScope(toolName, input, cwd);
-		return !!scope && this.grants.has(scope.key);
+		if (!scope) return undefined;
+		const grant = { key: ownerKey(scope.key, owner), toolName, input: structuredClone(input), at: this.now(), scope, ...(owner ? { owner } : {}) };
+		this.grants.set(grant.key, grant);
+		return grant;
+	}
+
+	isSimilarlyGranted(toolName: string, input: unknown, cwd: string, owner?: PermissionOwner): boolean {
+		const scope = approvalScope(toolName, input, cwd);
+		return !!scope && this.grants.has(ownerKey(scope.key, owner));
 	}
 
 	/** Only newly displayed shell scenarios can inform review of different commands. */
-	scenarioApprovals(toolName: string, cwd: string): ScenarioApproval[] {
+	scenarioApprovals(toolName: string, cwd: string, owner?: PermissionOwner): ScenarioApproval[] {
 		if (toolName !== "bash" && toolName !== "bg_run") return [];
 		const directory = resolvePathForPolicy(resolve(cwd)) ?? resolve(cwd);
 		const approvals: ScenarioApproval[] = [];
 		for (const grant of this.grantList()) {
+			if (grant.owner?.sessionId !== owner?.sessionId) continue;
 			const scope = grant.scope;
 			if (!scope?.scenario || scope.scenario.cwd !== directory) continue;
 			if (grant.toolName !== "bash" && grant.toolName !== "bg_run") continue;
@@ -155,7 +206,7 @@ export class PermissionLedger {
 	clearSimilar(): boolean {
 		let changed = false;
 		for (const [key, grant] of this.grants) {
-			if (grant.scope) {
+			if (grant.scope && !grant.directory) {
 				this.grants.delete(key);
 				changed = true;
 			}

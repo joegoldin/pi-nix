@@ -36,6 +36,15 @@ let
       promptFragment = null;
       # recheck's native regex validator links against zlib on Linux.
       extraBuildInputs = lib.optionals (name == "pi-mcp-adapter") [ pkgs.zlib ];
+      # Receipts need the full message; only status/history previews should be
+      # clipped. Preserve upstream secret redaction and terminal-control safety.
+      patchPhaseExtra = lib.optionalString (name == "pi-subagents") ''
+        substituteInPlace src/runs/background/steering.js \
+          --replace-fail 'import { previewDisplayText }' 'import { previewDisplayText, safeTerminalText }' \
+          --replace-fail 'const preview = steeringMessagePreview(message);' 'const preview = safeTerminalText(redactSecretValues(message));'
+        substituteInPlace src/tui/render.js \
+          --replace-fail 'if (!text.includes("\n"))' 'if (!text.includes("\n") && !options.expanded)'
+      '';
     };
   # First-party extensions. No pin, no lockfile: the source is in this repo and
   # neither package has a runtime dependency, so mkPiExtension's local-src arm

@@ -1,3 +1,4 @@
+import { asForwardedToolCall } from "../../authority/forwarded-tool-call";
 import type { AccessPath } from "../../access-intent/access-path";
 import type { BashProgram } from "../../access-intent/bash/program";
 import type { TokenEffect } from "../../access-intent/effect";
@@ -149,6 +150,7 @@ export function describeBashPathGate(
     payload,
     sessionApproval: SessionApproval.forPatterns(surface, patterns),
     promptDetails: {
+      toolCall: asForwardedToolCall(tcc),
       source: "tool_call",
       agentName: tcc.agentName,
       toolCallId: tcc.toolCallId,

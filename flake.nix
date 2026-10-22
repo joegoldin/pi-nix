@@ -96,6 +96,7 @@
               ./coding-agent/user-message-timestamps.patch
               ./coding-agent/native-queue-controls.patch
               ./coding-agent/editor-input.patch
+              ./coding-agent/extension-dialogs.patch
             ];
           };
 

@@ -372,7 +372,9 @@ describe("processInbox — recorded-authority resolution", () => {
     const accessIntent = makeForwardedAccessIntent({
       matchValues: ["git push"],
     });
+    const toolCall = { toolName: "bash", toolCallId: "child-push", input: { command: "git push", timeout: 60 } };
     temp.writeRequest({
+      toolCall,
       id: "req-ask",
       source: "tool_call",
       surface: "bash",
@@ -411,6 +413,7 @@ describe("processInbox — recorded-authority resolution", () => {
     expect(resolve).toHaveBeenCalledWith(accessIntent);
     expect(escalate).toHaveBeenCalledWith({
       requestId: "req-ask",
+      toolCall,
       source: "tool_call",
       agentName: "Explore",
       surface: "bash",
@@ -418,6 +421,7 @@ describe("processInbox — recorded-authority resolution", () => {
       forwarding: {
         requesterAgentName: "Explore",
         requesterSessionId: "child-session",
+        requesterCwd: accessIntent.requesterCwd,
       },
       accessIntent: {
         surface: "bash",

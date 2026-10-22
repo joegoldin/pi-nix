@@ -28,7 +28,7 @@ import type {
   ClassifyResult,
   EffectiveClassifierReasoningLevel,
   EffectiveConfig,
-  ScenarioApproval,
+  VerifiedApproval,
 } from "./types.ts";
 
 export function buildClassifierPrompt(config: EffectiveConfig): string {
@@ -383,7 +383,7 @@ export function serializeClassifierAction(
 export function buildClassifierContext(
   loadedContext: string,
   transcript: string,
-  approvals: readonly ScenarioApproval[] = [],
+  approvals: readonly VerifiedApproval[] = [],
 ): string {
   // Reference commands remain JSON data, including any apparent section delimiters.
   const scopes = JSON.stringify(approvals).replaceAll("<", "\\u003c");

@@ -117,7 +117,7 @@ function waitingGoal(status = "active", resumeAt?: number) {
 	} as never, () => ({ goalTurnLimit: 100, goalNoProgressTurns: 10 }) as never);
 	const emit = (name: string, event = {}) => handlers.get(name)?.(event, ctx);
 	emit("session_start");
-	return { emit, ctx, sent, tools, commands, notices, saved: () => saved, wait: (reason = "Build B completion", waiting_for: string | undefined = "background") => tools.get("goal_wait").execute("call", { goal_id: initial.id, reason, waiting_for }, undefined, undefined, ctx) };
+	return { emit, ctx, sent, tools, commands, notices, saved: () => saved, wait: (reason = "Build B completion", waiting_for: string | undefined = "background", background_task?: string) => tools.get("goal_wait").execute("call", { goal_id: initial.id, reason, waiting_for, background_task }, undefined, undefined, ctx) };
 }
 
 test("a background wake consumes the old wait so the new run can wait again", async () => {
@@ -205,7 +205,7 @@ test("a queued wake between turns in the same run consumes the previous wait", a
 
 test("wait recaps identify who must act, persist that distinction, and keep it in /goal status", async () => {
 	for (const [kind, label, reason] of [
-		["user", "Goal waiting for you", "Run the signing command from your clipboard, then paste the notarization result here."],
+		["user", "Goal waiting for your action", "Run the signing command from your clipboard, then paste the notarization result here."],
 		["background", "Goal waiting for a background task", "The Mac build is running. I'll continue when it finishes."],
 		["external", "Goal waiting for an external event", "The service is recovering. I'll check once at the scheduled time."],
 	]) {
@@ -216,8 +216,7 @@ test("wait recaps identify who must act, persist that distinction, and keep it i
 			expect(result.content[0].text).toStartWith(label);
 			expect(result.content[0].text).toContain(reason);
 			expect(h.saved().waiting.waitingFor).toBe(kind);
-			if (kind === "background") expect(result.content[0].text).toContain("No action needed from you");
-			if (kind === "user") expect(result.content[0].text).not.toContain("No action needed from you");
+			expect(result.content[0].text).not.toContain("No action needed from you");
 			await h.commands.get("goal").handler("status", h.ctx);
 			expect(h.notices.at(-1)).toContain(label);
 			expect(h.notices.at(-1)).toContain(reason);
@@ -230,9 +229,52 @@ test("new waits require an ownership category and user-facing tool field guidanc
 	try {
 		h.emit("before_agent_start", { messageType: "custom" });
 		expect(h.tools.get("goal_wait").parameters.required).toContain("waiting_for");
+		expect(h.tools.get("goal_wait").parameters.properties.waiting_for.description).toContain("Any required user action takes priority");
+		expect(h.tools.get("goal_wait").parameters.properties.reason.description).toContain("only the wait heading");
 		expect(h.tools.get("goal_wait").parameters.properties.waiting_for.anyOf.map((item: any) => item.const)).toEqual(["user", "background", "external"]);
 		for (const [name, field] of [["goal_wait", "reason"], ["goal_blocked", "reason"], ["goal_complete", "summary"]]) {
 			expect(h.tools.get(name).parameters.properties[field].description).toContain('"you"');
 		}
 	} finally { h.emit("session_shutdown"); }
+});
+
+test("a mislabeled manual test wait never gains a no-action notice in its result or status", async () => {
+	const h = waitingGoal();
+	const reason = "The manual Mac retry is starting. Activate its temporary window and drag Move onto Move destination.";
+	try {
+		h.emit("before_agent_start", { messageType: "custom" });
+		const result = await h.wait(reason, "background");
+		expect(result.terminate).toBe(true);
+		expect(result.content[0].text).toBe(`Goal waiting for a background task:\n${reason}`);
+		await h.commands.get("goal").handler("status", h.ctx);
+		expect(h.notices.at(-1)).toContain(reason);
+		expect(h.notices.at(-1)).not.toContain("No action needed from you");
+	} finally { h.emit("session_shutdown"); }
+});
+
+test("mixed waits persist and display both the user action and the background task", async () => {
+	const h = waitingGoal();
+	try {
+		h.emit("before_agent_start", { messageType: "custom" });
+		const result = await h.wait("Drag Move, then tell me when done.", "user", "The Mac retry is waiting for your drag; I’ll inspect its trace afterwards.");
+		expect(result.terminate).toBe(true);
+		expect(result.content[0].text).toContain("Goal waiting for your action:\nDrag Move");
+		expect(result.content[0].text).toContain("Background task:\nThe Mac retry");
+		expect(h.saved().waiting.backgroundTask).toBe(result.details.background_task);
+		await h.commands.get("goal").handler("status", h.ctx);
+		expect(h.notices.at(-1)).toContain("Background task:\nThe Mac retry");
+	} finally { h.emit("session_shutdown"); }
+});
+
+test("mixed wait metadata requires a user wait and a named task without entering wait on rejection", async () => {
+	for (const [kind, task] of [["background", "build"], ["external", "build"], ["user", "   "]]) {
+		const h = waitingGoal();
+		try {
+			h.emit("before_agent_start", { messageType: "custom" });
+			const result = await h.wait("Details", kind, task);
+			expect(result.details.rejected).toBe("background_task requires waiting_for=user and a non-empty task description");
+			expect(result.terminate).toBeUndefined();
+			expect(h.saved().waiting).toBeUndefined();
+		} finally { h.emit("session_shutdown"); }
+	}
 });

@@ -1,3 +1,4 @@
+import { coordinationKind } from "./coordination.ts";
 import { realpathSync, statSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -74,7 +75,7 @@ import type {
   DecisionKind,
   DenialRecord,
   EffectiveConfig,
-  ScenarioApproval,
+  VerifiedApproval,
 } from "./types.ts";
 import { safeJson, truncateMiddle } from "./utils.ts";
 
@@ -125,7 +126,7 @@ function projectIsTrusted(
 export type PiAutomodeOptions = {
   /** Shared session ledger, owned by pi-permissions rather than this classifier. */
   approvals?: {
-    context?(toolName: string, cwd: string): readonly ScenarioApproval[];
+    context?(toolName: string, cwd: string, input: Record<string, unknown>): readonly VerifiedApproval[];
     scope(toolName: string, input: unknown, cwd: string): string | undefined;
     has(toolName: string, input: unknown, cwd: string): boolean;
     remember(toolName: string, input: unknown, cwd: string): void;
@@ -801,6 +802,12 @@ export function createPiAutomode(options: PiAutomodeOptions = {}) {
       if (isOwnedInspection && !askRequiresClassifier) return undefined;
       if (isOwnedInspection && !deterministicOnly) state.checkedActions += 1;
 
+      const coordination = coordinationKind(event.toolName, input);
+      if (!deterministicOnly && !askRequiresClassifier && coordination &&
+          (coordination === "coordination" || !cfg.classifyReadOnlyTools)) {
+        return allow(ctx, coordination, `Native ${coordination} tool: ${event.toolName}`, event.toolName, summary, logCtx);
+      }
+
       // Deterministic path gate for file tools.
       //
       // `deniedPaths` always applies: a matching path is hard-denied before any
@@ -968,7 +975,7 @@ export function createPiAutomode(options: PiAutomodeOptions = {}) {
         cfg,
         serializeClassifierAction(event.toolName, input),
         loadedContext,
-        canReuseApproval ? options.approvals?.context?.(event.toolName, ctx.cwd) ?? [] : [],
+        canReuseApproval ? options.approvals?.context?.(event.toolName, ctx.cwd, input) ?? [] : [],
       );
       logClassifierIo(decision, logCtx);
       if (decision.decision === "allow") {

@@ -1,3 +1,4 @@
+import type { DirectoryApproval } from "../directory-access.ts";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
@@ -151,6 +152,7 @@ export type DecisionKind =
   | DenialRecord["kind"]
   | "permissions.allow"
   | "read-only"
+  | "coordination"
   | "inside-working-directory"
   /** The user allowed it at the prompt a classifier block raised (pi-nix patch). */
   | "user";
@@ -224,10 +226,12 @@ export type ScenarioApproval = {
   at: number;
 };
 
+export type VerifiedApproval = ScenarioApproval | DirectoryApproval;
+
 export type ClassifyAction = (
   ctx: ExtensionContext,
   config: EffectiveConfig,
   action: string,
   loadedContext: string,
-  approvals?: readonly ScenarioApproval[],
+  approvals?: readonly VerifiedApproval[],
 ) => Promise<ClassifyResult>;

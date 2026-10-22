@@ -283,3 +283,54 @@ for (const expanded of [false, true]) it(`capital A grants exact session access 
 	restored.revoke(restored.grantList()[0]!.key);
 	expect(restored.isGranted("bash", input)).toBe(false);
 });
+
+it("menu approval persists child ownership and tells the parent to route the retry", async () => {
+  const s = session();
+  const ledger = new PermissionLedger();
+  const owner = { sessionId: "worker-session", agentName: "integration-worker", cwd: "/tmp/child" };
+  ledger.record({ toolCallId: "child-call", toolName: "bash", input: { command: "bun test" }, reason: "needs approval", owner });
+  const branch = [{ type: "custom", customType: "pi-permissions", data: ledger.snapshot() }];
+  const ctx = {
+    cwd: "/tmp/parent", hasUI: false, isIdle: () => true,
+    sessionManager: { getBranch: () => branch, getSessionId: () => "menu-parent" },
+  };
+  piPermissions(s.api());
+  await s.handlers.get("session_start")!.at(-1)!({}, ctx);
+  await s.commands.get("permissions")!.handler("approve last", ctx);
+  expect(s.sent[0].message.content).toContain("session worker-session");
+  expect(s.sent[0].message.content).toContain("do not execute this call in the parent");
+  const restored = new PermissionLedger();
+  restored.restore(s.entries.at(-1)?.data as PermissionRecord);
+  expect(restored.scenarioApprovals("bash", owner.cwd, owner)).toHaveLength(1);
+  expect(restored.scenarioApprovals("bash", owner.cwd)).toEqual([]);
+  expect(restored.scenarioApprovals("bash", owner.cwd, { ...owner, sessionId: "sibling" })).toEqual([]);
+});
+
+it("menu directory approvals survive new user input and session restoration without an executable override", async () => {
+  const s = session();
+  const ledger = new PermissionLedger();
+  const input = { path: "/tmp/directory-fixture/a.txt", content: "new" };
+  ledger.record({ toolName: "write", toolCallId: "directory", input, reason: "Needs access", directories: [{ path: "/tmp/directory-fixture", access: "write" }] });
+  s.entries.push({ type: "custom", customType: "pi-permissions", data: ledger.snapshot() });
+  let rendered = "";
+  const ctx = {
+    cwd: "/tmp", mode: "tui", hasUI: true, isIdle: () => true,
+    sessionManager: { getBranch: () => s.entries },
+    ui: { notify() {}, custom: (factory: Function) => new Promise((resolve) => {
+      const view = factory({ terminal: { rows: 40 }, requestRender() {} }, { fg: (_slot: string, text: string) => text, bold: (text: string) => text }, {}, resolve);
+      rendered = view.render(100).join("\n");
+      view.handleInput("\r"); view.handleInput("\x1b");
+    }) },
+  };
+  piPermissions(s.api());
+  s.handlers.get("session_start")!.at(-1)!({}, ctx);
+  await s.commands.get("permissions")!.handler("", ctx);
+  expect(rendered).toContain("Read/write access under /tmp/directory-fixture");
+  expect(rendered.replaceAll("│", "")).toMatch(/for this conversation, until\s+revoked/);
+  s.handlers.get("input")![0]!({ source: "interactive" }, ctx);
+  const restored = new PermissionLedger();
+  restored.restore(s.entries.at(-1)!.data as PermissionRecord);
+  expect(restored.directoryApprovals()).toHaveLength(1);
+  expect(restored.isGranted("write", input)).toBe(false);
+  expect(s.sent[0]!.message.content).toContain("Read/write access under /tmp/directory-fixture");
+});

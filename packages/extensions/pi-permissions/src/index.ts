@@ -1,3 +1,6 @@
+import { AsyncLocalStorage } from "node:async_hooks";
+import { directoryScopeLabel, requestedDirectories } from "./directory-access.ts";
+import { createForwardedGate } from "./forwarded-gate.ts";
 // pi-permissions: permissions and auto mode for pi in one extension.
 //
 // Two engines, vendored (see ATTRIBUTION.md): engine/ is pi-permission-system,
@@ -116,6 +119,9 @@ export default function piPermissions(pi: ExtensionAPI): void {
 
 	const ledger = new PermissionLedger();
 	const persist = () => pi.appendEntry(LEDGER_ENTRY, ledger.snapshot());
+	const forwarded = createForwardedGate(ledger, persist);
+	const requestDetails = new AsyncLocalStorage<Record<string, unknown>>();
+	const directories = (cwd: string) => requestedDirectories(requestDetails.getStore(), cwd);
 	const clearSimilar = () => {
 		if (ledger.clearSimilar()) persist();
 	};
@@ -136,7 +142,9 @@ export default function piPermissions(pi: ExtensionAPI): void {
 			if (!result?.block || !event.toolName) return result;
 			const reason = result.reason ?? "";
 			if (wasInterruption(reason)) return result;
-			ledger.record({ toolCallId: event.toolCallId ?? "", toolName: event.toolName, input: event.input ?? {}, reason });
+			if (!ledger.open().some(d => !d.owner && d.toolCallId === event.toolCallId && d.toolName === event.toolName)) {
+				ledger.record({ toolCallId: event.toolCallId ?? "", toolName: event.toolName, input: event.input ?? {}, reason });
+			}
 			persist();
 			// Only where someone can open the menu; a headless session's agent
 			// would be told of a way out it cannot use.
@@ -169,16 +177,29 @@ export default function piPermissions(pi: ExtensionAPI): void {
 	withPermissionChain(createPiAutomode({
 		onControls: (controls) => (autoControls = controls),
 		approvals: {
-			context: (toolName, cwd) => ledger.scenarioApprovals(toolName, cwd),
-			scope: (toolName, input, cwd) => approvalScope(toolName, input, cwd)?.label,
-			has: (toolName, input, cwd) => ledger.isSimilarlyGranted(toolName, input, cwd),
+			context: (toolName, cwd, input) => [...ledger.scenarioApprovals(toolName, cwd, forwarded.owner()), ...ledger.directoryApprovals(forwarded.owner(), { toolName, input, cwd })],
+			scope: (toolName, input, cwd) => directories(cwd).length ? directoryScopeLabel(directories(cwd)) : approvalScope(toolName, input, cwd)?.label,
+			has: (toolName, input, cwd) => ledger.isSimilarlyGranted(toolName, input, cwd, forwarded.owner()),
 			remember: (toolName, input, cwd) => {
-				ledger.approveSimilar(toolName, input, cwd);
+				const requested = directories(cwd);
+				if (requested.length) for (const directory of requested) ledger.approveDirectory(directory, forwarded.owner());
+				else ledger.approveSimilar(toolName, input, cwd, forwarded.owner());
 				persist();
 			},
 		},
-	}))(gated);
-	permissionSystem(gated, { onSettings: (controller) => (settingsController = controller) });
+	}), {
+		wrapForwarded: forwarded.wrap,
+		wrapRequest: (handler, details) => (event, ctx) => requestDetails.run(details, async () => {
+			const result = await handler(event, ctx);
+			const requested = directories(ctx.cwd);
+			if (!details.forwarding && result?.block && requested.length && !wasInterruption(result.reason ?? "")) {
+				ledger.record({ toolCallId: event.toolCallId, toolName: event.toolName, input: event.input, reason: result.reason ?? "", directories: requested });
+				persist();
+			}
+			return result;
+		}),
+	})(gated);
+	permissionSystem(gated, { onForwardedDecision: forwarded.recordDecision, onSettings: (controller) => (settingsController = controller) });
 
 	function restoreLedger(ctx: ExtensionContext): void {
 		const entries = ctx.sessionManager.getBranch() as { type?: string; customType?: string; data?: unknown }[];
@@ -201,7 +222,17 @@ export default function piPermissions(pi: ExtensionAPI): void {
 	});
 
 	function approve(denial: Denial, ctx: ExtensionContext, exact = false): void {
-		const scope = !exact && (denial.toolName === "bash" || denial.toolName === "bg_run") ? approvalScope(denial.toolName, denial.input, ctx.cwd) : undefined;
+		if (denial.policyDenied) {
+			ctx.ui.notify("An explicit permission rule denied this child call. Menu approval cannot override that rule.", "warning");
+			return;
+		}
+		if (denial.incomplete || (denial.owner && !denial.owner.sessionId)) {
+			ctx.ui.notify("This child request lacks complete call metadata. Retry it with the updated child runtime before approving.", "warning");
+			return;
+		}
+		const cwd = denial.owner?.cwd ?? ctx.cwd;
+		const directoryScope = !exact && denial.directories?.length ? { label: directoryScopeLabel(denial.directories) } : undefined;
+		const scope = directoryScope ?? (!exact && (!denial.owner || denial.owner.cwd) && (denial.toolName === "bash" || denial.toolName === "bg_run") ? approvalScope(denial.toolName, denial.input, cwd) : undefined);
 		ledger.approve(denial.id, exact ? undefined : ctx.cwd);
 		persist();
 		const { title, target } = callLabel(denial.toolName, denial.input);
@@ -213,9 +244,11 @@ export default function piPermissions(pi: ExtensionAPI): void {
 					`The user approved a call that was blocked earlier: ${title}(${target}). ` +
 					(scope ? `Approved scope: ${scope.label}. Deterministic restrictions still apply; variants are reviewed by the auto classifier. ` :
 					`It is now allowed for the rest of this session, exactly as written (tool "${denial.toolName}", input ${input.length > 4000 ? `${input.slice(0, 4000)}…` : input}). `) +
-					"If it is still needed, retry it now.",
+					(denial.owner
+						? `This approval belongs only to child ${denial.owner.agentName} (session ${denial.owner.sessionId}), not to you or any sibling. Tell that child to retry if still needed; do not execute this call in the parent.`
+						: "If it is still needed, retry it now."),
 				display: true,
-				details: { toolName: denial.toolName, input: denial.input },
+				details: { toolName: denial.toolName, input: denial.input, owner: denial.owner },
 			},
 			ctx.isIdle() ? { triggerTurn: true } : { deliverAs: "steer" },
 		);

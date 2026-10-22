@@ -1,3 +1,4 @@
+import type { ForwardedToolCall } from "./forwarded-tool-call";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { DebugReviewLogger } from "../logging/session-logger";
@@ -78,6 +79,7 @@ function getContextSystemPrompt(ctx: ForwarderContext): string | undefined {
  * relayed value instead of three positional optionals.
  */
 interface ForwardedRequestFacts {
+  toolCall?: ForwardedToolCall;
   /**
    * The requester's own permission request id, adopted as the forwarded
    * request's id so one id runs from the child's gate to the serving node's
@@ -204,6 +206,7 @@ export class ParentAuthorizer implements TerminalAuthorizer {
     return this.waitForForwardedApproval(this.ctx, {
       requestId: details.requestId,
       payload: details.payload,
+      toolCall: details.toolCall,
       display: {
         source: uiPrompt.source,
         surface: uiPrompt.surface,
@@ -332,6 +335,7 @@ export class ParentAuthorizer implements TerminalAuthorizer {
       targetSessionId,
       requesterAgentName,
       payload: facts.payload,
+      toolCall: facts.toolCall,
       ...(facts.display
         ? {
             source: facts.display.source,

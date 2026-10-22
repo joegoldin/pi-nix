@@ -1,3 +1,4 @@
+import type { ForwardedToolCall } from "./forwarded-tool-call";
 import type { ReviewLogger } from "../logging/session-logger";
 import type { PromptPayload } from "../presentation/prompt-payload";
 import { renderReviewLogFacts } from "../presentation/review-log-renderer";
@@ -40,6 +41,7 @@ function recordedGrantWidth(
  * the prompter layer free of an events-module import.
  */
 export interface ForwardedAskProvenance {
+  requesterCwd?: string;
   requesterAgentName: string | null;
   requesterSessionId: string | null;
 }
@@ -59,6 +61,7 @@ export interface PromptPermissionDetails {
    */
   payload: PromptPayload;
   toolCallId?: string;
+  toolCall?: ForwardedToolCall;
   toolName?: string;
   skillName?: string;
   path?: string;

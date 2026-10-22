@@ -69,8 +69,9 @@ describe("prompts", () => {
 			resumePrompt(goal(), "blocked"), editedPrompt(goal()), waitingResumePrompt(goal(), "build"), BUDGET_WRAP_UP]) {
 			expect(prompt).toContain('Address the user as "you"');
 			expect(prompt).toContain('not "the operator"');
-			expect(prompt).toContain("Waiting for you");
+			expect(prompt).toContain("Waiting for your action");
 			expect(prompt).toContain("No action needed from you");
+			expect(prompt).toContain('set waiting_for to "user" even if a background task is running');
 		}
 	});
 	it("keeps multi-step goals in concrete todos across kickoff, continuation and resume", () => {
@@ -131,9 +132,27 @@ describe("status", () => {
 	});
 
 	it("distinguishes user action from background and external waits in the footer", () => {
-		for (const [waitingFor, label] of [["user", "waiting for you"], ["background", "waiting for a background task"], ["external", "waiting for an external event"]] as const) {
+		for (const [waitingFor, label] of [["user", "waiting for your action"], ["background", "waiting for a background task"], ["external", "waiting for an external event"]] as const) {
 			expect(statusText(goal({ waiting: { reason: "Details", waitingFor } }), null)).toStartWith(label);
 		}
 		expect(waitMessage({ reason: "Please reply" })).toBe("Goal waiting:\nPlease reply");
 	});
+});
+
+it("does not invent reassurance when a background wait still requests manual interaction", () => {
+	const reason = "The manual Mac retry is starting. Activate its temporary window and drag Move onto Move destination. I’ll inspect the trace when it finishes.";
+	for (const waitingFor of ["background", "external", "user"] as const) {
+		expect(waitMessage({ reason, waitingFor })).toContain(reason);
+		expect(waitMessage({ reason, waitingFor })).not.toContain("No action needed from you");
+	}
+	expect(waitMessage({ reason: "The build is running. No action needed from you.", waitingFor: "background" }).match(/No action needed from you/g)).toHaveLength(1);
+});
+
+it("names both the required user action and the background task in a mixed wait", () => {
+	const waiting = { waitingFor: "user" as const, reason: "Activate the Mac window and drag Move onto its destination; tell me when done.", backgroundTask: "The Mac retry is running and waiting for your drag. I’ll inspect its trace when it finishes." };
+	expect(waitMessage(waiting)).toBe(`Goal waiting for your action:\n${waiting.reason}\n\nBackground task:\n${waiting.backgroundTask}`);
+	const footer = statusText(goal({ waiting }), null);
+	expect(footer).toContain("waiting for your action");
+	expect(footer).toContain("background: The Mac retry");
+	expect(waitMessage(waiting)).not.toContain("No action needed");
 });

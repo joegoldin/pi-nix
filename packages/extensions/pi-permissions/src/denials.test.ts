@@ -135,3 +135,65 @@ it("menu shell approvals enter the classifier scenario ledger instead of bypassi
 	ledger.clearSimilar();
 	expect(ledger.scenarioApprovals("bash", "/tmp")).toEqual([]);
 });
+
+it("keeps child exact and scoped grants isolated through restore and revocation", () => {
+  const ledger = new PermissionLedger();
+  const owner = { sessionId: "child-a", agentName: "worker", cwd: "/tmp/child" };
+  const other = { ...owner, sessionId: "child-b" };
+  const call = blocked("bun test");
+  const parent = ledger.record(call);
+  const sibling = ledger.record({ ...call, owner: other });
+  const child = ledger.record({ ...call, owner });
+  ledger.approve(child.id);
+  expect(ledger.isGranted(call.toolName, call.input)).toBe(false);
+  expect(ledger.isGranted(call.toolName, call.input, other)).toBe(false);
+  expect(ledger.isGranted(call.toolName, call.input, owner)).toBe(true);
+  expect(ledger.open().map(d => d.id)).toEqual([sibling.id, parent.id]);
+  const restored = new PermissionLedger();
+  restored.restore(ledger.snapshot());
+  expect(restored.isGranted(call.toolName, call.input, owner)).toBe(true);
+  restored.revoke(restored.grantList()[0].key);
+  expect(restored.isGranted(call.toolName, call.input, owner)).toBe(false);
+  ledger.approveSimilar(call.toolName, call.input, owner.cwd, owner);
+  expect(ledger.scenarioApprovals(call.toolName, owner.cwd)).toEqual([]);
+  expect(ledger.scenarioApprovals(call.toolName, owner.cwd, other)).toEqual([]);
+  expect(ledger.scenarioApprovals(call.toolName, owner.cwd, owner)).toHaveLength(1);
+});
+
+it("does not carry a child's exact approval into a different working directory", () => {
+  const ledger = new PermissionLedger();
+  const owner = { sessionId: "child", agentName: "worker", cwd: "/tmp/reviewed" };
+  const call = blocked("bun test");
+  ledger.approve(ledger.record({ ...call, owner }).id);
+  expect(ledger.isGranted(call.toolName, call.input, owner)).toBe(true);
+  expect(ledger.isGranted(call.toolName, call.input, { ...owner, cwd: "/tmp/other" })).toBe(false);
+});
+
+it("remembers read and write directory access separately across conversation updates and restore", () => {
+  const ledger = new PermissionLedger();
+  const read = ledger.record({ toolCallId: "read", toolName: "read", input: { path: "/tmp/project/a.ts" }, reason: "first access", directories: [{ path: "/tmp/project", access: "read" }] });
+  ledger.approve(read.id, "/tmp/parent");
+  expect(ledger.grantList()[0].directory).toEqual({ path: "/tmp/project", access: "read" });
+  ledger.clearSimilar();
+  const restored = new PermissionLedger();
+  restored.restore(ledger.snapshot());
+  expect(restored.directoryApprovals()).toHaveLength(1);
+  expect(restored.directoryApprovals()[0].access).toBe("read");
+  const write = restored.record({ toolCallId: "write", toolName: "edit", input: { path: "/tmp/project/b.ts", edits: [] }, reason: "first write", directories: [{ path: "/tmp/project", access: "write" }] });
+  restored.approve(write.id, "/tmp/parent");
+  expect(restored.directoryApprovals().some(g => g.access === "write")).toBe(true);
+  for (const grant of restored.grantList()) restored.revoke(grant.key);
+  expect(restored.directoryApprovals()).toEqual([]);
+});
+
+it("shares conversation directory grants downward, never child-only grants upward or sideways", () => {
+  const ledger = new PermissionLedger();
+  const child = { sessionId: "child", agentName: "worker", cwd: "/tmp/project" };
+  const sibling = { ...child, sessionId: "sibling" };
+  ledger.approveDirectory({ path: "/tmp/shared", access: "read" });
+  ledger.approveDirectory({ path: "/tmp/project", access: "write" }, child);
+  expect(ledger.directoryApprovals()).toHaveLength(1);
+  expect(ledger.directoryApprovals(child)).toHaveLength(2);
+  expect(ledger.directoryApprovals(sibling)).toHaveLength(1);
+  expect(ledger.isGranted("edit", { path: "/tmp/project/file" }, child)).toBe(false);
+});

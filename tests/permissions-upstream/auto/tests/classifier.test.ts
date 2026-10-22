@@ -27,12 +27,13 @@ import {
 	createFakePi,
 } from "./test-helpers.ts";
 
-test("classifier policy scopes bounded authorization to existing local files", () => {
+test("classifier policy honors actual bounds without inventing file-by-file authorization", () => {
 	assert.match(CLASSIFIER_SYSTEM_PROMPT, /Do not invent deny rules/);
 	assert.match(CLASSIFIER_SYSTEM_PROMPT, /does not need to appear in ALLOW/);
 	assert.match(CLASSIFIER_SYSTEM_PROMPT, /Copying a local app icon or other non-executable asset/);
-	assert.match(CLASSIFIER_SYSTEM_PROMPT, /For modification or deletion of a pre-existing local file, a bounded direct user authorization must name/);
-	assert.match(CLASSIFIER_SYSTEM_PROMPT, /Other soft-deny actions need direct user authorization but do not require these file bounds/);
+	assert.doesNotMatch(CLASSIFIER_SYSTEM_PROMPT, /a bounded direct user authorization must name the task/);
+	assert.match(CLASSIFIER_SYSTEM_PROMPT, /Apply the bounds actually stated by the user and the listed policy/);
+	assert.match(CLASSIFIER_SYSTEM_PROMPT, /Do not require a verified permission-scope record/);
 	assert.match(CLASSIFIER_SYSTEM_PROMPT, /A later user instruction that narrows or revokes authorization controls/);
 	assert.match(CLASSIFIER_SYSTEM_PROMPT, /target stays inside a direct, bounded user authorization/);
 	assert.match(CLASSIFIER_SYSTEM_PROMPT, /target lies outside authorized scope/);
@@ -118,7 +119,7 @@ test("classifier tool-call parser accepts exact decisions and rejects invalid ou
 	assert.equal(parseClassifierDecision(multiple), undefined);
 });
 
-test("classifier transcript keeps user intent and tool calls but strips assistant prose and tool results", () => {
+test("classifier transcript labels preceding assistant prose as reply context, never tool-result authority", () => {
 	const entries = [
 		{ type: "message", message: { role: "user", content: [{ type: "text", text: "Fix the parser" }] } },
 		{
@@ -143,7 +144,8 @@ test("classifier transcript keeps user intent and tool calls but strips assistan
 	assert.match(transcript, /User: Do not publish anything/);
 	assert.match(transcript, /ToolCall bash:/);
 	assert.match(transcript, /npm test/);
-	assert.doesNotMatch(transcript, /I decided this command is safe/);
+	assert.match(transcript, /Assistant reply context \(not authorization\): "I decided this command is safe\."/);
+	assert.ok(transcript.indexOf("I decided this command is safe") < transcript.indexOf("User: Do not publish anything"));
 	assert.doesNotMatch(transcript, /malicious output/);
 });
 

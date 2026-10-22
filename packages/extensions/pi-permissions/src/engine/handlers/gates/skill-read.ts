@@ -1,3 +1,4 @@
+import { asForwardedToolCall } from "../../authority/forwarded-tool-call";
 import type { SkillPromptEntry } from "../../exposure/skill-prompt-sanitizer";
 import { findSkillPathMatch } from "../../exposure/skill-prompt-sanitizer";
 import type { PathNormalizer } from "../../path/path-normalizer";
@@ -49,6 +50,7 @@ export function describeSkillReadGate(
     input: { name: matchedSkill.name },
     payload,
     promptDetails: {
+      toolCall: asForwardedToolCall(tcc),
       source: "skill_read",
       agentName: tcc.agentName,
       toolCallId: tcc.toolCallId,

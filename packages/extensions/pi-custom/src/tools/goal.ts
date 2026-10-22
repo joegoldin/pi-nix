@@ -385,9 +385,10 @@ export function registerGoal(pi: ExtensionAPI, config: () => UiConfig): void {
 		parameters: Type.Object({
 			goal_id: Type.String({ minLength: 1, maxLength: MAX_GOAL_ID, description: "The exact goal_id shown in the current active /goal prompt." }),
 			waiting_for: Type.Union([Type.Literal("user"), Type.Literal("background"), Type.Literal("external")], {
-				description: "Who must act next: user for an action or reply you need from them; background for a running task; external for another service or event. This controls the user-visible wait heading.",
+				description: "Who must act next. Any required user action takes priority: choose user for a manual step or reply, even if a background task is running (for example, a UI test waiting for a drag or click). Choose background or external only when progress needs no user action. This controls the user-visible wait heading.",
 			}),
-			reason: Type.String({ minLength: 1, maxLength: 1000, description: "Write directly to the user as \"you\", not \"the operator\". For a user wait, start with the exact action and how to report completion. Otherwise name the pending task or event and explain what happens next. Avoid internal wake/scheduler jargon; the UI adds the wait heading and no-action-needed notice." }),
+			reason: Type.String({ minLength: 1, maxLength: 1000, description: "Write directly to the user as \"you\", not \"the operator\". For a user wait, start with the exact action and how to report completion. Otherwise name the pending task or event and explain what happens next. Avoid internal wake/scheduler jargon; the UI adds only the wait heading. Say no action is needed only when that is true; never combine that reassurance with a request for a manual step." }),
+			background_task: Type.Optional(Type.String({ minLength: 1, maxLength: 1000, description: "For a mixed wait only (waiting_for=user): name the concurrent background task, what it is doing or waiting for, and what happens next. Put the exact action needed from the user in reason, not here. The UI displays both separately." })),
 			resume_after_ms: Type.Optional(
 				Type.Integer({
 					minimum: 1,
@@ -402,11 +403,12 @@ export function registerGoal(pi: ExtensionAPI, config: () => UiConfig): void {
 			if (problem) return reject(problem);
 			if (goal!.waiting) return reject("goal is already waiting");
 			if (!params.reason.trim()) return reject("reason is required");
+			if (params.background_task !== undefined && (!params.background_task.trim() || params.waiting_for !== "user")) return reject("background_task requires waiting_for=user and a non-empty task description");
 			recordUsage(ctx, true);
 			continuationWanted = false;
 			const requested = params.resume_after_ms;
 			const effective = requested === undefined ? undefined : Math.max(MIN_WAIT_MS, requested);
-			goal!.waiting = { reason: params.reason.trim(), waitingFor: params.waiting_for, ...(effective !== undefined ? { resumeAt: Date.now() + effective } : {}) };
+			goal!.waiting = { reason: params.reason.trim(), waitingFor: params.waiting_for, ...(params.background_task !== undefined ? { backgroundTask: params.background_task.trim() } : {}), ...(effective !== undefined ? { resumeAt: Date.now() + effective } : {}) };
 			goal!.activeStartedAt = undefined;
 			persist();
 			scheduleWait();
@@ -415,7 +417,7 @@ export function registerGoal(pi: ExtensionAPI, config: () => UiConfig): void {
 			const clamped = effective !== undefined && effective !== requested ? `\nThe next automatic check is in ${effective / 1000} seconds (the minimum wait).` : "";
 			return {
 				content: [{ type: "text" as const, text: `${message}${clamped}` }],
-				details: { goal, goal_id: params.goal_id, reason: params.reason, waiting_for: params.waiting_for, resume_after_ms: effective, resume_at: goal!.waiting.resumeAt },
+				details: { goal, goal_id: params.goal_id, reason: params.reason, waiting_for: params.waiting_for, background_task: goal!.waiting.backgroundTask, resume_after_ms: effective, resume_at: goal!.waiting.resumeAt },
 				terminate: true,
 			};
 		},
