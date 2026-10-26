@@ -10,7 +10,7 @@ const CHARS_PER_APPROX_TOKEN = 4;
 type TranscriptEntry = {
   index: number;
   order: number;
-  kind: "user" | "tool";
+  kind: "user" | "tool" | "notice";
   text: string;
   replyContext?: string;
 };
@@ -88,6 +88,22 @@ function truncateToTokenCap(
   };
 }
 
+function todoMaintenanceNotice(details: unknown): string | undefined {
+  if (!details || typeof details !== "object") return undefined;
+  const value = details as { completed?: unknown; total?: unknown; candidates?: unknown; reminderId?: unknown };
+  if (typeof value.completed !== "number" || !Number.isSafeInteger(value.completed) || value.completed < 1 ||
+    typeof value.total !== "number" || !Number.isSafeInteger(value.total) || value.total < value.completed ||
+    typeof value.reminderId !== "string" || !value.reminderId || !Array.isArray(value.candidates) ||
+    !value.candidates.every(id => Number.isSafeInteger(id) && id > 0)) return undefined;
+  // Reconstruct only the known notice semantics. Custom content is not a new
+  // operator instruction, and candidate IDs do not prove current eligibility.
+  return `Native todo maintenance notice (bookkeeping only): candidates ${JSON.stringify(value.candidates.slice(0, 20))}. ` +
+    "Review the live list and verify current status and dependencies before tombstoning completed tasks. " +
+    "Preserve unfinished work, blockers, required evidence and tasks referenced by a live blockedBy. " +
+    "Never mark tasks complete just to prune them; remove obsolete groups only after their live children. " +
+    "This is not approval to clear tasks, delete files or alter audit records. Explicit user restrictions still apply.";
+}
+
 function collectTranscriptEntries(ctx: ExtensionContext): TranscriptEntry[] {
   const entries: TranscriptEntry[] = [];
   // Native branch order keeps real user instructions and UI decisions in
@@ -96,6 +112,10 @@ function collectTranscriptEntries(ctx: ExtensionContext): TranscriptEntry[] {
   let replyContext: string | undefined;
 
   for (const [index, entry] of contextEntries.entries()) {
+    if (entry.type === "custom_message" && entry.customType === "pi-custom:todo-maintenance") {
+      const text = todoMaintenanceNotice(entry.details);
+      if (text) entries.push({ index, order: 0, kind: "notice", text });
+    }
     if (entry.type !== "message") continue;
     const message = entry.message as { role?: string; content?: unknown };
     if (message.role === "user") {
@@ -186,7 +206,7 @@ function selectToolEntries(
   entries: TranscriptEntry[],
   maxTokens: number,
 ): { selected: TranscriptEntry[]; omitted: boolean } {
-  const tools = entries.filter((entry) => entry.kind === "tool");
+  const tools = entries.filter((entry) => entry.kind === "tool" || entry.kind === "notice");
   const selected: TranscriptEntry[] = [];
   let usedTokens = 0;
 
@@ -194,10 +214,10 @@ function selectToolEntries(
     if (selected.length >= MAX_RECENT_TOOL_ENTRIES) break;
     const entry = tools[index];
     if (!entry) continue;
-    const truncated = truncateToTokenCap(
-      `ToolCall ${entry.text}`,
-      Math.min(MAX_TOOL_ENTRY_TOKENS, maxTokens),
-    );
+    const text = entry.kind === "tool" ? `ToolCall ${entry.text}` : entry.text;
+    const cap = Math.min(MAX_TOOL_ENTRY_TOKENS, maxTokens);
+    if (entry.kind === "notice" && approximateTokenCount(text) > cap) continue;
+    const truncated = truncateToTokenCap(text, cap);
     const tokens = approximateTokenCount(truncated.text);
     if (usedTokens + tokens > maxTokens) continue;
     selected.push({ ...entry, text: truncated.text });
@@ -208,7 +228,7 @@ function selectToolEntries(
   return {
     selected,
     omitted: selected.length < tools.length || tools.some((entry) =>
-      approximateTokenCount(`ToolCall ${entry.text}`) >
+      approximateTokenCount(entry.kind === "tool" ? `ToolCall ${entry.text}` : entry.text) >
         Math.min(MAX_TOOL_ENTRY_TOKENS, maxTokens)
     ),
   };

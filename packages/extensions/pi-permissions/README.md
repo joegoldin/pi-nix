@@ -81,6 +81,20 @@ chronological order, including across compaction. Older answers are recovered
 only from matched questionnaire calls and validated results; arbitrary tool output
 cannot supply approval. Later instructions can narrow or revoke earlier answers.
 
+Native todo-maintenance reminders also reach the classifier, but only as bounded
+bookkeeping context reconstructed from validated candidate IDs—not their raw text
+and not operator authorization. Candidates still require a current status and
+dependency check. Deleting a native todo tombstones it; it does not erase a session
+transcript or audit log. Arbitrary `codemode` still goes through classification,
+including any additional nested actions.
+
+Requested inspection includes the bounded discovery needed to locate the named
+records; an outside-cwd path or a Python wrapper does not turn a read into a write.
+Secret, disclosure and explicit path restrictions still apply. Historical blocked
+statuses are not user revocations: later authorization for iterative testing on
+the same host/worktree and isolated app covers ordinary rebuilds and repeat tests,
+not new targets, privacy changes or materially greater disruption.
+
 Native supervisor requests/replies and local inter-agent messages also bypass
 classification: they convey data, not permission to execute the actions described
 in that data. Explicit deny and ask rules still apply. Native subagent status,

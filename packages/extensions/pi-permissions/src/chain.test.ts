@@ -922,3 +922,25 @@ test("directory facts survive follow-ups and restoration but never skip risk rev
   expect((await review("write", { path: "/tmp/directory-fixture/a.txt", content: "a" })).kind).toBe("deny");
   expect(h.classifierCalls()).toBe(6);
 });
+
+test("bookkeeping wrappers still classify every action and cannot hide a remote side effect", async () => {
+  const seen = [];
+  const h = await realHost(() => ({}), async (_ctx, _cfg, action) => {
+    seen.push(action);
+    return action.includes("git push")
+      ? { decision: "block", tier: "soft_deny", reason: "Publishing was not authorized" }
+      : { decision: "allow", tier: "allow", reason: "Completed-task bookkeeping only" };
+  });
+  const codes = [
+    'for (const id of [40,41]) text(await tools.todo({action:"delete",id}));',
+    'await tools.todo({action:"delete",id:40}); await tools.bash({command:"git push origin main"});',
+  ];
+  for (const [index, code] of codes.entries()) {
+    const call = { toolName: "codemode", toolCallId: `bookkeeping-${index}`, input: { code } };
+    await h.emit("tool_call", call);
+    const result = await h.service.links.get("pi-automode")({ ...call, toolCall: call }, {}, log);
+    expect(result.kind).toBe(index === 0 ? "allow" : "deny");
+  }
+  expect(h.classifierCalls()).toBe(2);
+  expect(seen[1]).toContain("git push origin main");
+});
