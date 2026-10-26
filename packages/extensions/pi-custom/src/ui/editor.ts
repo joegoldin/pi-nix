@@ -14,6 +14,7 @@ import { sliceByColumn, visibleWidth } from "@earendil-works/pi-tui";
 import type { UiTheme } from "./card.ts";
 import { createRepeatPasteEditor, type PasteEditorBase } from "./repeat-paste.ts";
 import { installPromptSelection, type SelectionRow } from "./prompt-selection.ts";
+import { createDictationEditor, type DictationColour } from "./dictation.ts";
 
 const PROMPT_ICON = "❯";
 // One space either side of the icon.
@@ -33,9 +34,10 @@ export type EditorBase = new (...args: any[]) => {
 	borderColor: Colour;
 };
 
-export function createPromptEditor(Base: EditorBase, promptColour: () => Colour, decorated = true): EditorBase {
-	// SAFETY: callers supply the pinned native CustomEditor; real-editor tests cover its private paste adapter.
-	class PromptEditor extends createRepeatPasteEditor(Base as unknown as PasteEditorBase) {
+export function createPromptEditor(Base: EditorBase, promptColour: () => Colour, decorated = true, voiceColour: DictationColour = (_slot, text) => text) {
+	// SAFETY: callers supply the pinned native CustomEditor; real-editor tests cover its editing adapters.
+	const PasteEditor = createRepeatPasteEditor(Base as unknown as PasteEditorBase);
+	class PromptEditor extends createDictationEditor(PasteEditor as Parameters<typeof createDictationEditor>[0], voiceColour) {
 		private userPadding = 0;
 		private scrolled = false;
 		private topBorder = "";
@@ -111,7 +113,7 @@ export function createPromptEditor(Base: EditorBase, promptColour: () => Colour,
 			this.selectionRows.set(top, { line: lines[top]!, start: 0, end: 0, skip: true });
 			this.selectionRows.set(bottom, { line: lines[bottom]!, start: 0, end: 0, skip: true });
 			const inset = Math.min(pad, Math.max(0, Math.floor((width - 1) / 2)));
-			for (let i = first; i < bottom; i++) this.selectionRows.set(i, { line: lines[i]!, start: inset, end: width - inset });
+			for (let i = first; i < bottom; i++) this.selectionRows.set(i, { line: lines[i]!, start: inset, end: width - inset, excludeColumn: this.dictationMeterColumn(i) });
 			return lines;
 		}
 	}

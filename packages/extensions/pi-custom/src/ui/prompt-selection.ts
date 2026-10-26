@@ -1,6 +1,6 @@
 import { sliceByColumn, stripTerminalSequences } from "@earendil-works/pi-tui";
 
-export type SelectionRow = { line: string; start: number; end: number; skip?: boolean };
+export type SelectionRow = { line: string; start: number; end: number; skip?: boolean; excludeColumn?: number };
 type Point = { row: number; col: number; boundary?: boolean; scrollView?: unknown };
 type Bounds = { start: Point; end: Point };
 type Rect = { x: number; y: number; width: number; height: number };
@@ -42,6 +42,7 @@ export function installPromptSelection(value: unknown, owner: Owner): boolean {
 			const line = this.previousScreen[row] ?? "";
 			const columns = this.getSelectionColumns(line, row, bounds);
 			const source = rows.get(row - box.rect.y);
+			let excludeColumn: number | undefined;
 			// Check the displayed row too: an overlay may cover the editor without
 			// removing its underlying layout box. Never strip another component.
 			if (source && row >= box.clip.y && row < box.clip.y + box.clip.height && columns.start >= box.rect.x && columns.end <= box.rect.x + box.rect.width && stripTerminalSequences(sliceByColumn(line, box.rect.x, box.rect.width, true)) === stripTerminalSequences(source.line)) {
@@ -49,8 +50,12 @@ export function installPromptSelection(value: unknown, owner: Owner): boolean {
 				if (source.skip) continue;
 				columns.start = Math.max(columns.start, box.rect.x + source.start);
 				columns.end = Math.min(columns.end, box.rect.x + source.end);
+				if (source.excludeColumn !== undefined) excludeColumn = box.rect.x + source.excludeColumn;
 			}
-			result.push(stripTerminalSequences(sliceByColumn(line, columns.start, Math.max(0, columns.end - columns.start), true)).trimEnd());
+			const selected = excludeColumn !== undefined && excludeColumn >= columns.start && excludeColumn < columns.end
+				? sliceByColumn(line, columns.start, excludeColumn - columns.start, true) + sliceByColumn(line, excludeColumn + 1, columns.end - excludeColumn - 1, true)
+				: sliceByColumn(line, columns.start, Math.max(0, columns.end - columns.start), true);
+			result.push(stripTerminalSequences(selected).trimEnd());
 		}
 		if (!changed) return original.call(this);
 		return result.join("\n") || undefined;

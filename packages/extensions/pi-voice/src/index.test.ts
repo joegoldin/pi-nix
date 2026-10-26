@@ -509,3 +509,55 @@ describe("extension entrypoint", () => {
 		}
 	});
 });
+
+describe("inline editor transport", () => {
+	it("streams into the editor and reconciles final text once, without a widget or paste", async () => {
+		process.env.PI_VOICE_RECORD_BIN = fakeRecordBin();
+		process.env.CLAUDE_CONFIG_DIR = tmp();
+		const { ctx, widgets, statuses, pastes } = fakeCtx(tmp());
+		const updates: Array<{ committed: string; partial: string; level: number }> = [];
+		const finals: Array<string | undefined> = [];
+		const session = new VoiceSession(ctx, request => request.accept({
+			update: value => updates.push({ ...value }), finish: text => finals.push(text),
+		}));
+		try {
+			session.start();
+			await waitFor(() => expect(updates.some(value => value.committed === "So the thing is,")).toBe(true));
+			expect(updates.some(value => value.partial === "so the thing is")).toBe(true);
+			expect(updates.some(value => value.level > 0)).toBe(true);
+			expect(widgets.filter(([, content]) => content !== undefined)).toEqual([]);
+			expect(statuses.filter(([, text]) => text !== undefined)).toEqual([]);
+			await session.stop();
+			expect(finals).toEqual(["So the thing is, we shipped it."]);
+			expect(pastes).toEqual([]);
+		} finally {
+			await session.stop();
+			delete process.env.PI_VOICE_RECORD_BIN;
+			delete process.env.CLAUDE_CONFIG_DIR;
+		}
+	});
+
+	it("finishes the inline transaction if the recorder exits without a final", async () => {
+		const path = join(tmp(), "record");
+		writeFileSync(path, "#!/bin/sh\nprintf '%s\\n' '{\"type\":\"commit\",\"t\":1,\"text\":\"Keep these words\"}'\n");
+		chmodSync(path, 0o755);
+		process.env.PI_VOICE_RECORD_BIN = path;
+		process.env.CLAUDE_CONFIG_DIR = tmp();
+		const { ctx, pastes } = fakeCtx(tmp());
+		let last = "", finished = 0;
+		const session = new VoiceSession(ctx, request => request.accept({
+			update: value => { last = value.committed; }, finish: () => { finished++; },
+		}));
+		try {
+			session.start();
+			await waitFor(() => expect(finished).toBe(1));
+			expect(last).toBe("Keep these words");
+			expect(pastes).toEqual([]);
+			expect(session.active).toBe(false);
+		} finally {
+			await session.stop();
+			delete process.env.PI_VOICE_RECORD_BIN;
+			delete process.env.CLAUDE_CONFIG_DIR;
+		}
+	});
+});

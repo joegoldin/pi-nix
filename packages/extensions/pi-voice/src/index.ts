@@ -1,5 +1,5 @@
 // pi-voice entrypoint: spawn `audiomemo record --stream`, render what it says,
-// paste what it heard, and tell the statusline the microphone is live.
+// stream into the prompt editor, and tell the statusline the microphone is live.
 //
 // node's child_process rather than pi.exec: ExecOptions is { signal, timeout,
 // cwd } and exec resolves once with the whole of stdout, so it cannot deliver
@@ -30,8 +30,18 @@ export interface VoiceContext {
 	};
 }
 
+/** Optional handshake with pi-custom's existing prompt editor. */
+export interface VoiceEditorRequest {
+	accept(handle: {
+		update(value: { committed: string; partial: string; level: number }): void;
+		finish(text?: string): void;
+	}): void;
+	onInterrupt(): void;
+}
+
 /** The slice of pi's ExtensionAPI this extension registers against. */
 export interface VoiceHost {
+	events?: { emit(channel: string, data: unknown): void };
 	on(event: string, handler: (payload: never, ctx: never) => unknown): void;
 	registerCommand(
 		name: string,
@@ -83,8 +93,11 @@ export class VoiceSession {
 	private clock: ReturnType<typeof setInterval> | undefined;
 	private ended: (() => void) | undefined;
 	private stopPromise: Promise<void> | undefined;
+	private inline: Parameters<VoiceEditorRequest["accept"]>[0] | undefined;
+	private usedInline = false;
+	private finalHandled = false;
 
-	constructor(ctx: VoiceContext) {
+	constructor(ctx: VoiceContext, private readonly beginInline?: (request: VoiceEditorRequest) => void) {
 		this.ctx = ctx;
 		this.cfg = readVoiceConfig(env());
 		this.statePath = voiceStatePath(env(), homedir());
@@ -104,6 +117,8 @@ export class VoiceSession {
 		this.meter = new Meter();
 		this.streamOpen = false;
 		this.stopRequested = false;
+		this.usedInline = false;
+		this.finalHandled = false;
 		Object.assign(this.state, emptyState(), { recording: true });
 		this.startedAt = Date.now();
 		this.lastLevelAt = this.startedAt;
@@ -116,6 +131,12 @@ export class VoiceSession {
 			return;
 		}
 		this.child = child;
+		if (this.ctx.mode === "tui") {
+			this.beginInline?.({
+				accept: handle => { this.inline = handle; this.usedInline = true; },
+				onInterrupt: () => { void this.stop(); },
+			});
+		}
 
 		child.on("error", (err) => {
 			this.fail(err);
@@ -139,6 +160,7 @@ export class VoiceSession {
 			this.clearStopFallback();
 			this.state.recording = false;
 			this.stopClock();
+			this.finishInline();
 			clearVoiceState(this.statePath);
 			this.paint();
 			this.settle();
@@ -150,14 +172,16 @@ export class VoiceSession {
 			pid: process.pid,
 			since: this.startedAt,
 		});
-		this.mountWidget();
-		this.startClock();
+		if (!this.usedInline) {
+			this.mountWidget();
+			this.startClock();
+		}
 		this.paint();
 	}
 
 	/**
 	 * Stop, and resolve once the child has closed, so the caller knows the final
-	 * event has been handled and the paste has happened.
+	 * event has been handled and the editor has its final text.
 	 */
 	stop(): Promise<void> {
 		if (!this.child) return Promise.resolve();
@@ -209,6 +233,7 @@ export class VoiceSession {
 				// A stop that arrived before the producer was up has been waiting for
 				// exactly this line.
 				if (this.stopRequested) this.sendStop();
+				if (this.usedInline && this.state.note) this.ctx.ui.notify(`voice: ${this.state.note}`, "info");
 				break;
 			case "level": {
 				const now = Date.now();
@@ -226,8 +251,11 @@ export class VoiceSession {
 				this.state.partial = "";
 				break;
 			case "final": {
+				if (this.finalHandled) break;
+				this.finalHandled = true;
 				const text = event.text.trim();
-				if (text !== "") this.ctx.ui.pasteToEditor(text);
+				if (this.usedInline) this.finishInline(text || undefined);
+				else if (text !== "") this.ctx.ui.pasteToEditor(text);
 				break;
 			}
 			case "error":
@@ -239,6 +267,12 @@ export class VoiceSession {
 				break;
 		}
 		this.paint();
+	}
+
+	private finishInline(text?: string): void {
+		const inline = this.inline;
+		this.inline = undefined;
+		inline?.finish(text);
 	}
 
 	private settle(): void {
@@ -253,6 +287,7 @@ export class VoiceSession {
 		this.clearStopFallback();
 		this.state.recording = false;
 		this.stopClock();
+		this.finishInline();
 		clearVoiceState(this.statePath);
 		this.ctx.ui.notify(`voice: could not start ${this.cfg.recordBin}: ${String(err)}`, "error");
 		this.paint();
@@ -298,10 +333,13 @@ export class VoiceSession {
 	}
 
 	private paint(): void {
-		// setStatus runs through sanitizeStatusText, which collapses runs of
-		// spaces and newlines. The meter row is space-padded and the transcript
-		// may contain runs of spaces, so only this one short token goes through
-		// it; the real UI is the widget.
+		this.inline?.update(this.state);
+		// The custom editor owns both transcript and meter. Retain the widget
+		// only for hosts without that integration, never alongside it.
+		if (this.usedInline) {
+			this.ctx.ui.setStatus(STATUS_KEY, undefined);
+			return;
+		}
 		const theme = this.ctx.ui.theme;
 		if (this.state.recording) {
 			this.ctx.ui.setStatus(STATUS_KEY, theme ? theme.fg("error", "●rec") : "●rec");
@@ -321,7 +359,7 @@ export default function register(pi: VoiceHost): void {
 		// A pi that died mid-recording leaves enabled:true behind and the mic
 		// glyph stays lit. Clear it when the process that wrote it is gone.
 		reconcileStaleState(voiceStatePath(env(), homedir()), pidIsAlive);
-		session ??= new VoiceSession(ctx as VoiceContext);
+		session ??= new VoiceSession(ctx as VoiceContext, request => pi.events?.emit("pi-voice:begin", request));
 		unsubscribe?.();
 		unsubscribe = undefined;
 		const context = ctx as VoiceContext;
@@ -348,9 +386,9 @@ export default function register(pi: VoiceHost): void {
 	});
 
 	pi.registerCommand("voice", {
-		description: "Toggle dictation, or press Space in an empty prompt to start and Space to stop. Speech is pasted into the editor.",
+		description: "Toggle dictation, or press Space in an empty prompt to start and Space to stop. Speech appears live in the editor; stopping never submits.",
 		handler: async (_args: string, ctx: never) => {
-			session ??= new VoiceSession(ctx as VoiceContext);
+			session ??= new VoiceSession(ctx as VoiceContext, request => pi.events?.emit("pi-voice:begin", request));
 			if (session.active) {
 				await session.stop();
 			} else {

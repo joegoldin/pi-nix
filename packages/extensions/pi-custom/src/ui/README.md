@@ -56,6 +56,12 @@ completer.
 - **Prompt editing.** Paste the same large block again to expand its collapsed
   marker in place; further identical repeats leave one copy. Editing or moving
   to another insertion point resumes normal pasting. Expansion is one undo step.
+- **Inline dictation.** pi-voice streams into the prompt at the insertion point:
+  confirmed words use the normal text colour and provisional words are gray.
+  A green/yellow/red height-changing VU bar replaces the cursor. Revisions and
+  the final pass update one undoable insertion, without collapsed paste markers.
+  Typing or moving the caret stops dictation; late results cannot overwrite edits.
+  Enter stops without submitting. Fullscreen copying excludes the meter cell.
 - **Prompt box and shimmer.** Fullscreen selection copies prompt text without
   the rounded outline, `❯`, or layout padding; typed indentation and symbols
   remain. Terminal-native selection (including Shift-drag bypass) cannot omit
@@ -77,6 +83,7 @@ completer.
 | File | Role |
 |---|---|
 | `index.ts` | Registration and session wiring |
+| `dictation.ts` | Optional voice bridge, streamed insertion ownership, transcript styling and VU cursor |
 | `card.ts` | Card layout: header truncation, collapsing, wrapping, panel background, compact mode |
 | `tools.ts` | What each tool's card says (pure) |
 | `group.ts` | Runs of exploratory calls: the model built from the branch and the stream, the run line (pure) |

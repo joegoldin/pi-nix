@@ -141,6 +141,7 @@ let
     pkgs.runCommand "pi-nix-pi-custom-tests"
       {
         src = ../packages/extensions/pi-custom;
+        PI_VOICE_SRC = ../packages/extensions/pi-voice;
         nativeBuildInputs = [
           pkgs.bun
           pkgs.typescript

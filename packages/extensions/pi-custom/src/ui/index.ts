@@ -28,6 +28,7 @@ import { createCompleter } from "./complete.ts";
 import { loadConfig, saveConfig, type UiConfig } from "./config.ts";
 import { computeBreakdown, ContextView } from "./context.ts";
 import { createPromptEditor, type EditorBase, sessionAccent, shimmerFrames } from "./editor.ts";
+import { registerDictationBridge } from "./dictation.ts";
 import { Framed } from "./frame.ts";
 import { fileSuggestions, registerSearchTools, SearchIndex, trackSelection } from "./fff.ts";
 import { type EntryLike, GroupState, LiveFeed, type MessageLike, RunModel } from "./group.ts";
@@ -88,6 +89,8 @@ export default function piUi(pi: ExtensionAPI): void {
 	let config: UiConfig = loadConfig();
 	const index = new SearchIndex();
 	let ctxRef: ExtensionContext | undefined;
+	let editor: InstanceType<ReturnType<typeof createPromptEditor>> | undefined;
+	registerDictationBridge(pi.events, () => editor);
 	let completerInstalled = false;
 	// What each write call's target held before it ran. The write tool's result
 	// does not say, and by the time the card draws, the file is already new.
@@ -318,8 +321,10 @@ export default function piUi(pi: ExtensionAPI): void {
 			CustomEditor as unknown as EditorBase,
 			() => ctx.ui.theme.getThinkingBorderColor(pi.getThinkingLevel()),
 			config.promptIcon,
+			(slot, text) => ctx.ui.theme.fg(slot, text),
 		);
-		ctx.ui.setEditorComponent((tui, theme, keybindings) => new Editor(tui, theme, keybindings) as never);
+		editor?.interruptDictation();
+		ctx.ui.setEditorComponent((tui, theme, keybindings) => (editor = new Editor(tui, theme, keybindings)) as never);
 		if (config.shimmer) {
 			const accent = sessionAccent(ctx.sessionManager.getSessionId());
 			ctx.ui.setWorkingIndicator({ frames: shimmerFrames("Working…", ctx.ui.theme, accent), intervalMs: 80 });
@@ -362,6 +367,8 @@ export default function piUi(pi: ExtensionAPI): void {
 	});
 
 	pi.on("session_shutdown", () => {
+		// Voice owns graceful shutdown and may still deliver its final pass.
+		editor = undefined;
 		// Left behind, pi would keep asking a model nothing feeds any more.
 		if ((globalThis as Record<symbol, unknown>)[HIDE_THINKING] === hideThinking) {
 			delete (globalThis as Record<symbol, unknown>)[HIDE_THINKING];

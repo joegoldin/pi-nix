@@ -151,8 +151,8 @@ This fork adds:
 | `voice.audiomemo` | package | *(none)* | The audiomemo package providing `record`. No default: the jail binds this exact derivation's closure. |
 | `voice.device` | `null \| str` | `null` | Device alias or name passed as `-D`. Null defers to audiomemo's own config, whose picker is an interactive TUI. |
 | `voice.extraArgs` | `[str]` | `[ ]` | Further `record` arguments. `--stream` and `-t` are always passed. |
-| `voice.barWidth` | int | `12` | Width of the VU bar, in cells. |
-| `voice.placement` | enum | `belowEditor` | Where the voice widget sits relative to the editor. |
+| `voice.barWidth` | int | `12` | Width of the fallback widget's VU bar; the inline cursor uses one cell. |
+| `voice.placement` | enum | `belowEditor` | Fallback widget placement when the pi-custom editor is unavailable. |
 | `voice.keyFiles` | `{str: str}` | `{ }` | `*_API_KEY_FILE` paths. audiomemo opens the files itself, so no secret enters the store. Each is bound read-only into the jail. |
 | `voice.configFile` | `null \| str` | `null` | audiomemo's config file, bound read-only into the jail. Without it `record` tries to onboard and dies on `/dev/tty`. |
 | `voice.jailPermissions` | function | read-only | The jail entries voice needs, for a consumer who replaces `jail.permissions` outright. |
@@ -185,15 +185,24 @@ status row; older statuslines show it as a separate status row.
 `/voice` starts and stops dictation. pi-voice spawns `audiomemo record
 --stream`, which writes one JSON object per line while it records: the mic
 level, the live partial text, the committed text, and one final transcript.
-The extension draws two rows below the editor: a record dot, a clock, a VU
-bar, a dB readout, and the transcript with the moving partial dimmed. The
-finished text arrives in the editor through `ctx.ui.pasteToEditor`.
+With pi-custom, speech appears directly at the prompt's insertion point:
+confirmed words use the normal text colour, provisional words are gray, and
+the block cursor becomes a one-cell VU meter whose height and green/yellow/red
+colour follow the microphone level. The final transcript revises that same
+insertion rather than pasting a second copy. Long recordings remain expanded,
+wrap and scroll with the editor, and are one undo step.
+
+Typing or moving the caret ends dictation and preserves your edits against late
+transcription results. Enter ends it without submitting. If the recorder exits
+without a final transcript, words already received remain editable. Without
+the pi-custom integration, the extension retains its two-row widget and final
+`ctx.ui.pasteToEditor` fallback.
 
 In the packaged interactive runtime, press **Space** at a completely empty
 prompt to start recording; press **Space** again to stop. The starting Space
 is consumed without inserting whitespace. Existing drafts (including whitespace),
 pasted text, and Kitty key-repeat/release events do not activate dictation. Space stops recording
-even with a draft present; the transcript is pasted, never submitted.
+even with a draft present; stopping never submits the transcript.
 The editor-scoped `ctx.ui.onEditorInput` hook runs after raw input listeners
 and focus routing, so dialogs, overlays, and other plugins' modal controls
 keep their keys. Older runtimes without that hook retain `/voice` only.
