@@ -184,8 +184,8 @@ status row; older statuslines show it as a separate status row.
 
 `programs.pi.coding-agent.minimap.enable = true` loads the first-party
 `pi-minimap` extension. `/minimap` opens a narrow, source-linked sidebar in
-fullscreen mode. Older activity condenses into milestones and an opening
-paragraph; current purpose, runtime status and minimap-only token/cost totals
+fullscreen mode. Older activity condenses into milestones and a few short
+bullets; current topics, runtime status and minimap-only token/cost totals
 stay pinned at the bottom. Click an entry to jump to its source, or click the
 model button to switch between Cerebras Qwen and OpenAI Luna with low reasoning.
 Hidden panels pause inference, including when the terminal is too narrow.

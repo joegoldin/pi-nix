@@ -30,29 +30,58 @@ The default panel is 38 columns wide and hides when fewer than 72 chat columns
 remain. Hiding, including automatic hiding on resize, cancels the current request
 and pauses new requests. Reopening shows catching-up state and a distinct recap.
 
-Updates coalesce over five seconds, with one request in flight. Input contains at
-most twelve bounded event excerpts, compact prior state, and an explicit omitted
-event count for long gaps. Thinking, images, tool argument bodies and tool outputs
-are excluded. Bounded target paths and task labels are retained; common credential
-forms are redacted. User and assistant text is
-still sent to the selected provider when you enable the panel. Redaction is not
-a guarantee that arbitrary private text can safely be shared.
+Routine updates need five new message/tool-result records and wait at least
+30 seconds between requests by default. Questions, agent completion, goal actions
+and reported failures can flush a smaller batch, still respecting that interval.
+There is one request in flight and no idle polling for summaries. Output is capped
+at 600 tokens.
 
-History is bounded to six recent entries, two milestones and one opening
-paragraph. Empty model beats do not produce tool-call spam. Summaries retain only
-source IDs, not a second transcript. Branch-local snapshots use Pi's append-only
-custom-entry persistence; they are not model-context messages.
+Normal input contains at most eight 240-character excerpts, current focus and the
+small recent list. Reopening uses one catch-up request with at most twelve
+480-character excerpts and an explicit omitted-event count. Opening unchanged
+history makes no request. Routine updates omit archived history; folding refers to
+recent entries by index, and older compaction uses existing summaries, not another
+copy of raw events. A recap can revise entries and remove redundant chatter.
+
+Thinking, images and argument bodies are excluded. Bounded text from tool output
+already in the main transcript is included, retaining useful headers/result tails.
+Target paths and task labels are retained; common credential forms are redacted
+before clipping. This text goes to the selected provider when the panel is open.
+Redaction is not a guarantee that arbitrary private text can safely be shared.
+
+History is bounded to six recent entries, two milestones and up to three short
+EARLIER bullets. Empty model beats do not produce tool-call spam. Entries can be
+revised rather than appended; exact repeats are merged. Source IDs link back to the
+original transcript. Branch-local snapshots use Pi's append-only custom-entry
+persistence; they are not model-context messages.
 
 The bottom usage display counts only minimap calls, across model and branch switches
 within the same session. A fork inherits history, not its parent's spend ledger. Input
 includes cache reads/writes; output uses provider-reported output tokens. Prices
-are estimates from the runtime's reported usage and model pricing, not an invoice.
+are estimates, always shown to four decimal places, not an invoice. For direct
+Cerebras endpoints, the extension asks `/v1/models?format=openrouter` for current
+per-token rates. Successful results are cached for one hour; failed lookups back
+off for five minutes and fall back to the configured model prices. Metadata fetches
+have a three-second timeout and do not count as inference calls. Credentials are
+never forwarded from custom endpoints, and redirects are rejected. OpenAI's model
+API does not publish rates, so Luna uses configured/catalog prices. No account
+billing endpoint is queried. Missing cache-token rates remain unknown when those
+tokens were used.
+
 Missing pricing displays **cost unavailable**; partly reported totals have **+ ?**.
 Cancelled or invalid replies still count when usage is reported. A call whose usage
 was not returned remains explicitly unreported, including an interrupted call
 restored after restart.
 
-“Now” is model-written purpose. The runtime status is separate: active agent,
+The sidebar extends alongside todos and other above-editor widgets, ending just
+above the full-width editor. Event ages use source timestamps when known (for
+example, “8m ago”); legacy unknown times stay blank. A local minute tick refreshes
+ages without inference. The compact key distinguishes asks, decisions, changes,
+checks and issues; success/error colors take precedence.
+
+“Now” is model-written purpose: up to two parent topics and one subtopic level,
+with at most four displayed lines. Parent goals stay stable while current steps
+change. The runtime status is separate: active agent,
 running tools, an open question, idle, or a confirmed goal wait/block. A tool failure
 alone does not prove that the whole task is blocked. The observer never invents
 runtime state from summary prose.

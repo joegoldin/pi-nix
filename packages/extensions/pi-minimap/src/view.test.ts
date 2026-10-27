@@ -195,3 +195,78 @@ test("transient scrollbar overlays a reserved gutter, never summary text", async
 		true,
 	);
 });
+
+test("event ages and the small key render without making observer requests", () => {
+	const { engine, view } = fixture();
+	engine.state.recent[0]!.at = Date.now() - 8 * 60_000;
+	engine.state.recent[0]!.kind = "ask";
+	const requests = engine.state.usage.requests;
+	expect(view.log.render(37).join("\n")).toContain("8m ago");
+	expect(view.render(38).join("\n")).toContain("? ask");
+	view.refresh();
+	expect(engine.state.usage.requests).toBe(requests);
+});
+
+test("human ages use minutes, hours and days and leave unknown times blank", async () => {
+	const { relativeAge } = await import("./view.ts");
+	const now = Date.now();
+	expect(relativeAge(now - 20_000, now)).toBe("just now");
+	expect(relativeAge(now - 8 * 60_000, now)).toBe("8m ago");
+	expect(relativeAge(now - 2 * 3600_000, now)).toBe("2h ago");
+	expect(relativeAge(now - 2 * 86400_000, now)).toBe("2d ago");
+	expect(relativeAge(undefined, now)).toBe("");
+	expect(relativeAge(NaN, now)).toBe("");
+});
+
+test("NOW fits two parent topics and one child level into four physical lines", async () => {
+	const { purposeRows } = await import("./view.ts");
+	const { parseSummary } = await import("./state.ts");
+	const summary = parseSummary(
+		JSON.stringify({
+			beat: "",
+			tone: "neutral",
+			now: "Improve minimap",
+			focus: [
+				{
+					topic: "Minimap",
+					subtopics: ["Batch summaries", "Remove repeats", "Layout"],
+				},
+				{
+					topic: "Prices",
+					subtopics: ["Check current provider rates", "Test estimates"],
+				},
+			],
+		}),
+		false,
+		false,
+	);
+	const rows = purposeRows(summary, 24);
+	expect(rows).toHaveLength(4);
+	expect(rows[0]).toContain("Minimap");
+	expect(rows[2]).toContain("Prices");
+	expect(rows.filter((row) => row.startsWith("  "))).toHaveLength(2);
+	const { visibleWidth } = await import("@earendil-works/pi-tui");
+	expect(rows.every((row) => visibleWidth(row) <= 24)).toBe(true);
+});
+
+test("legacy earlier paragraphs render as at most three short source-linked bullets", () => {
+	const { engine, view } = fixture();
+	engine.state.earlier = {
+		from: "old",
+		to: "old",
+		tone: "neutral",
+		text:
+			"Kept the editor full width. Limited model requests to useful batches. " +
+			"Preserved original source links ".repeat(30),
+	};
+	view.log.render(37);
+	const bullets = [
+		...new Set(
+			view.log.rows
+				.filter((row) => row.beat?.from === "old")
+				.map((row) => row.beat!.text),
+		),
+	];
+	expect(bullets).toHaveLength(3);
+	expect(bullets.every((text) => text.length <= 100)).toBe(true);
+});

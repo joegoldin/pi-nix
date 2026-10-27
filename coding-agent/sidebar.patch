@@ -221,11 +221,23 @@
  }
  
  /** Shared fullscreen transcript and fixed input-dock layout. */
-@@ -36,10 +37,34 @@
+@@ -28,18 +29,45 @@
+ 		...(options.scrollbarTrackStyle === undefined ? {} : { scrollbarTrackStyle: options.scrollbarTrackStyle }),
+ 		...(options.scrollbarThumbStyle === undefined ? {} : { scrollbarThumbStyle: options.scrollbarThumbStyle }),
+ 	});
+-	const dock = new VStack([
++	const conversation = new VStack([
++		{ component: transcript, basis: 0, grow: 1, shrink: 1, minSize: 1 },
+ 		{ component: options.pendingMessages, shrink: 1, minSize: 0 },
+ 		{ component: options.status, shrink: 1, minSize: 0 },
+ 		...(options.widgetsAbove === undefined ? [] : [{ component: options.widgetsAbove, shrink: 1, minSize: 0 }]),
++	]);
++	const dock = new VStack([
+ 		{ component: options.editor, shrink: 1, minSize: 3 },
  		...(options.widgetsBelow === undefined ? [] : [{ component: options.widgetsBelow, shrink: 1, minSize: 0 }]),
  		{ component: options.footer, shrink: 1, minSize: 0 },
  	]);
-+	const body = new HStack([{ component: transcript, basis: 0, grow: 1, minSize: 1 }]);
++	const body = new HStack([{ component: conversation, basis: 0, grow: 1, minSize: 1 }]);
 +	let generation = 0;
 +	let visibility: ((visible: boolean) => void) | undefined;
  	return {
@@ -238,7 +250,7 @@
 +			const columns = Number.isFinite(width) ? Math.max(24, Math.min(60, Math.floor(width))) : 38;
 +			let shown: boolean | undefined;
 +			body.clear();
-+			body.addChild(transcript, { basis: 0, grow: 1, minSize: 1 });
++			body.addChild(conversation, { basis: 0, grow: 1, minSize: 1 });
 +			if (component) body.addChild(component, {
 +				basis: columns, shrink: 0,
 +				visible: viewport => {

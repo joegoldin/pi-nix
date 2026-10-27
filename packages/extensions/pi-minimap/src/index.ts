@@ -20,6 +20,7 @@ import {
 	type ModelChoice,
 } from "./state.ts";
 import { MinimapView } from "./view.ts";
+import { CerebrasRates, costAtRates } from "./pricing.ts";
 
 interface SidebarUI {
 	setSidebar?(
@@ -89,8 +90,14 @@ export default function register(pi: ExtensionAPI): void {
 	let engine: MinimapEngine | undefined;
 	let view: MinimapView | undefined;
 	let inFlight: Promise<Completion> | undefined;
+	const rates = new CerebrasRates();
 	let sessionId: string | undefined;
 	let unsubscribe: (() => void) | undefined;
+	let ageTimer: ReturnType<typeof setInterval> | undefined;
+	const stopAgeTimer = () => {
+		if (ageTimer) clearInterval(ageTimer);
+		ageTimer = undefined;
+	};
 	let streaming: boolean | undefined;
 	let idleStatus = "Idle";
 	const waits = new Map<string, string>();
@@ -151,8 +158,23 @@ export default function register(pi: ExtensionAPI): void {
 							model.id === (process.env.PI_MINIMAP_LUNA_MODEL || "gpt-6-luna"),
 					);
 		if (!model) throw new Error("Selected model unavailable");
-		started();
 		const pending = (async (): Promise<Completion> => {
+			const prices = await rates.get(
+				model,
+				async () => {
+					const auth = await owner.modelRegistry.getApiKeyAndHeaders(model);
+					if (
+						!auth.ok ||
+						(auth.baseUrl &&
+							auth.baseUrl.replace(/\/$/, "") !== "https://api.cerebras.ai/v1")
+					)
+						return;
+					return auth.apiKey;
+				},
+				signal,
+			);
+			if (signal.aborted) throw new Error("Cancelled");
+			started();
 			const response = await owner.modelRegistry
 				.streamSimple(
 					model,
@@ -164,7 +186,7 @@ export default function register(pi: ExtensionAPI): void {
 					},
 					{
 						signal,
-						maxTokens: 1000,
+						maxTokens: 600,
 						sessionId: `pi-minimap:${owner.sessionManager.getSessionId()}:${choice}`,
 						...(choice === "luna" ? { reasoning: "low" as const } : {}),
 					},
@@ -173,12 +195,14 @@ export default function register(pi: ExtensionAPI): void {
 			const priced = Object.values(model.cost).some(
 				(value) => typeof value === "number" && value > 0,
 			);
+			const usage = reportedUsage(response.usage, priced);
+			if (usage && prices) usage.cost = costAtRates(usage, prices);
 			return {
 				text: response.content
 					.filter((block) => block.type === "text")
 					.map((block) => block.text)
 					.join("\n"),
-				usage: reportedUsage(response.usage, priced),
+				usage,
 				error: ["error", "aborted", "length"].includes(response.stopReason)
 					? "Incomplete summary"
 					: undefined,
@@ -193,6 +217,7 @@ export default function register(pi: ExtensionAPI): void {
 	}
 
 	function mount(): void {
+		stopAgeTimer();
 		if (!ctx || !engine) return;
 		const owner = ctx,
 			current = engine,
@@ -228,8 +253,13 @@ export default function register(pi: ExtensionAPI): void {
 			{
 				width: setting("PI_MINIMAP_WIDTH", 38, 24, 60),
 				onVisibilityChange: (shown) => {
-					if (current === engine)
-						current.setVisible(shown && current.state.enabled);
+					if (current !== engine) return;
+					stopAgeTimer();
+					current.setVisible(shown && current.state.enabled);
+					if (current.visible) {
+						ageTimer = setInterval(() => view?.refresh(), 60_000);
+						ageTimer.unref?.();
+					}
 				},
 			},
 		);
@@ -271,10 +301,10 @@ export default function register(pi: ExtensionAPI): void {
 		const current = new MinimapEngine(
 			state,
 			{
-				read: (lastId) => {
+				read: (lastId, recap) => {
 					const entries = context.sessionManager.getBranch();
 					order = new Map(entries.map((entry, index) => [entry.id, index]));
-					return readBatch(entries, lastId);
+					return readBatch(entries, lastId, recap);
 				},
 				request: (choice, prompt, signal, started) =>
 					request(context, choice, prompt, signal, started),
@@ -288,7 +318,7 @@ export default function register(pi: ExtensionAPI): void {
 						pi.appendEntry(STATE_TYPE, { ...snapshot, usageSessionId: id });
 				},
 			},
-			setting("PI_MINIMAP_INTERVAL_MS", 5000, 2000, 60000),
+			setting("PI_MINIMAP_INTERVAL_MS", 30000, 2000, 60000),
 		);
 		engine = current;
 		const ui = context.ui as ExtensionContext["ui"] & SidebarUI;
@@ -306,6 +336,7 @@ export default function register(pi: ExtensionAPI): void {
 			return undefined;
 		});
 		unsubscribe = () => {
+			stopAgeTimer();
 			inputOff?.();
 			pointerOff?.();
 		};
@@ -332,12 +363,18 @@ export default function register(pi: ExtensionAPI): void {
 	pi.on("agent_end", () => {
 		streaming = false;
 		tools.clear();
-		engine?.schedule();
+		engine?.schedule(true);
 		changed();
 	});
-	pi.on("message_end", () => engine?.schedule());
+	pi.on("message_end", (event) =>
+		engine?.schedule(
+			event.message.role === "toolResult" && event.message.isError,
+		),
+	);
 	pi.on("tool_execution_start", (event) => {
 		tools.set(event.toolCallId, event.toolName);
+		if (["ask_user_question", "contact_supervisor"].includes(event.toolName))
+			engine?.schedule(true);
 		if (event.toolName === "goal_wait" && record(event.args)) {
 			const labels: Record<string, string> = {
 				user: "Waiting for you",
@@ -356,7 +393,10 @@ export default function register(pi: ExtensionAPI): void {
 			idleStatus = "Blocked";
 		waits.delete(event.toolCallId);
 		tools.delete(event.toolCallId);
-		engine?.schedule();
+		engine?.schedule(
+			event.isError ||
+				["goal_complete", "goal_blocked", "goal_wait"].includes(event.toolName),
+		);
 		changed();
 	});
 	pi.registerCommand("minimap", {
@@ -378,7 +418,7 @@ export default function register(pi: ExtensionAPI): void {
 			else if (action === "on" || action === "off") {
 				if (engine!.state.enabled !== (action === "on")) toggle();
 			} else if (action === "model") engine!.switchModel();
-			else if (action === "refresh") engine!.schedule();
+			else if (action === "refresh") engine!.schedule(true);
 			else
 				context.ui.notify("Usage: /minimap [on|off|model|refresh]", "warning");
 		},

@@ -144,7 +144,7 @@ test("starts hidden; runtime adapter uses no tools, limits output and asks Luna 
 	expect(h.calls).toHaveLength(1);
 	expect(h.calls[0].model.provider).toBe("cerebras");
 	expect(h.calls[0].context.tools).toBeUndefined();
-	expect(h.calls[0].options.maxTokens).toBe(1000);
+	expect(h.calls[0].options.maxTokens).toBe(600);
 	expect(h.calls[0].options.reasoning).toBeUndefined();
 	h.branch([
 		{ id: "a", type: "message", message: { role: "user", content: "Build" } },
@@ -174,7 +174,7 @@ test("narrow hiding pauses requests and restores a distinct catch-up", async () 
 			message: { role: "assistant", content: "Checking" },
 		},
 	]);
-	h.emit("message_end");
+	h.emit("message_end", { message: { role: "assistant" } });
 	await h.view().engine.refresh();
 	expect(h.calls).toHaveLength(1);
 	h.visibility(true);
@@ -262,6 +262,7 @@ test("branch replacement waits for cancellation and accounts a late paid reply w
 	};
 	await h.command("on");
 	const old = h.view().engine.refresh();
+	await Promise.resolve(); // Let the metadata lookup finish and inference start.
 	h.branch([
 		{
 			id: "other",
@@ -318,4 +319,78 @@ test("a fork keeps inherited history but starts a separate spend ledger with a r
 	h.emit("session_start", { reason: "fork" });
 	expect(h.view().engine.state.recent).toHaveLength(1);
 	expect(h.view().engine.state.usage.requests).toBe(0);
+});
+
+test("Cerebras catalogue rates override stored SDK cost without counting metadata as inference", async () => {
+	const { spyOn } = await import("bun:test");
+	let lookups = 0;
+	const fetchSpy = spyOn(globalThis, "fetch").mockImplementation(async () => {
+		lookups++;
+		return Response.json({
+			data: [
+				{
+					id: "cerebras/qwen-test",
+					pricing: { prompt: "0.0000006", completion: "0.0000012" },
+				},
+			],
+		});
+	});
+	try {
+		const h = harness();
+		const models = h.ctx.modelRegistry.getAvailable();
+		h.ctx.modelRegistry.getAvailable = () => [
+			{ ...models[0], baseUrl: "https://api.cerebras.ai/v1" },
+		];
+		h.ctx.modelRegistry.getApiKeyAndHeaders = async () => ({
+			ok: true,
+			apiKey: "fixture-key",
+		});
+		await h.command("on");
+		await h.view().engine.refresh();
+		expect(h.view().engine.state.usage.cost).toBeCloseTo(0.000084, 10);
+		expect(h.view().engine.state.usage.requests).toBe(1);
+		expect(lookups).toBe(1);
+		h.branch([
+			{
+				id: "next",
+				type: "message",
+				message: { role: "user", content: "Continue" },
+			},
+		]);
+		await h.view().engine.refresh();
+		expect(lookups).toBe(1);
+		expect(h.view().engine.state.usage.requests).toBe(2);
+	} finally {
+		fetchSpy.mockRestore();
+	}
+});
+
+test("minute ticks refresh ages locally and hiding clears the timer", async () => {
+	const { spyOn } = await import("bun:test");
+	const original = globalThis.setInterval;
+	let tick: (() => void) | undefined,
+		timer: ReturnType<typeof setInterval> | undefined;
+	const intervals = spyOn(globalThis, "setInterval").mockImplementation(((
+		fn: () => void,
+		ms: number,
+	) => {
+		expect(ms).toBe(60000);
+		tick = fn;
+		timer = original(fn, ms);
+		return timer;
+	}) as typeof setInterval);
+	const clear = spyOn(globalThis, "clearInterval");
+	try {
+		const h = harness();
+		await h.command("on");
+		await h.view().engine.refresh();
+		expect(h.calls).toHaveLength(1);
+		tick!();
+		expect(h.calls).toHaveLength(1);
+		h.visibility(false);
+		expect(clear).toHaveBeenCalledWith(timer);
+	} finally {
+		intervals.mockRestore();
+		clear.mockRestore();
+	}
 });

@@ -208,7 +208,7 @@ describe("bounded history and input", () => {
 				state,
 				batch,
 				parseSummary(
-					summary(),
+					summary(`Completed distinct step ${i}`),
 					state.recent.length >= 6,
 					state.chapters.length >= 2,
 				),
@@ -236,7 +236,7 @@ describe("bounded history and input", () => {
 		expect(batch.events.at(-1)!.id).toBe("e999");
 		expect(JSON.stringify(batch).length).toBeLessThan(6500);
 	});
-	test("does not send thinking, tool arguments, tool output or bearer credentials", () => {
+	test("includes visible output but excludes thinking, argument bodies and credentials", () => {
 		const batch = readBatch(
 			[
 				{
@@ -261,7 +261,9 @@ describe("bounded history and input", () => {
 					message: {
 						role: "toolResult",
 						toolName: "bash",
-						content: [{ type: "text", text: "PRIVATE_OUTPUT" }],
+						content: [
+							{ type: "text", text: "SAFE_OUTPUT Bearer output-secret" },
+						],
 						isError: true,
 					},
 				},
@@ -272,12 +274,13 @@ describe("bounded history and input", () => {
 		for (const secret of [
 			"PRIVATE_THINKING",
 			"PRIVATE_COMMAND",
-			"PRIVATE_OUTPUT",
+			"output-secret",
 			"secret-token",
 			"secret-key",
 		])
 			expect(text).not.toContain(secret);
 		expect(text).toContain("failed");
+		expect(text).toContain("SAFE_OUTPUT");
 		expect(text).toContain("redacted");
 	});
 	test("strict reply shape and bounded control-free text", () => {
@@ -375,4 +378,436 @@ test("restored spend belongs to its session, not an inherited parent snapshot", 
 	};
 	expect(restoreUsage([entry], "parent").requests).toBe(2);
 	expect(restoreUsage([entry], "fork").requests).toBe(0);
+});
+
+test("repeated and revised beats update one entry instead of duplicating it", () => {
+	const state = emptySnapshot();
+	const batch = (id: string) => ({ from: id, to: id, omitted: 0, events: [] });
+	applySummary(
+		state,
+		batch("a"),
+		parseSummary(summary("Checking the sidebar layout"), false, false),
+		false,
+	);
+	applySummary(
+		state,
+		batch("b"),
+		parseSummary(summary("Checking the sidebar layout."), false, false),
+		false,
+	);
+	expect(state.recent).toHaveLength(1);
+	const revised = JSON.parse(
+		summary("Checked the sidebar layout; it ends above todos"),
+	);
+	revised.replaceRecent = 0;
+	applySummary(
+		state,
+		batch("c"),
+		parseSummary(JSON.stringify(revised), false, false),
+		true,
+	);
+	expect(state.recent).toHaveLength(1);
+	expect(state.recent[0]).toMatchObject({
+		from: "a",
+		to: "c",
+		text: revised.beat,
+		recap: true,
+	});
+	expect(state.lastId).toBe("c");
+});
+
+test("routine notifications wait at least thirty seconds between requests", async () => {
+	const { spyOn } = await import("bun:test");
+	const original = globalThis.setTimeout;
+	const delays: number[] = [];
+	const spy = spyOn(globalThis, "setTimeout").mockImplementation(((
+		fn: any,
+		delay: number,
+		...args: any[]
+	) => {
+		delays.push(delay);
+		return original(fn, delay, ...args);
+	}) as typeof setTimeout);
+	try {
+		const h = harness();
+		h.engine.setVisible(true);
+		await h.engine.refresh();
+		h.batch({
+			from: "c",
+			to: "c",
+			omitted: 0,
+			events: [{ id: "c", text: "assistant: working" }],
+		});
+		for (let i = 0; i < 30; i++) h.engine.schedule();
+		expect(delays.at(-1)).toBeGreaterThanOrEqual(29000);
+		expect(delays.at(-1)).toBeLessThanOrEqual(30000);
+		expect(h.calls).toHaveLength(1);
+	} finally {
+		spy.mockRestore();
+	}
+});
+
+test("automatic updates require five records unless a useful boundary flushes the batch", async () => {
+	const h = harness();
+	h.engine.setVisible(true);
+	await h.engine.refresh();
+	const batch = (count: number) => ({
+		from: "c",
+		to: `c${count}`,
+		omitted: 0,
+		events: Array.from({ length: count }, (_, i) => ({
+			id: `c${i}`,
+			text: "assistant: working",
+		})),
+	});
+	h.batch(batch(3));
+	await h.engine.refresh(false);
+	expect(h.calls).toHaveLength(1);
+	h.batch(batch(5));
+	await h.engine.refresh(false);
+	expect(h.calls).toHaveLength(2);
+	h.batch(batch(1));
+	h.engine.schedule(true);
+	await h.engine.refresh(false);
+	expect(h.calls).toHaveLength(3);
+});
+
+test("reopening a long gap makes one bounded recap and reopening unchanged makes none", async () => {
+	const h = harness();
+	h.engine.setVisible(true);
+	await h.engine.refresh();
+	h.engine.setVisible(false);
+	const entries = Array.from({ length: 2000 }, (_, i) => ({
+		id: `gap${i}`,
+		type: "message",
+		message: { role: "assistant", content: `Changed step ${i}` },
+	}));
+	h.batch(readBatch(entries, "b")!);
+	h.engine.setVisible(true);
+	await h.engine.refresh(false);
+	expect(h.calls).toHaveLength(2);
+	const prompt = JSON.parse(h.calls[1]!.prompt);
+	expect(prompt.recap).toBe(true);
+	expect(prompt.events).toHaveLength(12);
+	expect(prompt.omittedEvents).toBe(1988);
+	expect(h.engine.state.recent.at(-1)?.to).toBe("gap1999");
+	h.engine.setVisible(false);
+	h.engine.setVisible(true);
+	await h.engine.refresh(false);
+	expect(h.calls).toHaveLength(2);
+});
+
+test("revisions preserve source spans without forcing unrelated folding", () => {
+	const state = emptySnapshot();
+	for (let i = 0; i < 6; i++)
+		applySummary(
+			state,
+			{ from: `s${i}`, to: `s${i}`, omitted: 0, events: [] },
+			parseSummary(summary(`Step ${i}`), false, false),
+			false,
+		);
+	const revised = parseSummary(
+		JSON.stringify({
+			replaceRecent: 0,
+			beat: "Step zero finished",
+			tone: "success",
+			now: "Continue",
+		}),
+		true,
+		true,
+	);
+	applySummary(
+		state,
+		{ from: "next", to: "next", omitted: 3, events: [] },
+		revised,
+		true,
+	);
+	expect(state.recent).toHaveLength(6);
+	expect(state.chapters).toHaveLength(0);
+	expect(state.recent[0]).toMatchObject({ from: "s0", to: "next", omitted: 3 });
+	expect(() =>
+		parseSummary(
+			JSON.stringify({ ...revised, replaceRecent: 8 }),
+			false,
+			false,
+		),
+	).toThrow();
+	expect(SYSTEM_PROMPT).toContain("plain, everyday language");
+});
+
+test("event timestamps and categories survive summaries and restoration without inventing legacy times", () => {
+	const timestamp = Date.now() - 8 * 60_000;
+	const entries = [
+		{
+			id: "a",
+			type: "message",
+			message: { role: "user", content: "Fix the layout", timestamp },
+		},
+	];
+	const batch = readBatch(entries, "")!;
+	expect(batch.at).toBe(timestamp);
+	const state = emptySnapshot();
+	const reply = parseSummary(
+		JSON.stringify({
+			...JSON.parse(summary("Asked for the sidebar to reach the editor")),
+			kind: "ask",
+		}),
+		false,
+		false,
+	);
+	applySummary(state, batch, reply, false);
+	expect(state.recent[0]).toMatchObject({ at: timestamp, kind: "ask" });
+	const restored = restore([
+		...entries,
+		{ type: "custom", customType: STATE_TYPE, data: state },
+	]);
+	expect(restored.recent[0]).toMatchObject({ at: timestamp, kind: "ask" });
+	delete state.recent[0]!.at;
+	expect(
+		restore([
+			...entries,
+			{ type: "custom", customType: STATE_TYPE, data: state },
+		]).recent[0]?.at,
+	).toBeUndefined();
+});
+
+test("bounded tool output keeps result tails, redacts secrets, and identifies permission blocks", () => {
+	const result = (text: string, isError = false) => ({
+		id: "out",
+		type: "message",
+		message: {
+			role: "toolResult",
+			toolName: "bash",
+			isError,
+			content: [{ type: "text", text }],
+		},
+	});
+	const output = readBatch(
+		[
+			result(
+				JSON.stringify({
+					output:
+						"Starting pricing checks\napi_key=DO_NOT_SEND\n" +
+						"noise ".repeat(2000) +
+						"\n41 pass\n0 fail",
+					exit_code: 0,
+				}),
+			),
+		],
+		"",
+	)!;
+	expect(output.events[0]!.text).toContain("41 pass");
+	expect(output.events[0]!.text).toContain("0 fail");
+	expect(output.events[0]!.text).not.toContain("DO_NOT_SEND");
+	expect(output.events[0]!.text.length).toBeLessThan(600);
+	expect(
+		readBatch(
+			[
+				result(
+					"Action blocked; the tool did not run. Classifier HTTP503",
+					true,
+				),
+			],
+			"",
+		)!.events[0]!.text,
+	).toContain("did not run");
+});
+
+test("catch-up can remove redundant entries and revise one using the original indices", () => {
+	const state = emptySnapshot();
+	for (let i = 0; i < 6; i++)
+		applySummary(
+			state,
+			{ from: `e${i}`, to: `e${i}`, events: [], omitted: 0 },
+			parseSummary(summary(`Old step ${i}`), false, false),
+			false,
+		);
+	const revised = parseSummary(
+		JSON.stringify({
+			dropRecent: [0, 1, 2, 3, 4],
+			replaceRecent: 5,
+			beat: "Pricing checks passed",
+			tone: "success",
+			now: "Finish minimap",
+			focus: [
+				{ topic: "Minimap", subtopics: ["Batch summaries", "Check pricing"] },
+			],
+		}),
+		true,
+		true,
+	);
+	applySummary(
+		state,
+		{ from: "latest", to: "latest", events: [], omitted: 10 },
+		revised,
+		true,
+	);
+	expect(state.recent).toHaveLength(1);
+	expect(state.recent[0]).toMatchObject({
+		from: "e5",
+		to: "latest",
+		recap: true,
+	});
+	expect(state.focus?.[0]?.subtopics).toHaveLength(2);
+	const before = structuredClone(state);
+	expect(() =>
+		applySummary(
+			state,
+			{ from: "bad", to: "bad", events: [], omitted: 0 },
+			{ ...revised, dropRecent: [5] },
+			false,
+		),
+	).toThrow();
+	expect(state).toEqual(before);
+});
+
+test("routine input is smaller and does not resend archived history; folding uses indices", async () => {
+	const entries = Array.from({ length: 100 }, (_, i) => ({
+		id: `e${i}`,
+		type: "message",
+		message: { role: "assistant", content: "detail ".repeat(1000) },
+	}));
+	const live = readBatch(entries, "e0", false)!,
+		recap = readBatch(entries, "e0", true)!;
+	expect(live.events).toHaveLength(8);
+	expect(recap.events).toHaveLength(12);
+	expect(JSON.stringify(live).length).toBeLessThan(3000);
+	const h = harness();
+	h.engine.setVisible(true);
+	await h.engine.refresh();
+	h.engine.state.earlier = {
+		text: "ARCHIVE_SENTINEL",
+		tone: "neutral",
+		from: "a",
+		to: "a",
+	};
+	h.engine.state.chapters = [
+		{ text: "CHAPTER_SENTINEL", tone: "neutral", from: "a", to: "a" },
+	];
+	h.batch(live);
+	await h.engine.refresh(false);
+	expect(h.calls.at(-1)!.prompt).not.toContain("ARCHIVE_SENTINEL");
+	expect(h.calls.at(-1)!.prompt).not.toContain("CHAPTER_SENTINEL");
+	// Sampling a busy batch does not require archived history either.
+	h.batch({
+		from: "new",
+		to: "new",
+		omitted: 0,
+		events: Array.from({ length: 5 }, (_, i) => ({
+			id: `new${i}`,
+			text: "Changed something",
+		})),
+	});
+	await h.engine.refresh(false);
+	const normal = h.calls.at(-1)!.prompt;
+	expect(normal).not.toContain("ARCHIVE_SENTINEL");
+	expect(normal).not.toContain("CHAPTER_SENTINEL");
+	h.engine.state.recent = Array.from({ length: 6 }, (_, i) => ({
+		text: `UNIQUE_STEP_${i}`,
+		tone: "neutral" as const,
+		from: `x${i}`,
+		to: `x${i}`,
+	}));
+	h.engine.state.chapters.push({
+		text: "second chapter",
+		tone: "neutral",
+		from: "a",
+		to: "a",
+	});
+	h.batch({
+		from: "final",
+		to: "final",
+		omitted: 0,
+		events: Array.from({ length: 5 }, (_, i) => ({
+			id: `final${i}`,
+			text: "Changed something else",
+		})),
+	});
+	await h.engine.refresh(false);
+	const folded = JSON.parse(h.calls.at(-1)!.prompt);
+	expect(folded.fold).toEqual([0, 1, 2]);
+	expect(folded.compact.chapters).toHaveLength(2);
+	expect(h.calls.at(-1)!.prompt.match(/UNIQUE_STEP_0/g)).toHaveLength(1);
+});
+
+test("earlier history uses bounded bullets and can be rewritten on recap without folding recent entries", () => {
+	const state = emptySnapshot();
+	state.earlier = {
+		text: "Old paragraph",
+		tone: "neutral",
+		from: "old",
+		to: "old",
+	};
+	const reply = parseSummary(
+		JSON.stringify({
+			beat: "",
+			tone: "neutral",
+			now: "Finish",
+			earlier: ["Kept the editor full width.", "Limited summary requests."],
+		}),
+		false,
+		false,
+	);
+	applySummary(
+		state,
+		{ from: "a", to: "a", omitted: 0, events: [] },
+		reply,
+		true,
+		true,
+	);
+	expect(state.earlier.bullets).toEqual([
+		"Kept the editor full width.",
+		"Limited summary requests.",
+	]);
+	expect(state.recent).toHaveLength(0);
+	const usage = { ...emptySnapshot().usage, requests: 1, cost: 0.1012 };
+	expect(usageRows(usage)[1]).toContain("$0.1012");
+	usage.cost = 1;
+	expect(usageRows(usage)[1]).toContain("$1.0000");
+});
+
+test("visible output redacts prefixed keys, quoted passwords and full bearer tokens before clipping", () => {
+	const batch = readBatch(
+		[
+			{
+				id: "out",
+				type: "message",
+				message: {
+					role: "toolResult",
+					toolName: "bash",
+					content: [
+						{
+							type: "text",
+							text: "CEREBRAS_API_KEY=\"NEVER SEND THIS\" password='private phrase' Bearer aaa+bbb/ccc==",
+						},
+					],
+				},
+			},
+		],
+		"",
+	)!;
+	const text = batch.events[0]!.text;
+	for (const secret of [
+		"NEVER",
+		"SEND THIS",
+		"private phrase",
+		"phrase",
+		"bbb/ccc",
+	])
+		expect(text).not.toContain(secret);
+	expect(text).toContain("redacted");
+});
+
+test("structured focus does not need a duplicate prose purpose field", () => {
+	const result = parseSummary(
+		JSON.stringify({
+			beat: "",
+			tone: "neutral",
+			focus: [{ topic: "Minimap", subtopics: ["Check batching"] }],
+		}),
+		false,
+		false,
+	);
+	expect(result.now).toBe("Minimap");
+	expect(result.focus?.[0]?.subtopics).toEqual(["Check batching"]);
 });

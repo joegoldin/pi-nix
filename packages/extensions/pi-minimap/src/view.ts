@@ -10,7 +10,13 @@ import {
 	type TuiMouseEventResult,
 } from "@earendil-works/pi-tui";
 import type { MinimapEngine } from "./engine.ts";
-import type { Beat, Usage } from "./state.ts";
+import {
+	earlierBullets,
+	type Beat,
+	type EventKind,
+	type Snapshot,
+	type Usage,
+} from "./state.ts";
 
 export interface Palette {
 	fg(
@@ -21,7 +27,8 @@ export interface Palette {
 			| "success"
 			| "warning"
 			| "error"
-			| "border",
+			| "border"
+			| "customMessageLabel",
 		text: string,
 	): string;
 	bg(slot: "selectedBg", text: string): string;
@@ -43,11 +50,52 @@ export function usageRows(usage: Usage): string[] {
 	const known = usage.requests - usage.unknownCost;
 	const cost =
 		known > 0
-			? `est. $${usage.cost.toFixed(usage.cost < 0.01 ? 4 : 2)}${usage.unknownCost ? " + ?" : ""}`
+			? `est. $${usage.cost.toFixed(4)}${usage.unknownCost ? " + ?" : ""}`
 			: "cost unavailable";
 	return [tokens, `${usage.requests} calls · ${cost}`];
 }
 
+export function purposeRows(
+	state: Pick<Snapshot, "now" | "focus">,
+	width: number,
+): string[] {
+	if (!state.focus?.length)
+		return wrapTextWithAnsi(
+			state.now || "Observing this conversation.",
+			width,
+		).slice(0, 4);
+	return state.focus
+		.flatMap((topic) => [
+			truncateToWidth(`• ${topic.topic}`, width, "…"),
+			...topic.subtopics.map((text, index) =>
+				truncateToWidth(
+					`  ${index === topic.subtopics.length - 1 ? "└" : "├"} ${text}`,
+					width,
+					"…",
+				),
+			),
+		])
+		.slice(0, 4);
+}
+export function relativeAge(at: number | undefined, now = Date.now()): string {
+	if (at === undefined || !Number.isFinite(at) || at <= 0) return "";
+	const minutes = Math.floor(Math.max(0, now - at) / 60_000);
+	if (minutes < 1) return "just now";
+	if (minutes < 60) return `${minutes}m ago`;
+	const hours = Math.floor(minutes / 60);
+	return hours < 24 ? `${hours}h ago` : `${Math.floor(hours / 24)}d ago`;
+}
+const kinds: Record<
+	EventKind,
+	{ mark: string; slot: Parameters<Palette["fg"]>[0] }
+> = {
+	ask: { mark: "?", slot: "accent" },
+	decision: { mark: "◆", slot: "customMessageLabel" },
+	change: { mark: "•", slot: "success" },
+	check: { mark: "◇", slot: "accent" },
+	blocker: { mark: "!", slot: "warning" },
+	note: { mark: "·", slot: "text" },
+};
 type Row = { text: string; beat?: Beat };
 class Log implements Component {
 	rows: Row[] = [];
@@ -74,8 +122,9 @@ class Log implements Component {
 			if (!beats.length) return;
 			rows.push({ text: this.theme.fg("muted", label) });
 			for (const beat of beats) {
+				const kind = kinds[beat.kind ?? "note"];
 				const slot =
-					beat.tone === "neutral" ? (older ? "muted" : "text") : beat.tone;
+					beat.tone === "neutral" ? (older ? "muted" : kind.slot) : beat.tone;
 				if (beat.recap)
 					rows.push({
 						text: this.theme.fg(
@@ -93,21 +142,44 @@ class Log implements Component {
 							? "!"
 							: beat.tone === "error"
 								? "×"
-								: "·";
+								: kind.mark;
+				const age = relativeAge(beat.at);
+				let extraAge = false;
 				const lines = wrapTextWithAnsi(
 					beat.text,
 					Math.max(1, contentWidth - 2),
 				);
 				lines.forEach((line, index) => {
 					let text = this.theme.fg(slot, `${index ? " " : mark} ${line}`);
+					if (age && index === lines.length - 1) {
+						const padding =
+							contentWidth - visibleWidth(text) - visibleWidth(age);
+						if (padding >= 2)
+							text += " ".repeat(padding) + this.theme.fg("muted", age);
+						else extraAge = true;
+					}
 					if (this.hover === beat.from)
 						text = this.theme.bg("selectedBg", text);
 					rows.push({ text, beat });
 				});
+				if (extraAge)
+					rows.push({ text: this.theme.fg("muted", `  ${age}`), beat });
 				rows.push({ text: "" });
 			}
 		};
-		section("EARLIER", state.earlier ? [state.earlier] : [], true);
+		section(
+			"EARLIER",
+			state.earlier
+				? earlierBullets(state.earlier.bullets ?? state.earlier.text).map(
+						(text, index) => ({
+							...state.earlier!,
+							text,
+							at: index === 0 ? state.earlier!.at : undefined,
+						}),
+					)
+				: [],
+			true,
+		);
 		section("MILESTONES", state.chapters, true);
 		section("RECENT", state.recent);
 		if (!rows.length)
@@ -169,6 +241,24 @@ export class MinimapView extends HStack {
 						width,
 						"",
 					),
+					...wrapTextWithAnsi(
+						theme.fg("accent", "? ask") +
+							"  " +
+							theme.fg("customMessageLabel", "◆ decision") +
+							"  " +
+							theme.fg("success", "• change"),
+						width,
+					),
+					...wrapTextWithAnsi(
+						theme.fg("accent", "◇ check") +
+							"  " +
+							theme.fg("warning", "! issue") +
+							"  " +
+							theme.fg("success", "✓ done") +
+							"  " +
+							theme.fg("error", "× error"),
+						width,
+					),
 					"",
 				];
 			},
@@ -204,12 +294,7 @@ export class MinimapView extends HStack {
 						: theme.fg("border", "─".repeat(width)),
 					theme.bold(theme.fg("accent", "NOW")),
 				];
-				rows.push(
-					...wrapTextWithAnsi(
-						engine.state.now || "Observing this conversation.",
-						width,
-					).slice(0, 3),
-				);
+				rows.push(...purposeRows(engine.state, width));
 				rows.push(theme.fg("muted", actions.status()));
 				if (engine.error) rows.push(theme.fg("warning", engine.error));
 				else if (engine.catchingUp)

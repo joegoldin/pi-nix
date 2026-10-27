@@ -1774,8 +1774,8 @@ in
       };
       intervalMs = lib.mkOption {
         type = lib.types.ints.between 2000 60000;
-        default = 5000;
-        description = "Minimum interval between coalesced minimap requests.";
+        default = 30000;
+        description = "Minimum interval between minimap requests; normal batches also need five new message records.";
       };
       qwenModel = lib.mkOption {
         type = lib.types.nullOr lib.types.str;
