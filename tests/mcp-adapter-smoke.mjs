@@ -8,6 +8,15 @@ import { pathToFileURL } from "node:url";
 
 const [adapter, piModules] = process.argv.slice(2);
 assert(adapter && piModules, "usage: smoke <adapter> <pi node_modules>");
+// Both the extension source and the public JS API keep model-assisted features opt-in.
+for (const file of ["semantic-settings.ts", "dist/semantic-settings.js"]) {
+  const { validateSemanticSearchSettings } = await import(pathToFileURL(join(adapter, file)).href);
+  assert.equal(validateSemanticSearchSettings(undefined).enabled, false);
+  assert.equal(validateSemanticSearchSettings(false).enabled, false);
+  assert.equal(validateSemanticSearchSettings({ allowedServers: ["local"] }).enabled, true);
+}
+const { validateExtractionSettings } = await import(pathToFileURL(join(adapter, "dist/extraction-settings.js")).href);
+assert.equal(validateExtractionSettings(undefined).enabled, false);
 const root = await mkdtemp(join(tmpdir(), "pi-mcp-smoke-"));
 process.env.HOME = root;
 process.env.XDG_CONFIG_HOME = join(root, ".config");
@@ -55,6 +64,7 @@ try {
   assert.equal(tools.filter(t => t.name === "mcp").length, 1);
   assert(session.getActiveToolNames().includes("codemode"));
   const proxy = tools.find(t => t.name === "mcp");
+  assert(!proxy.parameters.properties.extract, "Unconfigured extraction must remain unavailable");
   for (const name of ["native", "local"]) {
     const result = await proxy.execute(`test-${name}`, { server: name, tool: "echo", args: { text: `${name} works` } }, undefined, undefined, runner.createContext());
     assert(!result.isError, JSON.stringify(result));

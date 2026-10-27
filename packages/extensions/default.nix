@@ -38,13 +38,23 @@ let
       extraBuildInputs = lib.optionals (name == "pi-mcp-adapter") [ pkgs.zlib ];
       # Receipts need the full message; only status/history previews should be
       # clipped. Preserve upstream secret redaction and terminal-control safety.
-      patchPhaseExtra = lib.optionalString (name == "pi-subagents") ''
-        substituteInPlace src/runs/background/steering.js \
-          --replace-fail 'import { previewDisplayText }' 'import { previewDisplayText, safeTerminalText }' \
-          --replace-fail 'const preview = steeringMessagePreview(message);' 'const preview = safeTerminalText(redactSecretValues(message));'
-        substituteInPlace src/tui/render.js \
-          --replace-fail 'if (!text.includes("\n"))' 'if (!text.includes("\n") && !options.expanded)'
-      '';
+      patchPhaseExtra =
+        lib.optionalString (name == "pi-subagents") ''
+          substituteInPlace src/runs/background/steering.js \
+            --replace-fail 'import { previewDisplayText }' 'import { previewDisplayText, safeTerminalText }' \
+            --replace-fail 'const preview = steeringMessagePreview(message);' 'const preview = safeTerminalText(redactSecretValues(message));'
+          substituteInPlace src/tui/render.js \
+            --replace-fail 'if (!text.includes("\n"))' 'if (!text.includes("\n") && !options.expanded)'
+        ''
+        + lib.optionalString (name == "pi-mcp-adapter") ''
+          # Pi credentials must not silently enable model-assisted metadata sharing.
+          substituteInPlace semantic-settings.ts --replace-fail \
+            ${lib.escapeShellArg "  if (value === undefined) return { ...DEFAULTS, allowedServers: [] };\n  if (value === false)"} \
+            ${lib.escapeShellArg "  if (value === undefined || value === false)"}
+          substituteInPlace dist/semantic-settings.js --replace-fail \
+            ${lib.escapeShellArg "    if (value === undefined)\n        return { ...DEFAULTS, allowedServers: [] };\n    if (value === false)"} \
+            ${lib.escapeShellArg "    if (value === undefined || value === false)"}
+        '';
     };
   # First-party extensions. No pin, no lockfile: the source is in this repo and
   # neither package has a runtime dependency, so mkPiExtension's local-src arm

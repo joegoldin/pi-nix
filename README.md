@@ -412,8 +412,11 @@ programs.pi.coding-agent = {
 The adapter reads shared `.mcp.json` files and Pi's existing `mcp.json` files;
 no server definitions need copying. Adapter-specific settings belong in
 `mcp-adapter.json`. Project servers retain the adapter's trust/approval checks.
-Codemode can call `tools.mcp(...)`; the separate `mcpScript` tool stays off by
-default. Permission extensions see proxy calls, not each underlying MCP tool's
+Codemode can call `tools.mcp(...)`; adapter 7 removed the separate `mcpScript`
+tool. Semantic search and extraction remain opt-in: configure
+`settings.semanticSearch` or `settings.extraction` explicitly in
+`mcp-adapter.json` before sharing metadata or results with a model provider.
+Permission extensions see proxy calls, not each underlying MCP tool's
 native identity. Existing built-in OAuth sign-ins require the adapter's import
 flow; the two clients do not share subsequent sign-ins or sign-outs.
 
