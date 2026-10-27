@@ -29,9 +29,9 @@
     url = "https://registry.npmjs.org/jsbi/-/jsbi-4.3.2.tgz";
     hash = "sha512-9fqMSQbhJykSeii05nxKl4m6Eqn2P6rOlYiS+C5Dr/HPIU/7yZxu5qzbs40tgaFORiw2Amd0mirjxatXYMkIew==";
   };
-  "undici@8.10.2" = fetchurl {
-    url = "https://registry.npmjs.org/undici/-/undici-8.10.2.tgz";
-    hash = "sha512-/y4/bH9YNU5hi9NIrpOuvGXFcxrj3CMrV+/AYpowAYTpHn8gX/XPFjNy766FPoYY0miQhdW977JFWKGNhBdwyQ==";
+  "undici@8.12.3" = fetchurl {
+    url = "https://registry.npmjs.org/undici/-/undici-8.12.3.tgz";
+    hash = "sha512-+fdndUTwBP86cVjihTp21hZHo7d6oj1c/47XPA3lL8mM0XHs+C4EkcjmgRsFnFk2f/UONGDy9ItBItmXsLOQHw==";
   };
   "yaml@2.8.3" = fetchurl {
     url = "https://registry.npmjs.org/yaml/-/yaml-2.8.3.tgz";

@@ -1,8 +1,8 @@
 {
   "pi-subagents": {
-    "version": "0.76.1",
-    "url": "https://registry.npmjs.org/pi-subagents/-/pi-subagents-0.76.1.tgz",
-    "hash": "sha512-DTHVUUyLx5KfwikpSQF4sWIKaazbxanAoKd8v4ZGt9OqLM2xNQ79BrPHjaqOARipoUb0kZIKyEYwTPItPqYq1g==",
+    "version": "0.83.0",
+    "url": "https://registry.npmjs.org/pi-subagents/-/pi-subagents-0.83.0.tgz",
+    "hash": "sha512-MlmLLa8Cb2/RCkkhCgbRDdeigpFL8v0rKqa+HjWpa/3ylZb49Fg+XDsbMeNu+zQ6268dnxGt1sTDhXsAKxBzKg==",
     "bundled": false,
     "entrypoints": [],
     "skills": [
