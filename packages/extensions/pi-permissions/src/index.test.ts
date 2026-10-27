@@ -19,6 +19,7 @@ function session() {
 		},
 	};
 	const tools: string[] = [];
+	const shortcuts = new Map<string, { handler: (ctx: unknown) => unknown }>();
 	const handlers = new Map<string, ((event: unknown, ctx: unknown) => unknown)[]>();
 	const commands = new Map<string, { handler: (args: string, ctx: unknown) => unknown; getArgumentCompletions?: (prefix: string) => { value: string; label: string }[] | null }>();
 	const sent: { message: { customType: string; content: string }; options: unknown }[] = [];
@@ -31,7 +32,7 @@ function session() {
 			registerTool: (tool: { name: string }) => tools.push(tool.name),
 			registerCommand: (name: string, command: { handler: (args: string, ctx: unknown) => unknown }) => commands.set(name, command),
 			sendMessage: (message: { customType: string; content: string }, options: unknown) => sent.push({ message, options }),
-			registerShortcut() {},
+			registerShortcut: (key: string, shortcut: { handler: (ctx: unknown) => unknown }) => shortcuts.set(key, shortcut),
 			registerFlag() {},
 			registerMessageRenderer() {},
 			appendEntry: (customType: string, data: unknown) => entries.push({ type: "custom", customType, data }),
@@ -47,7 +48,7 @@ function session() {
 		}
 		return undefined;
 	};
-	return { api, tools, handlers, commands, sent, entries, toolCall, bus };
+	return { api, tools, handlers, commands, shortcuts, sent, entries, toolCall, bus };
 }
 
 describe("loading", () => {
@@ -333,4 +334,19 @@ it("menu directory approvals survive new user input and session restoration with
   expect(restored.directoryApprovals()).toHaveLength(1);
   expect(restored.isGranted("write", input)).toBe(false);
   expect(s.sent[0]!.message.content).toContain("Read/write access under /tmp/directory-fixture");
+});
+
+
+it("Ctrl+P opens the permissions menu without submitting a message", async () => {
+ const s = session();
+ piPermissions(s.api());
+ let opened = 0;
+ const ctx = { mode: "tui", cwd: "/tmp", hasUI: true, isIdle: () => true,
+  sessionManager: { getBranch: () => [] },
+  ui: { notify() {}, custom: async () => { opened++; return undefined; } },
+ };
+ await s.shortcuts.get("ctrl+p")!.handler(ctx);
+ expect(opened).toBe(1);
+ expect(s.sent).toEqual([]);
+ expect(s.shortcuts.has("ctrl+shift+p")).toBe(false);
 });

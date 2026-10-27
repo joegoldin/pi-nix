@@ -17,7 +17,7 @@
 		"tree-sitter-bash": "0.25.1",
 		"unbash": "4.0.10",
 		"web-tree-sitter": "0.26.9",
-		"zod": "4.4.3"
+		"zod": "4.6.6"
 	},
 	"scripts": {
 		"test": "bun test"

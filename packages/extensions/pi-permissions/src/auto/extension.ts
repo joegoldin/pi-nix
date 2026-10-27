@@ -4,7 +4,6 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type {
   ExtensionAPI,
-  ExtensionCommandContext,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
@@ -171,7 +170,7 @@ export type AutoModeSnapshot = {
 export type AutoModeControls = {
   snapshot(ctx: ExtensionContext): AutoModeSnapshot;
   /** Runs a /permissions auto subcommand: "on", "off", "reload", "reset", "model". */
-  run(args: string, ctx: ExtensionCommandContext): Promise<void>;
+  run(args: string, ctx: ExtensionContext): Promise<void>;
 };
 
 type LogCtx = {
@@ -1051,7 +1050,7 @@ export function createPiAutomode(options: PiAutomodeOptions = {}) {
 
     async function handleAutomodeCommand(
       args: string,
-      ctx: ExtensionCommandContext,
+      ctx: ExtensionContext,
     ): Promise<void> {
       const [command = "status", ...rest] = args
         .trim()

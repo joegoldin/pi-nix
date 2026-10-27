@@ -29,7 +29,7 @@ describe("BINDABLE_DIALOG_KEY_CHARACTERS", () => {
     }
   });
 
-  it("admits exactly pi-tui's symbol keys, minus the one its matcher cannot see", () => {
+  it("admits pi-tui's symbol keys except the reserved modifier separator", () => {
     const symbols = piTuiSymbolKeys();
     // Guard the derivation itself: an empty list would make the claim vacuous.
     expect(symbols.length).toBeGreaterThan(20);
@@ -39,10 +39,9 @@ describe("BINDABLE_DIALOG_KEY_CHARACTERS", () => {
     expect(admitted).toEqual(symbols.filter((symbol) => symbol !== "+"));
   });
 
-  it("excludes `+` because pi-tui reads it as a modifier separator", () => {
-    // `parseKeyId` splits the identifier on `+`, leaving no key name behind, so
-    // a `+` binding would match nothing at all.
-    expect(matchesKey("+", "+")).toBe(false);
+  it("keeps `+` excluded even though Pi 1.4 can now match it", () => {
+    // Host compatibility does not broaden the fork's accepted dialog bindings.
+    expect(matchesKey("+", "+")).toBe(true);
     expect(BINDABLE_DIALOG_KEY_CHARACTERS.has("+")).toBe(false);
   });
 

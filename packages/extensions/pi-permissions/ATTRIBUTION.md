@@ -46,3 +46,14 @@ engines use pi's exported helpers.
 - [zod](https://github.com/colinhacks/zod) (MIT), for its config validation.
 - [unbash](https://github.com/webpro-nl/unbash) (ISC), for auto mode's
   command analysis.
+
+## Pi 1.4 compatibility review
+
+Ported pi-automode fixes `f9024e5a399e` (macOS user roots and `find` traversal
+flags) and `e69c02036b56` (no retained Codex classifier WebSocket). Regression
+fixtures exercise decisions without running destructive commands or inference.
+
+Reviewed pi-permission-system through 41.0.0. Its new command-effect declarations
+and nonexistent-path delegation change policy semantics; this fork retains its
+reviewed approval scopes and directory-access rules rather than replacing them
+with that upstream policy. The engines' vendored suites remain release checks.

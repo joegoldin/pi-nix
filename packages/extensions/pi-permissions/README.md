@@ -9,6 +9,9 @@ It takes over from two npm packages this setup ran side by side,
 pi-nix patches that joined them. Both engines are vendored here as source
 ([ATTRIBUTION.md](ATTRIBUTION.md)), with those patches folded in.
 
+Press **Ctrl+P** to open the same menu as `/permissions`. This does not submit
+the editor draft or change any permission setting.
+
 ## How a tool call is decided
 
 Each tool call passes through, in order:

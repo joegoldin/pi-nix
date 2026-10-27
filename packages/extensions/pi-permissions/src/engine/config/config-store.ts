@@ -6,7 +6,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, normalize } from "node:path";
-import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { DebugReviewLogger } from "../logging/session-logger";
 import type { ConfigIssueSource } from "./config-issue-reporter";
 import { loadAndMergeConfigs, loadUnifiedConfig } from "./config-loader";
@@ -51,7 +51,7 @@ export interface SessionConfigStore extends ConfigReader {
 export interface CommandConfigStore extends ConfigReader {
   save(
     next: PermissionSystemExtensionConfig,
-    ctx: ExtensionCommandContext,
+    ctx: ExtensionContext,
   ): void;
 }
 
@@ -156,7 +156,7 @@ export class ConfigStore
    */
   save(
     next: PermissionSystemExtensionConfig,
-    ctx: ExtensionCommandContext,
+    ctx: ExtensionContext,
   ): void {
     const normalized = normalizePermissionSystemConfig(next);
     const globalPath = getGlobalConfigPath(this.deps.agentDir);

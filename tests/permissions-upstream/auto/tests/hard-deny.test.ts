@@ -495,13 +495,13 @@ test("AST hard-deny applies temp policy to find -delete roots", () => {
 	assert.equal(
 		deterministicHardDeny(
 			"bash",
-			{ command: "find /tmp/automode-find-subtree -delete" },
+			{ command: `find ${JSON.stringify(join(os.tmpdir(), "automode-find-subtree"))} -delete` },
 			process.cwd(),
 		),
 		undefined,
 	);
 	assert.match(
-		deterministicHardDeny("bash", { command: "find /tmp -delete" }, process.cwd()) ?? "",
+		deterministicHardDeny("bash", { command: `find ${JSON.stringify(os.tmpdir())} -delete` }, process.cwd()) ?? "",
 		/system-wide delete/,
 	);
 });

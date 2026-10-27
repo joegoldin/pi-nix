@@ -42,7 +42,10 @@ pkgs.stdenv.mkDerivation {
 
   buildPhase = ''
     runHook preBuild
-    export HOME="$TMPDIR"
+    # Home and temporary roots must be distinct for the path-policy fixtures.
+    export HOME="$TMPDIR/home"
+    export TMPDIR="$TMPDIR/tmp"
+    mkdir -p "$HOME" "$TMPDIR"
 
     # pi's own packages, which pi supplies to extensions at runtime, then
     # pi-permissions' dependencies over them.

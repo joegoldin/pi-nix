@@ -18,7 +18,7 @@ import { createForwardedGate } from "./forwarded-gate.ts";
 
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { type AutoModeControls, createPiAutomode } from "./auto/extension.ts";
 import { withPermissionChain } from "./auto/permission-chain.ts";
 import { approvalScope, type Denial, type PermissionRecord, PermissionLedger } from "./denials.ts";
@@ -323,7 +323,7 @@ export default function piPermissions(pi: ExtensionAPI): void {
 	}
 
 	/** Carries out what the menu asks; resolves with "model" when the menu must close for the model picker. */
-	async function carryOut(effect: MenuEffect, ctx: ExtensionCommandContext): Promise<"model" | undefined> {
+	async function carryOut(effect: MenuEffect, ctx: ExtensionContext): Promise<"model" | undefined> {
 		switch (effect.kind) {
 			case "approve-exact":
 			case "approve":
@@ -356,7 +356,7 @@ export default function piPermissions(pi: ExtensionAPI): void {
 	}
 
 	/** One showing of the menu; resolves with "model" when the model picker is wanted next. */
-	function showMenu(ctx: ExtensionCommandContext, tab: MenuTab): Promise<"model" | undefined> {
+	function showMenu(ctx: ExtensionContext, tab: MenuTab): Promise<"model" | undefined> {
 		return ctx.ui.custom<"model" | undefined>((tui, theme, _keybindings, done) => {
 			const menu = new PermissionsMenu(ledger, { auto: () => autoRows(ctx), settings: settingsRows }, tab);
 			const view = new PermissionsMenuView(
@@ -391,7 +391,7 @@ export default function piPermissions(pi: ExtensionAPI): void {
 		});
 	}
 
-	async function openPermissions(ctx: ExtensionCommandContext, tab: MenuTab): Promise<void> {
+	async function openPermissions(ctx: ExtensionContext, tab: MenuTab): Promise<void> {
 		let next: MenuTab | undefined = tab;
 		while (next) {
 			const wanted = await showMenu(ctx, next);
@@ -402,6 +402,13 @@ export default function piPermissions(pi: ExtensionAPI): void {
 			}
 		}
 	}
+
+	pi.registerShortcut("ctrl+p", {
+		description: "Open permissions",
+		handler: async (ctx) => {
+			if (ctx.mode === "tui") await openPermissions(ctx, "denied");
+		},
+	});
 
 	pi.registerCommand("permissions", {
 		description: "Permissions in one place: blocked calls, approvals, auto mode and settings",
