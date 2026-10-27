@@ -79,8 +79,8 @@ pkgs.writeShellApplication {
             cp "$work/scripts/grammars.lock.json" "packages/extensions/$slug/grammars.lock.json"
           fi
 
-          # Preserve lockfile v1, which bun2nix 2.1 understands. New Bun
-          # installs otherwise create v2 even when the package is unchanged.
+          # Preserve existing resolutions. The converter also accepts v3 when
+          # dependency overrides require Bun to upgrade the lock format.
           cp "packages/extensions/$slug/bun.lock" "$work/bun.lock"
 
           (
@@ -95,6 +95,7 @@ pkgs.writeShellApplication {
             bun install --lockfile-only \
               --omit=dev --omit=peer \
               --os='*' --cpu='*' >/dev/null
+            bun audit
           )
 
           mkdir -p "packages/extensions/$slug"

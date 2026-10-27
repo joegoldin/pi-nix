@@ -17,17 +17,21 @@
 #      `Failed to resolve root dev dependency '@earendil-works/pi-coding-agent'`
 #      (reproduced on pi-subagents).
 #
+# Package-specific security overrides are shared by the updater and build so
+# frozen installs use the same manifest.
+#
 # peerDependencies and peerDependenciesMeta are dropped after the hoist so bun
 # does not re-resolve the @earendil-works tree transitively. That alone takes
 # @juicesharp/rpiv-todo from 137 fetchurl entries to 2.
 ''
-  ${jq}/bin/jq '
+  ${jq}/bin/jq --slurpfile fixes ${./dependency-overrides.json} '
     (.peerDependenciesMeta // {}) as $meta
     | .dependencies = ((.dependencies // {}) + ((.peerDependencies // {})
         | with_entries(select(
             (.key | startswith("@earendil-works/") | not)
             and (($meta[.key].optional // false) | not)))))
     | del(.devDependencies, .peerDependencies, .peerDependenciesMeta)
+    | if $fixes[0][.name] then .overrides = ((.overrides // {}) + $fixes[0][.name]) else . end
   ' package.json > package.json.normalised
   mv package.json.normalised package.json
 ''

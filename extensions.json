@@ -13,9 +13,9 @@
     ]
   },
   "pi-web-access": {
-    "version": "0.37.0",
-    "url": "https://registry.npmjs.org/pi-web-access/-/pi-web-access-0.37.0.tgz",
-    "hash": "sha512-Je7D5ghQi9dpN0KhpFMuHYwKy0oBvpNrNR7zuTzSyCRsIJDC5in8yGz/3yItxvWYHF1W+q2Sq190nyaLkoWhgg==",
+    "version": "0.45.0",
+    "url": "https://registry.npmjs.org/pi-web-access/-/pi-web-access-0.45.0.tgz",
+    "hash": "sha512-AHgUKUas1vvBtdKbcv+7rWTPTIOl8xHR4E7s4dLBAz6soSGGPC4YNq1uVGuH5+bVrMx4X/fmPCm4rsOQIxexdQ==",
     "bundled": false,
     "entrypoints": [],
     "skills": [],

@@ -13,6 +13,7 @@ in
   smoke = import ./smoke-test.nix args;
   builders = import ./lib-test.nix args;
   extensions = import ./extensions-test.nix args;
+  web-access = import ./web-access-test.nix args;
   mcp-adapter = import ./mcp-adapter-test.nix args;
   queued-messages = import ./queued-messages-test.nix args;
   editor-input = import ./editor-input-test.nix args;
