@@ -856,6 +856,19 @@ let
 
   fastModeEntrypoints = lib.optionals cfg.fastMode.enable cfg.fastMode.package.passthru.piEntrypoint;
 
+  minimapEntrypoints = lib.optionals cfg.minimap.enable cfg.minimap.package.passthru.piEntrypoint;
+  minimapEnv = lib.optionalAttrs cfg.minimap.enable (
+    {
+      PI_MINIMAP_WIDTH.value = toString cfg.minimap.width;
+      PI_MINIMAP_INTERVAL_MS.value = toString cfg.minimap.intervalMs;
+      PI_MINIMAP_LUNA_PROVIDER.value = cfg.minimap.lunaProvider;
+      PI_MINIMAP_LUNA_MODEL.value = cfg.minimap.lunaModel;
+    }
+    // lib.optionalAttrs (cfg.minimap.qwenModel != null) {
+      PI_MINIMAP_QWEN_MODEL.value = cfg.minimap.qwenModel;
+    }
+  );
+
   customEntrypoints = lib.optionals custom.enable custom.package.passthru.piEntrypoint;
 
   customJailPermissions =
@@ -932,6 +945,7 @@ let
     // notifyEnv
     // messagingEnv
     // voiceEnv
+    // minimapEnv
     // customEnv;
 in
 {
@@ -1745,6 +1759,41 @@ in
       '';
     };
 
+    minimap = {
+      enable = lib.mkEnableOption "the first-party semantic minimap (hidden until /minimap)";
+      package = lib.mkOption {
+        type = lib.types.package;
+        default = self.packages.${system}.ext-pi-minimap;
+        defaultText = lib.literalExpression "pi-nix's packages.ext-pi-minimap";
+        description = "The pi-minimap extension package.";
+      };
+      width = lib.mkOption {
+        type = lib.types.ints.between 24 60;
+        default = 38;
+        description = "Sidebar columns; it hides and pauses when fewer than 72 chat columns remain.";
+      };
+      intervalMs = lib.mkOption {
+        type = lib.types.ints.between 2000 60000;
+        default = 5000;
+        description = "Minimum interval between coalesced minimap requests.";
+      };
+      qwenModel = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        description = "Cerebras model ID, or null to use the first available Qwen model.";
+      };
+      lunaProvider = lib.mkOption {
+        type = lib.types.str;
+        default = "openai";
+        description = "Provider ID for Luna. Credentials come from Pi's model registry.";
+      };
+      lunaModel = lib.mkOption {
+        type = lib.types.str;
+        default = "gpt-6-luna";
+        description = "Luna model ID. Minimap requests use low reasoning.";
+      };
+    };
+
     fastMode = {
       enable = lib.mkOption {
         type = lib.types.bool;
@@ -2189,7 +2238,8 @@ in
       ++ voiceEntrypoints
       ++ foreignSkillsEntrypoints
       ++ customEntrypoints
-      ++ fastModeEntrypoints;
+      ++ fastModeEntrypoints
+      ++ minimapEntrypoints;
     skills = extSkills;
     promptTemplates = extPrompts;
     settings = extSettings;

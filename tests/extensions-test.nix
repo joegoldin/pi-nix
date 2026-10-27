@@ -26,7 +26,7 @@ let
   };
 
   expectedNames = [
-    # custom, fast, foreign-skills, notify, permissions and voice are first-party,
+    # custom, fast, foreign-skills, minimap, notify, permissions and voice are first-party,
     # from packages/extensions/<name>: no pin, and only custom and permissions
     # vendor a lockfile.
     # They are listed in sorted order with the rest rather than grouped,
@@ -36,6 +36,7 @@ let
     "ext-pi-foreign-skills"
     "ext-pi-lens"
     "ext-pi-mcp-adapter"
+    "ext-pi-minimap"
     "ext-pi-notify"
     "ext-pi-permissions"
     "ext-pi-subagents"
@@ -71,6 +72,7 @@ let
     # A first-party extension names its entrypoint explicitly instead, because
     # nothing about it is resolved from an npm manifest.
     assert exts.ext-pi-notify.passthru.piEntrypoint == [ "${exts.ext-pi-notify}/src/index.ts" ];
+    assert exts.ext-pi-minimap.passthru.piEntrypoint == [ "${exts.ext-pi-minimap}/src/index.ts" ];
     assert exts.ext-pi-voice.passthru.piEntrypoint == [ "${exts.ext-pi-voice}/src/index.ts" ];
     assert exts.ext-pi-voice.passthru.settings == { };
     assert exts.ext-pi-voice.passthru.promptFragment == null;

@@ -22,6 +22,7 @@ let
         ext-pi-notify
         ext-pi-custom
         ext-pi-fast
+        ext-pi-minimap
         ;
     };
     inputs.agent-statusline = self.inputs.agent-statusline;

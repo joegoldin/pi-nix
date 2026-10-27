@@ -41,6 +41,7 @@ let
         ext-pi-foreign-skills
         ext-pi-custom
         ext-pi-fast
+        ext-pi-minimap
         ;
     };
     inputs.agent-statusline = self.inputs.agent-statusline;
@@ -605,6 +606,26 @@ assert
   );
 assert lib.any (e: lib.hasInfix "pi-fast" e)
   (evalPi { pi.coding-agent.fastMode.enable = true; }).extensions;
+
+# Minimap is opt-in; loading it exposes controls without enabling inference.
+assert !bare.minimap.enable;
+assert envValue bare "PI_MINIMAP_WIDTH" == null;
+assert
+  let
+    enabled = evalPi {
+      pi.coding-agent.minimap = {
+        enable = true;
+        width = 40;
+        intervalMs = 8000;
+        qwenModel = "qwen-test";
+      };
+    };
+  in
+  lib.any (e: lib.hasInfix "pi-minimap" e) enabled.extensions
+  && (envValue enabled "PI_MINIMAP_WIDTH").value == "40"
+  && (envValue enabled "PI_MINIMAP_INTERVAL_MS").value == "8000"
+  && (envValue enabled "PI_MINIMAP_QWEN_MODEL").value == "qwen-test"
+  && (envValue enabled "PI_MINIMAP_LUNA_MODEL").value == "gpt-6-luna";
 
 # pi-custom is off by default and contributes its entrypoint when enabled. The
 # clipboard crosses the jail as text through a host channel, never as a bound

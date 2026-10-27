@@ -39,7 +39,7 @@ assert(plain(component.render(50))[0].includes("9:24 AM"), "time is local, not f
 process.env.TZ = "UTC";
 for (const text of ["history message", '<skill name="demo" location="/tmp/SKILL.md">\nSkill text\n</skill>\n\nuser guidance']) {
   const ctx = {
-    chatContainer: new Container(), outputPad: 1,
+    chatContainer: new Container(), outputPad: 1, messageComponents: new WeakMap(),
     getUserMessageText: () => text,
     getMarkdownThemeWithSettings: getMarkdownTheme,
     getMarkdownTransformers: () => [],

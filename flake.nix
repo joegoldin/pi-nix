@@ -97,6 +97,7 @@
               ./coding-agent/native-queue-controls.patch
               ./coding-agent/editor-input.patch
               ./coding-agent/extension-dialogs.patch
+              ./coding-agent/sidebar.patch
             ];
           };
 

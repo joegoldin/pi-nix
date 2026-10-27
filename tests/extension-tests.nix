@@ -170,6 +170,32 @@ let
         touch $out
       '';
 
+  piMinimapTest =
+    let
+      piModules = "${self.packages.${system}.coding-agent-bun}/lib/node_modules";
+    in
+    pkgs.runCommand "pi-nix-pi-minimap-tests"
+      {
+        src = ../packages/extensions/pi-minimap;
+        nativeBuildInputs = [
+          pkgs.bun
+          pkgs.typescript
+        ];
+      }
+      ''
+        set -euo pipefail
+        cp -R "$src" work
+        chmod -R u+w work
+        cd work
+        export HOME="$TMPDIR"
+        mkdir node_modules
+        for d in ${piModules}/*; do ln -s "$d" node_modules/; done
+        bun test
+        cp ${piCustomTsconfig} tsconfig.json
+        tsc -p tsconfig.json
+        touch $out
+      '';
+
   # pi-permissions is typechecked the same way, against the pi this flake
   # builds overlaid with its own dependencies. Its vendored engines' own suites
   # run in the permissions-upstream check; bun test runs the tests written for
@@ -218,5 +244,6 @@ lib.mapAttrs mkTest {
 }
 // {
   pi-custom = piCustomTest;
+  pi-minimap = piMinimapTest;
   pi-permissions = piPermissionsTest;
 }
