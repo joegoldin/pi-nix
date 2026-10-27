@@ -92,28 +92,37 @@
               inherit rev hash;
             };
             patches = [
+              ./coding-agent/dependency-updates.patch
               ./coding-agent/jump-to-last-user.patch
               ./coding-agent/user-message-timestamps.patch
               ./coding-agent/native-queue-controls.patch
               ./coding-agent/editor-input.patch
-              ./coding-agent/extension-dialogs.patch
               ./coding-agent/sidebar.patch
+              ./coding-agent/shortcuts-popup.patch
             ];
           };
 
           patch = import ./patch.nix { inherit pkgs; };
 
+          bun2nixCompat = (bun2nixFor system).packages.${system}.bun2nix.overrideAttrs (old: {
+            patches = (old.patches or [ ]) ++ [ ./bun2nix-lock-v3.patch ];
+            postBuild = (old.postBuild or "") + ''
+              cargo test --offline --locked -p bun2nix --lib lock_version_tests
+            '';
+          });
+
           sync = import ./sync.nix {
             inherit pkgs patch;
-            bun2nix = (bun2nixFor system).packages.${system}.bun2nix;
+            bun2nix = bun2nixCompat;
           };
 
           regenerateModels = import ./regenerate-models.nix {
-            inherit pkgs;
+            inherit pkgs patch;
           };
 
           updateExtensions = import ./update-extensions.nix {
             pkgs = bunPkgs;
+            bun2nix = bun2nixCompat;
           };
 
           update = import ./update.nix {

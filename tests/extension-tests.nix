@@ -1,11 +1,9 @@
 # Test derivations for the first-party extensions.
 # Each runs twice over the same tree:
 #
-#   bun test — the unit suite. No node_modules and no network: the packages
-#     declare no dependencies at all, and `import type` from @earendil-works/*
-#     is erased before bun ever tries to resolve it.
+#   bun test — the unit suite against the packaged runtime, without network.
 #
-#   tsc --strict — the entrypoint against pi's own published .d.ts. That is what
+#   tsc --strict — the entrypoint against the packaged pi's .d.ts. That is what
 #     pins ctx.modelRegistry.complete, ctx.signal, pi.events.emit and
 #     ToolCallEventResult to the shapes pi really has rather than to the shapes
 #     this fork believes it has. A pi bump that changes one fails here.
@@ -33,24 +31,7 @@ let
       inherit (pin) rev hash;
     };
 
-  # The npm tarball, not the GitHub source: only the published package carries
-  # dist/*.d.ts, and the published types are what a third-party extension author
-  # would compile against. Version and hash track VERSION.json's rev by hand;
-  # `nix run .#update` does not touch them, so a pi bump that moves the API
-  # surface shows up as a typecheck failure rather than as silent drift.
-  piTypes = pkgs.fetchurl {
-    url = "https://registry.npmjs.org/@earendil-works/pi-coding-agent/-/pi-coding-agent-0.87.1.tgz";
-    hash = "sha512-m8ArJUtVcQMSe1lLE/Ei7vX/JV7O39sWmWBsXV2NOU70F0qCp8GubA24pT3LnwTmM6LL2xV80/h6sQg85n69ew==";
-  };
-
-  # Every one of them reaches node:fs or node:child_process, so tsc needs
-  # node's types.
-  # skipLibCheck covers undici-types, which this tarball references and which is
-  # not fetched.
-  nodeTypes = pkgs.fetchurl {
-    url = "https://registry.npmjs.org/@types/node/-/node-22.18.12.tgz";
-    hash = "sha512-BICHQ67iqxQGFSzfCFTT7MRQ5XcBjG5aeKh5Ok38UBbPe5fxTyE+aHFxwVrGyr8GNlqFMLKD1D3P2K/1ks8tog==";
-  };
+  piModules = "${self.packages.${system}.coding-agent-bun}/lib/node_modules";
 
   tsconfig = pkgs.writeText "pi-extension-tsconfig.json" (
     builtins.toJSON {
@@ -66,11 +47,7 @@ let
         ];
         allowImportingTsExtensions = true;
         skipLibCheck = true;
-        typeRoots = [ "./types" ];
         types = [ "node" ];
-        paths = {
-          "@earendil-works/pi-coding-agent" = [ "./pi-types/dist/index.d.ts" ];
-        };
       };
       include = [ "src/**/*.ts" ];
       exclude = [ "src/**/*.test.ts" ];
@@ -96,13 +73,10 @@ let
 
         export HOME="$TMPDIR"
 
-        # bun writes nothing and fetches nothing: no package declares a
-        # dependency, so a lockfile would be empty and an install a no-op.
+        mkdir node_modules
+        for d in ${piModules}/*; do ln -s "$d" node_modules/; done
         bun test
 
-        mkdir -p pi-types types/node
-        tar -xzf ${piTypes} -C pi-types --strip-components=1
-        tar -xzf ${nodeTypes} -C types/node --strip-components=1
         cp ${tsconfig} tsconfig.json
         tsc -p tsconfig.json
 
@@ -110,10 +84,8 @@ let
       '';
 
   # pi-custom calls into pi at runtime (its helpers, editor, components and
-  # model registry) rather than importing types only, and it is written against
-  # pi 1.0's renderer API, which the pinned 0.87 types above predate. So it is
-  # tested and typechecked against the pi this flake builds: that pi's
-  # node_modules, plus pi-custom's own FFF dependency taken from its package.
+  # model registry). It also needs its own FFF dependency alongside the
+  # packaged Pi runtime used by every extension check.
   # Its contract tests read pi's source, as the other first-party ones do.
   piCustomTsconfig = pkgs.writeText "pi-custom-tsconfig.json" (
     builtins.toJSON {
@@ -142,6 +114,7 @@ let
       {
         src = ../packages/extensions/pi-custom;
         PI_VOICE_SRC = ../packages/extensions/pi-voice;
+        TZDIR = "${pkgs.tzdata}/share/zoneinfo";
         nativeBuildInputs = [
           pkgs.bun
           pkgs.typescript

@@ -69,6 +69,7 @@ let
     '';
 
     preBuild = ''
+      node ${./dependency-compat.mjs}
           find packages -name "package.json" -exec sed -i \
             -e 's/--watch --preserveWatchOutput//g' \
             {} \;

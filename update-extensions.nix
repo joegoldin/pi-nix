@@ -1,4 +1,7 @@
-{ pkgs }:
+{
+  pkgs,
+  bun2nix ? pkgs.bun2nix,
+}:
 
 let
   # The identical string mkPiExtension runs in postPatch. Sharing it is not
@@ -9,17 +12,19 @@ let
 in
 pkgs.writeShellApplication {
   name = "pi-update-extensions";
-  runtimeInputs = with pkgs; [
-    bun
-    bun2nix
-    cacert
-    coreutils
-    curl
-    gnused
-    gnutar
-    gzip
-    jq
-  ];
+  runtimeInputs =
+    with pkgs;
+    [
+      bun
+      cacert
+      coreutils
+      curl
+      gnused
+      gnutar
+      gzip
+      jq
+    ]
+    ++ [ bun2nix ];
   text = # bash
     ''
       set -euo pipefail
@@ -31,7 +36,18 @@ pkgs.writeShellApplication {
 
       cp extensions.json "$tmpdir/extensions.json"
 
-      for name in $(jq -r 'keys[]' extensions.json); do
+      names=("$@")
+      if (( ''${#names[@]} == 0 )); then
+        mapfile -t names < <(jq -r 'keys[]' extensions.json)
+      fi
+      for name in "''${names[@]}"; do
+        if ! jq -e --arg name "$name" 'has($name)' extensions.json >/dev/null; then
+          echo "Unknown extension: $name" >&2
+          exit 1
+        fi
+      done
+
+      for name in "''${names[@]}"; do
         slug=$(printf '%s' "$name" | sed -e 's|^@||' -e 's|/|-|g')
         enc=$(jq -rn --arg n "$name" '$n | @uri')
 

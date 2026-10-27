@@ -5,8 +5,19 @@ const modules = process.argv[2];
 const load = (path) => import(pathToFileURL(`${modules}/${path}`).href);
 const { InteractiveMode } = await load("@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.js");
 const { TuiMainScreen, TuiAltScreen } = await load("@earendil-works/pi-tui/dist/index.js");
-const { initTheme } = await load("@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js");
+const { initTheme, getMarkdownTheme } = await load("@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js");
 initTheme("dark", false);
+const { KeybindingsManager } = await load("@earendil-works/pi-coding-agent/dist/core/keybindings.js");
+const bindings = new KeybindingsManager();
+assert.deepEqual(bindings.getKeys("app.model.cycleForward"), ["shift+ctrl+p"]);
+assert.ok(!bindings.getKeys("app.model.cycleBackward").includes("shift+ctrl+p"));
+assert.ok(!bindings.getKeys("app.model.cycleForward").includes("ctrl+p"));
+assert.deepEqual(bindings.getKeys("app.session.togglePath"), ["ctrl+p"]);
+const { ExtensionRunner } = await load("@earendil-works/pi-coding-agent/dist/core/extensions/runner.js");
+const permissionsShortcut = { extensionPath: "pi-permissions", description: "Open permissions", handler() {} };
+const shortcutHost = { extensions: [{ shortcuts: new Map([["ctrl+p", permissionsShortcut]]) }], hasUI: () => true };
+assert.equal(ExtensionRunner.prototype.getShortcuts.call(shortcutHost, bindings.getEffectiveConfig()).get("ctrl+p"), permissionsShortcut,
+  "Ctrl+P must be available to permissions, despite picker-local Ctrl+P bindings");
 const proto = InteractiveMode.prototype;
 assert.equal(typeof proto.addExtensionEditorInputListener, "function", "editor-scoped input must be supported by the shipped runtime");
 
@@ -27,12 +38,20 @@ for (const Tui of [TuiMainScreen, TuiAltScreen]) {
     clearScreen() {}, setTitle() {}, setProgress() {}, setProgramStatus() {},
   });
   tui.requestRender = () => {};
+  let guide;
+  const showOverlay = tui.showOverlay.bind(tui);
+  tui.showOverlay = (component, options) => { guide = component; return showOverlay(component, options); };
   const editor = component();
   const mode = Object.assign(Object.create(proto), {
+    extensionDialogs: [],
     ui: tui, editor, defaultEditor: editor,
     extensionEditorInputHandlers: new Set(), editorInputWrapped: new WeakSet(),
     extensionTerminalInputSubscriptions: new Set(),
     editorContainer: { clear() {}, addChild() {} }, disposeActiveSelector() {},
+    getMarkdownThemeWithSettings: () => getMarkdownTheme(),
+    getAppKeyDisplay: (key) => key, getEditorKeyDisplay: (key) => key,
+    keybindings: { getEffectiveConfig: () => ({}) },
+    runtimeHost: { session: { extensionRunner: { getShortcuts: () => new Map([["alt+j", { description: "Message another session" }], ["alt+m", { description: "Toggle minimap" }]]) } } },
   });
   const api = mode.createExtensionUIContext();
   const seen = [];
@@ -82,6 +101,36 @@ for (const Tui of [TuiMainScreen, TuiAltScreen]) {
   mode.clearExtensionTerminalInputListeners();
   tui.handleTerminalInput(" ");
   assert.deepEqual(editor.inputs, ["A", " ", " "], "reload clears editor subscriptions too");
+  assert.match(mode.getHotkeysMarkdown(), /Message another session/);
+  assert.match(mode.getHotkeysMarkdown(), /Toggle minimap/);
+  assert.match(mode.getHotkeysMarkdown(), /app.message.sendNow/);
+  editor.text = "";
+  const before = editor.inputs.length;
+  tui.handleTerminalInput("?");
+  assert.equal(tui.hasOverlay(), true, "empty-prompt ? opens the guide");
+  assert.equal(editor.inputs.length, before, "the guide trigger is not inserted");
+  const firstPage = guide.render(90);
+  assert.match(firstPage.join("\n"), /Message another session/, "extension keys are visible on the first page");
+  assert(firstPage.length <= tui.terminal.rows - 2);
+  tui.handleTerminalInput("\x1b[F");
+  assert.notDeepEqual(guide.render(90), firstPage, "the long guide scrolls to its last page");
+  assert.match(guide.render(90).at(-1), /Esc closes/, "dismissal hint stays visible");
+  tui.handleTerminalInput("\x1b");
+  assert.equal(tui.hasOverlay(), false, "Escape dismisses the guide");
+  editor.text = "draft";
+  tui.handleTerminalInput("?");
+  assert.equal(tui.hasOverlay(), false);
+  assert.equal(editor.inputs.at(-1), "?", "? remains literal in a draft");
+  editor.text = "";
+  tui.handleTerminalInput("\x1b[200~?\x1b[201~");
+  assert.equal(tui.hasOverlay(), false, "pasting ? does not open help");
+  tui.setFocus(dialog);
+  tui.handleTerminalInput("?");
+  assert.equal(tui.hasOverlay(), false, "questions in dialogs do not open help");
+  tui.setFocus(editor);
+  tui.handleTerminalInput("\x1b[63u");
+  assert.equal(tui.hasOverlay(), true, "Kitty question-mark key opens help too");
+  tui.handleTerminalInput("\x1b");
   tui.stop();
 }
 console.log("editor input: focus, overlays, raw modal priority, replacement, consumption, transforms and cleanup passed in both TUI modes");

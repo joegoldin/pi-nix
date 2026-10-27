@@ -1,13 +1,16 @@
-{ pkgs }:
+{ pkgs, patch }:
 
 pkgs.writeShellApplication {
   name = "pi-regenerate-models";
-  runtimeInputs = with pkgs; [
-    coreutils
-    jq
-    nix
-    nodejs
-  ];
+  runtimeInputs =
+    with pkgs;
+    [
+      coreutils
+      jq
+      nix
+      nodejs
+    ]
+    ++ [ patch ];
   text = # bash
     ''
       set -euo pipefail
@@ -27,6 +30,7 @@ pkgs.writeShellApplication {
       cp package-lock.json "$tmpdir/package-lock.json"
 
       pushd "$tmpdir" >/dev/null
+      pi-patch
       npm ci --ignore-scripts
 
       npm run generate-models --workspace=packages/ai

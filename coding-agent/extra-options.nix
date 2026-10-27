@@ -1769,8 +1769,8 @@ in
       };
       width = lib.mkOption {
         type = lib.types.ints.between 24 60;
-        default = 38;
-        description = "Sidebar columns; it hides and pauses when fewer than 72 chat columns remain.";
+        default = 44;
+        description = "Maximum sidebar columns; narrow terminals use at most half their width. Hides and pauses only below 48 columns or 14 rows of conversation space.";
       };
       intervalMs = lib.mkOption {
         type = lib.types.ints.between 2000 60000;

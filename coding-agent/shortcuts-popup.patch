@@ -1,0 +1,109 @@
+--- a/packages/coding-agent/src/modes/interactive/interactive-mode.ts
++++ b/packages/coding-agent/src/modes/interactive/interactive-mode.ts
+@@ -2643,6 +2643,10 @@
+ 				if (result?.consume) return;
+ 				data = result?.data ?? data;
+ 			}
++			if (editor.getText() === "" && (matchesKey(data, "?") || matchesKey(data, "shift+/"))) {
++				this.showShortcutGuide();
++				return;
++			}
+ 			handleInput.call(editor, data);
+ 		};
+ 	}
+@@ -3095,6 +3099,7 @@
+ 	// =========================================================================
+ 
+ 	private setupKeyHandlers(): void {
++		this.wrapEditorInput(this.editor);
+ 		// Set up handlers on defaultEditor - they use this.editor for text access
+ 		// so they work correctly regardless of which editor is active
+ 		this.defaultEditor.onEscape = () => {
+@@ -6894,7 +6899,7 @@
+ 		return keyDisplayText(action);
+ 	}
+ 
+-	private handleHotkeysCommand(): void {
++	private getHotkeysMarkdown(): string {
+ 		// Navigation keybindings
+ 		const cursorUp = this.getEditorKeyDisplay("tui.editor.cursorUp");
+ 		const cursorDown = this.getEditorKeyDisplay("tui.editor.cursorDown");
+@@ -6989,9 +6994,10 @@
+ 
+ 		// Add extension-registered shortcuts
+ 		const extensionRunner = this.session.extensionRunner;
++		let extensionKeys = "";
+ 		const shortcuts = extensionRunner.getShortcuts(this.keybindings.getEffectiveConfig());
+ 		if (shortcuts.size > 0) {
+-			hotkeys += `
++			extensionKeys += `
+ **Extensions**
+ | Key | Action |
+ |-----|--------|
+@@ -6999,10 +7005,46 @@
+ 			for (const [key, shortcut] of shortcuts) {
+ 				const description = shortcut.description ?? shortcut.extensionPath;
+ 				const keyDisplay = formatKeyText(key, { capitalize: true });
+-				hotkeys += `| \`${keyDisplay}\` | ${description} |\n`;
+-			}
+-		}
+-
++				extensionKeys += `| \`${keyDisplay}\` | ${description} |\n`;
++			}
++		}
++
++		return (extensionKeys + "\n" + hotkeys).trim();
++	}
++
++	private showShortcutGuide(): void {
++		const markdown = new Markdown(this.getHotkeysMarkdown(), 1, 0, this.getMarkdownThemeWithSettings());
++		let top = 0;
++		let maximum = 0;
++		let page = 1;
++		const overlay = this.ui.showOverlay({
++			render: (width: number) => {
++				const rows = markdown.render(width);
++				page = Math.max(1, this.ui.terminal.rows - 6);
++				maximum = Math.max(0, rows.length - page);
++				top = Math.min(top, maximum);
++				return [
++					theme.bold(theme.fg("accent", "Keyboard shortcuts")),
++					...rows.slice(top, top + page),
++					theme.fg("muted", "↑↓ / PgUp PgDn scroll · Esc closes"),
++				];
++			},
++			invalidate: () => markdown.invalidate(),
++			handleInput: (data: string) => {
++				if (matchesKey(data, "escape") || matchesKey(data, "enter")) overlay.hide();
++				else if (matchesKey(data, "up")) top = Math.max(0, top - 1);
++				else if (matchesKey(data, "down")) top = Math.min(maximum, top + 1);
++				else if (matchesKey(data, "pageUp")) top = Math.max(0, top - page);
++				else if (matchesKey(data, "pageDown")) top = Math.min(maximum, top + page);
++				else if (matchesKey(data, "home")) top = 0;
++				else if (matchesKey(data, "end")) top = maximum;
++				this.ui.requestRender();
++			},
++		}, { width: "90%", anchor: "center" });
++	}
++
++	private handleHotkeysCommand(): void {
++		const hotkeys = this.getHotkeysMarkdown();
+ 		this.chatContainer.addChild(new Spacer(1));
+ 		this.chatContainer.addChild(new DynamicBorder());
+ 		this.chatContainer.addChild(new ThemedText(() => theme.bold(theme.fg("accent", "Keyboard Shortcuts")), 1, 0));
+--- a/packages/coding-agent/src/core/keybindings.ts
++++ b/packages/coding-agent/src/core/keybindings.ts
+@@ -39,11 +39,11 @@
+ 		description: "Save thinking level",
+ 	},
+ 	"app.model.cycleForward": {
+-		defaultKeys: "ctrl+p",
++		defaultKeys: "shift+ctrl+p",
+ 		description: "Cycle to next model",
+ 	},
+ 	"app.model.cycleBackward": {
+-		defaultKeys: windowsKeybindings ? "alt+p" : "shift+ctrl+p",
++		defaultKeys: windowsKeybindings ? "alt+p" : [],
+ 		description: "Cycle to previous model",
+ 	},
+ 	"app.model.select": { defaultKeys: "ctrl+l", description: "Open model selector" },

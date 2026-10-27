@@ -68,6 +68,7 @@ pkgs.writeShellApplication {
       node scripts/generate-coding-agent-install-lock.mjs
 
       bun install --ignore-scripts
+      node ${./coding-agent/dependency-compat.mjs}
       # Bun has no audit-level=none. Reuse only the workspace exceptions;
       # registry/install errors and other remaining advisories still fail.
       # Exact-pin fixes can rewrite manifests, which our pristine-source builds

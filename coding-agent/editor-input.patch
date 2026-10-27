@@ -22,10 +22,10 @@
  	setWorkingVisible: () => {},
 --- a/packages/coding-agent/src/modes/interactive/interactive-mode.ts
 +++ b/packages/coding-agent/src/modes/interactive/interactive-mode.ts
-@@ -561,6 +561,8 @@
- 	private extensionSelector: ExtensionSelectorComponent | undefined = undefined;
- 	private extensionInput: ExtensionInputComponent | undefined = undefined;
- 	private extensionEditor: ExtensionEditorComponent | undefined = undefined;
+@@ -563,6 +563,8 @@
+ 	// Extension dialogs shown in the editor slot (select, confirm, input, editor, inline custom).
+ 	// The last entry is visible; see pushExtensionDialog().
+ 	private extensionDialogs: Array<{ component: ExtensionDialogComponent; blocked: BlockedStatus | undefined }> = [];
 +	private extensionEditorInputHandlers = new Set<(data: string) => { consume?: boolean; data?: string } | undefined>();
 +	private editorInputWrapped = new WeakSet<EditorComponent>();
  	private extensionTerminalInputSubscriptions = new Set<{

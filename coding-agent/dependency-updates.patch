@@ -1,0 +1,126 @@
+--- a/package.json
++++ b/package.json
+@@ -73,6 +73,10 @@
+ 	},
+ 	"version": "0.0.3",
+ 	"overrides": {
+-		"protobufjs": "7.6.6"
++		"protobufjs": "7.6.6",
++		"zod": "4.6.6",
++		"miniflare": {
++			"undici": "7.30.1"
++		}
+ 	}
+ }
+--- a/packages/agent/package.json
++++ b/packages/agent/package.json
+@@ -45,6 +45,6 @@
+ 	},
+ 	"devDependencies": {
+ 		"@types/node": "22.19.19",
+-		"vitest": "4.1.11"
++		"vitest": "4.1.12"
+ 	}
+ }
+--- a/packages/ai/package.json
++++ b/packages/ai/package.json
+@@ -101,6 +101,6 @@
+ 	"devDependencies": {
+ 		"@types/node": "22.19.19",
+ 		"canvas": "3.2.3",
+-		"vitest": "4.1.11"
++		"vitest": "4.1.12"
+ 	}
+ }
+--- a/packages/chord/package.json
++++ b/packages/chord/package.json
+@@ -91,7 +91,7 @@
+ 	"devDependencies": {
+ 		"@types/ws": "8.18.2",
+ 		"shx": "0.3.4",
+-		"vitest": "4.1.11",
++		"vitest": "4.1.12",
+ 		"ws": "8.21.0"
+ 	}
+ }
+--- a/packages/codemode/package.json
++++ b/packages/codemode/package.json
+@@ -71,6 +71,6 @@
+ 	},
+ 	"devDependencies": {
+ 		"shx": "0.3.4",
+-		"vitest": "4.1.11"
++		"vitest": "4.1.12"
+ 	}
+ }
+--- a/packages/coding-agent/package.json
++++ b/packages/coding-agent/package.json
+@@ -61,7 +61,7 @@
+ 		"quickjs-wasi": "3.6.2",
+ 		"semver": "7.8.5",
+ 		"typebox": "1.3.27",
+-		"undici": "8.10.2",
++		"undici": "8.12.3",
+ 		"yaml": "2.9.0"
+ 	},
+ 	"overrides": {
+@@ -75,7 +75,7 @@
+ 		"@types/semver": "7.7.1",
+ 		"marked": "18.0.11",
+ 		"shx": "0.3.4",
+-		"vitest": "4.1.11"
++		"vitest": "4.1.12"
+ 	},
+ 	"keywords": [
+ 		"coding-agent",
+--- a/packages/durable/package.json
++++ b/packages/durable/package.json
+@@ -162,6 +162,6 @@
+ 		"@cloudflare/vitest-plugin": "1.4.4",
+ 		"fake-indexeddb": "6.2.6",
+ 		"shx": "0.3.4",
+-		"vitest": "4.1.11"
++		"vitest": "4.1.12"
+ 	}
+ }
+--- a/packages/env/package.json
++++ b/packages/env/package.json
+@@ -50,6 +50,6 @@
+ 	},
+ 	"devDependencies": {
+ 		"shx": "0.3.4",
+-		"vitest": "4.1.11"
++		"vitest": "4.1.12"
+ 	}
+ }
+--- a/packages/evals/package.json
++++ b/packages/evals/package.json
+@@ -17,7 +17,7 @@
+ 		"@vitest-evals/core": "0.15.0",
+ 		"autoevals": "0.3.0",
+ 		"shx": "0.3.4",
+-		"vitest": "4.1.11",
++		"vitest": "4.1.12",
+ 		"vitest-evals": "0.15.0"
+ 	}
+ }
+--- a/packages/mcp/package.json
++++ b/packages/mcp/package.json
+@@ -56,6 +56,6 @@
+ 	"devDependencies": {
+ 		"@types/cross-spawn": "6.0.6",
+ 		"shx": "0.3.4",
+-		"vitest": "4.1.11"
++		"vitest": "4.1.12"
+ 	}
+ }
+--- a/packages/telemetry/package.json
++++ b/packages/telemetry/package.json
+@@ -47,6 +47,6 @@
+ 	},
+ 	"devDependencies": {
+ 		"@types/node": "22.19.19",
+-		"vitest": "4.1.11"
++		"vitest": "4.1.12"
+ 	}
+ }

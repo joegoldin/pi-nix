@@ -610,6 +610,7 @@ assert lib.any (e: lib.hasInfix "pi-fast" e)
 # Minimap is opt-in; loading it exposes controls without enabling inference.
 assert !bare.minimap.enable;
 assert bare.minimap.intervalMs == 30000;
+assert bare.minimap.width == 44;
 assert envValue bare "PI_MINIMAP_WIDTH" == null;
 assert
   let

@@ -8,7 +8,7 @@ initTheme("dark", false);
 const editor = { text: "draft", getText() { return this.text; }, setText(text) { this.text = text; } };
 const container = { children: [editor], clear() { this.children = []; }, addChild(c) { this.children.push(c); } };
 const mode = Object.assign(Object.create(InteractiveMode.prototype), {
-  editor, editorContainer: container, extensionDialogTail: Promise.resolve(),
+  editor, editorContainer: container, extensionDialogs: [],
   ui: { setFocus() {}, requestRender() {} }, keybindings: {}, disposeActiveSelector() {},
   programStatus: { setBlocked() {} },
 });
@@ -21,21 +21,21 @@ await flush();
 assert.equal(container.children[0], question);
 const permission = api.confirm("Concurrent child permission", "Allow the operation?");
 await flush();
-assert.equal(container.children[0], question, "Permission prompt displaced an unanswered questionnaire");
+assert.notEqual(container.children[0], question, "Nested permission must be answerable while its parent waits");
+assert.equal(mode.extensionDialogs.length, 2);
+container.children[0].handleInput("\x1b");
+assert.equal(await permission, false, "Cancelling permission must not grant authority");
+assert.equal(container.children[0], question, "The unanswered question must return intact");
 finishQuestion("answer");
 assert.equal(await pendingQuestion, "answer");
-await flush();
-assert(mode.extensionSelector, "Queued permission prompt never opened");
-mode.extensionSelector.handleInput("\x1b");
-assert.equal(await permission, false, "Cancelling permission must not grant authority");
 assert.equal(container.children[0], editor);
 assert.equal(editor.text, "draft");
 
-// A failed custom factory must release the queue for later dialogs.
+// A failed custom factory must leave subsequent dialogs usable.
 await assert.rejects(api.custom(() => { throw new Error("factory failed"); }), /factory failed/);
 const final = api.custom((_tui, _theme, _kb, done) => { done("next"); return question; });
 assert.equal(await final, "next");
-console.log("Question/permission serialization, rejection recovery, draft preservation and no implicit approval passed");
+console.log("Native dialog stacking, nested permission cancellation, rejection recovery and draft preservation passed");
 
 if (process.argv[3]) {
   const { registerAsk } = await import(pathToFileURL(process.argv[3]));

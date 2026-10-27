@@ -8,5 +8,6 @@ pkgs.writeShellApplication {
   text = # bash
     ''
       patch --batch --forward -p1 < ${./coding-agent/installer-chord.patch}
+      patch --batch --forward -p1 < ${./coding-agent/dependency-updates.patch}
     '';
 }
