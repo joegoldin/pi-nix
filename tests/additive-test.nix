@@ -4,7 +4,7 @@
 # hash is recorded here, and any edit to one breaks the build with the file
 # name in the message.
 #
-# When a legitimate `git rebase upstream/master` changes one of these files,
+# When a reviewed upstream rebase or Pi runtime upgrade changes these files,
 # update its hash here in the same commit as the rebase. That is the point:
 # the hash changing should be a deliberate act, never a side effect.
 { pkgs, ... }:
@@ -22,7 +22,8 @@ let
 
   actual = pkgs.lib.mapAttrs (_name: path: builtins.hashFile "sha256" path) protected;
 
-  # Recorded from upstream/master @ b4773a5, plus the fork's own edits to four
+  # Recorded for Pi 1.4.0, on the upstream/master @ b4773a5 base, plus fork edits
+  # to the protected files. Earlier baselines included edits to four
   # of them. Each is a deliberate divergence with its reason written where it
   # lives:
   #
@@ -34,15 +35,20 @@ let
   #
   #   options.nix -- jail.privateAgentSubdirs has to append its tmpfs after the
   #   agent-directory bind, and that bind is emitted here.
+  #   VERSION.json, bun.nix -- the Pi 1.4 source and generated dependencies.
+  #   package.nix, package-bun.nix, sync.nix -- apply the audited dependency
+  #   compatibility hook consistently to npm and Bun builds and regeneration.
+  #   regenerate-models.nix -- apply the same manifest patches before npm ci.
+  #   options.nix -- retain the published launcher configuration/MCP merge wiring.
   expected = {
-    "VERSION.json" = "9edc0cc1c23cf92df06b75a7a80da22b5c92f42892829b824e5b53d770ee5841";
-    "coding-agent/bun.nix" = "283e48b1c3106d6351bc4f75a5030cb536510af7b77a5ab2079891ff5027283c";
-    "coding-agent/options.nix" = "9aa0f06210faddd4e4724f286c591bbffb0935f11a0d3bad4634d5b91d753b03";
-    "coding-agent/package-bun.nix" = "12d41d833bd73a6d10591beb8c1f3673544a4c90550063f91a9539a61ec630b4";
-    "coding-agent/package.nix" = "faf1fab660452e42cb2d9a528ccc273e88c4b6dd00996e7161493c080d433faa";
-    "regenerate-models.nix" = "d9ade9a165e7de1a1cefc1ae859a1f30cff317e2076e3d9fbae07d4bd8cfbea5";
+    "VERSION.json" = "dd8e48737748a3613acb76c041a7a962da55f702bd1cd22fa5e56f12ecf77ce9";
+    "coding-agent/bun.nix" = "71950b35ce99c3c1132daf9f3c5e81f4a82cc018fd0eb0da4d66ad88969082b0";
+    "coding-agent/options.nix" = "8e4d15055baf64dd62f7e5d724d1fd958eee1cbec2299f5a414a8d8fb001747a";
+    "coding-agent/package-bun.nix" = "d3439e7199c9b4ee7d6e610dc5311bf361e9d766a298905cc2424db57187bdbc";
+    "coding-agent/package.nix" = "2365edc0215c9ee48f34e45c1b143999daeef7011db7637de181fd0240f2dd67";
+    "regenerate-models.nix" = "c91f62b9768a2af5129b8a02c55b887c4edf3a47aa7021ef79c184d9b8c116b4";
     "scan.nix" = "916d7beef7edc2b9c586b5e2050f826d311af9e95a3d31b315be1648b8a2da14";
-    "sync.nix" = "7a0055e9684df1aa61d634ff8f8d360341da1c05537c350979a5dccfd5e4717d";
+    "sync.nix" = "395a4441c88c3717baaa4f7855f5f634c3273b04470794a95fdce58bb0adf2f1";
   };
 
   drifted = pkgs.lib.attrNames (

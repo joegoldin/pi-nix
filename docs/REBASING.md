@@ -18,7 +18,7 @@ touches them:
 
 ## What we edit upstream
 
-Only these, and only as insertions:
+Prefer these insertion points; recorded protected-file exceptions are described below:
 
 | File | Our change |
 | --- | --- |
@@ -29,8 +29,9 @@ Only these, and only as insertions:
 | `coding-agent/home-manager.nix` | one line adding `extra-options.nix` to `imports` |
 | `README.md` | rewritten for the fork |
 
-`coding-agent/options.nix` is **never** modified. Our options module reaches
-pi's command line through `extraArgs`, `extensions`, `skills`,
+Prefer leaving `coding-agent/options.nix` unchanged. Its recorded fork changes
+provide launcher configuration/MCP merging and private agent-directory mounts.
+Our options module otherwise reaches pi's command line through `extraArgs`, `extensions`, `skills`,
 `promptTemplates`, `settings`, and `environment`, all of which merge across
 module definitions, and it overrides the `package` default with `lib.mkDefault`
 rather than editing the declaration.
@@ -47,7 +48,7 @@ git fetch upstream
 git rebase upstream/master
 ```
 
-Expect conflicts only in the six files in the table above. Resolve by keeping
+Expect conflicts in the table above and in the recorded protected-file divergences. Resolve by keeping
 **both** sides: upstream's version of the surrounding code plus our insertion.
 Never resolve a conflict by dropping an upstream hunk.
 
@@ -62,5 +63,9 @@ git diff upstream/master --stat -- \
   VERSION.json package-lock.json bun.lock ai
 ```
 
-The `git diff` must print nothing. If it does not, an upstream file was
-restructured and the next rebase will be painful — revert that hunk.
+Review any differences against the intentional divergences documented in
+`tests/additive-test.nix`. A Pi runtime upgrade also changes the source pin,
+generated locks and, when needed, dependency compatibility hooks. Review those
+changes and refresh the protected-file hashes with the upgrade; do not remove
+files from the guard or bypass it. Unexplained differences need investigation
+before release.
