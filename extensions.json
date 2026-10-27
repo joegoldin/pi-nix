@@ -22,9 +22,9 @@
     "prompts": []
   },
   "pi-lens": {
-    "version": "4.3.0",
-    "url": "https://registry.npmjs.org/pi-lens/-/pi-lens-4.3.0.tgz",
-    "hash": "sha512-6PTzboAc9z2WSEA6aNXCWGsd5ES5MKNJBMIxazbEk2fzcXZFerhJ1k07UDrGjE+hkkd6TnPhsHAxMQ28ZT0WGQ==",
+    "version": "4.4.6",
+    "url": "https://registry.npmjs.org/pi-lens/-/pi-lens-4.4.6.tgz",
+    "hash": "sha512-Hlf4YJuLNpzOnIUj0MMobtsG2mH4n3fkgjdywQhVvwmetUpkgr0J4n9NJKMhRaDszyTshQ4itJtkyd3nUKfktw==",
     "bundled": false,
     "entrypoints": [],
     "skills": [

@@ -2,7 +2,7 @@
   "package": "tree-sitter-wasms",
   "version": "0.1.13",
   "grammars": {
-    "tree-sitter-bash.wasm": "sha256:807dcdb1380a59befb112ed8fbd3d3872c7fadaf5903a769282b50973b30696d",
+    "tree-sitter-bash.wasm": "sha256:8292919c88a0f7d3fb31d0cd0253ca5a9531bc1ede82b0537f2c63dd8abe6a7a",
     "tree-sitter-c.wasm": "sha256:056b25072382f72deee2c64ec238ffc4bb8cf42844ef21502c0e70f03a8a0d66",
     "tree-sitter-c_sharp.wasm": "sha256:6266a7e32d68a3459104d994dc848df15d5672b0ea8e86d327274b694f8e6991",
     "tree-sitter-cpp.wasm": "sha256:f6afdf53bfd6de76557bb7edb624a3a3869e14d9a83b78433f93617ecee42527",
@@ -39,6 +39,11 @@
       "package": "@tree-sitter-grammars/tree-sitter-yaml",
       "version": "0.7.1",
       "url": "https://unpkg.com/@tree-sitter-grammars/tree-sitter-yaml@0.7.1/tree-sitter-yaml.wasm"
+    },
+    "tree-sitter-bash.wasm": {
+      "package": "tree-sitter-bash",
+      "version": "0.25.1",
+      "url": "https://unpkg.com/tree-sitter-bash@0.25.1/tree-sitter-bash.wasm"
     }
   },
   "vendored": {
