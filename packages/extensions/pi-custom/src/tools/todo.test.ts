@@ -304,3 +304,45 @@ for (const stop of ["clear", "shutdown"]) test(`background maintenance cancels o
 	timer.advance(600_001);
 	expect(h.messages).toHaveLength(0);
 });
+
+test("maintenance is model-side bookkeeping, not a new conversational request", async () => {
+	const { getCurrentSystemPrompt, getCurrentTools } = await import("@earendil-works/pi-ai");
+	const timer = fakeTodoClock(); const h = uiHarness(timer.clock);
+	for (let i = 0; i < 6; i++) await h.act({ action: "create", subject: `Task ${i}` });
+	for (let id = 1; id <= 5; id++) await h.act({ action: "update", id, status: "completed" });
+	await h.act({ action: "update", id: 6, status: "in_progress" });
+	timer.advance(60_001);
+	const note = h.messages[0].message;
+	const tool = { name: "read", description: "Read", parameters: { type: "object" } };
+	const user = { role: "user", content: "Continue the comparison research", timestamp: 1 };
+	const result = { role: "toolResult", toolCallId: "read1", toolName: "read", content: [{ type: "text", text: "Research evidence" }], isError: false, timestamp: 2 };
+	const messages = [
+		{ role: "system", content: "Keep operator constraints", toolsAdded: [tool], timestamp: 0 }, user, result,
+		{ role: "custom", ...note, content: "UNTRUSTED NOTICE TEXT", timestamp: 3 },
+	];
+	const transformed = h.emit("context_with_system", { messages })?.messages ?? messages;
+	expect(transformed.some((message: any) => message.role === "custom" && message.customType === note.customType)).toBe(false);
+	expect(transformed.filter((message: any) => message.role !== "system")).toEqual([user, result]);
+	const prompt = getCurrentSystemPrompt(transformed as never);
+	expect(prompt).toContain("Keep operator constraints");
+	expect(prompt).toContain("continue the already-authorized work");
+	expect(prompt).toContain("cleanup-only final response");
+	expect(prompt).not.toContain("UNTRUSTED NOTICE TEXT");
+	expect(getCurrentTools(transformed as never)).toEqual([tool]);
+	expect(h.messages).toHaveLength(1);
+	expect(h.messages[0].options.triggerTurn).toBe(false);
+	// The request-local hint is not repeated at every tool step.
+	const next = h.emit("context_with_system", { messages })?.messages ?? messages;
+	expect(getCurrentSystemPrompt(next as never)).not.toContain("Candidates:");
+});
+
+test("stale maintenance cannot elicit an already-pruned final acknowledgement", async () => {
+	const timer = fakeTodoClock(); const h = uiHarness(timer.clock);
+	for (let i = 0; i < 5; i++) await h.act({ action: "create", subject: `Done ${i}` });
+	for (let id = 1; id <= 5; id++) await h.act({ action: "update", id, status: "completed" });
+	timer.advance(60_001);
+	for (let id = 1; id <= 5; id++) await h.act({ action: "delete", id });
+	const user = { role: "user", content: "Keep researching", timestamp: 1 };
+	const messages = [user, { role: "custom", ...h.messages[0].message, timestamp: 2 }];
+	expect(h.emit("context_with_system", { messages })?.messages ?? messages).toEqual([user]);
+});

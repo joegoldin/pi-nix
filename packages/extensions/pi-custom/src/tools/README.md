@@ -54,7 +54,13 @@ branch changes and shutdown cancel pending timers.
 The reminder tells the model to review the current list before tombstoning
 obsolete completed tasks, preserving unfinished work, blockers, dependency
 references and required evidence. The background task never deletes tasks itself;
-if every completion is still referenced, it sends no reminder.
+if every completion is still referenced, it sends no reminder. At request time,
+maintenance receipts are removed from conversational messages so they cannot
+become a new user request. An eligible reminder becomes one bounded system hint,
+reconstructed from the live list rather than its raw text. Stale reminders are
+omitted. Cleanup is quiet bookkeeping: continue already-authorized work afterward,
+not a cleanup-only final response. This never restarts completed, blocked or
+waiting work, and the original receipt remains in session history for auditing.
 
 Starting a task returns conflicting active tasks to pending. Simultaneous
 work requires distinct explicit owners, not several unowned in-progress

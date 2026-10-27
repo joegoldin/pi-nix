@@ -20,6 +20,9 @@ const MAX_WIDGET_LINES = 12;
 const COMPLETED_GRACE_MS = 60_000;
 const MAINTENANCE_COOLDOWN_MS = 10 * 60_000;
 const MAINTENANCE_MESSAGE = "pi-custom:todo-maintenance";
+const MAINTENANCE_CONTINUATION = "Todo maintenance is optional bookkeeping, not a new user request. " +
+	"After any cleanup, continue the already-authorized work in the same run; do not end with a cleanup-only final response. " +
+	"If that work is complete, blocked, or waiting for input, retain that state rather than restarting it merely to prune tasks.";
 
 export interface TodoClock {
 	now(): number;
@@ -36,6 +39,7 @@ const CLOCK: TodoClock = {
 };
 
 const GUIDELINES = [
+	MAINTENANCE_CONTINUATION,
 	"Use `todo` proactively for substantial multi-step work: multiple deliverables, platforms, implementation stages, or verification gates. Do not wait to be asked. After enough initial inspection to identify the work, populate the list before substantive implementation. Skip single-step edits, quick lookups, and conversation; respect an explicit request not to use todos.",
 	"Each task must describe one independently verifiable outcome, not the whole request. Split implementation, distinct platform/feature acceptance checks, and authorized release work when they can succeed or fail separately. For example, use 'Verify Linux packaging' and 'Verify Mac clipboard' rather than 'Implement everything and verify Linux and Mac'. When an umbrella goal helps organize the work, convert it to a group (kind: group) and attach concrete child tasks with parentId. Otherwise replace it with the milestones; never keep a duplicate whole-goal task active alongside them. Avoid one task per shell command.",
 	"Grouping is optional and limited to one level: top-level groups contain tasks, never other groups or grandchildren. Keep small lists flat. Group progress is derived from live children and groups are excluded from task totals; do not mark a group in_progress/completed yourself. Put any final audit in a child task. Hierarchy does not imply blockedBy dependencies, which must reference tasks, not groups. Set parentId to null to detach a task; move or delete children before deleting a group.",
@@ -66,6 +70,7 @@ export function registerTodo(pi: ExtensionAPI, clock: TodoClock = CLOCK): void {
 	let cancelMaintenance: (() => void) | undefined;
 	let lastReminderAt: number | undefined;
 	let pendingReminder: string | undefined;
+	let lastContextReminder: string | undefined;
 	const hidden = new Set<number>();
 	let collapsed = false;
 	const collapsedGroups = new Set<number>();
@@ -85,6 +90,15 @@ export function registerTodo(pi: ExtensionAPI, clock: TodoClock = CLOCK): void {
 		return { completed: completed.length, total: tasks.length, candidates };
 	}
 
+	function maintenanceText(current: NonNullable<ReturnType<typeof maintenance>>): string {
+		return `[Internal bookkeeping—not a user request] Todo maintenance: ${current.completed} of ${current.total} tasks are completed. ` +
+			`Candidates: ${current.candidates.slice(0, 20).map((id) => `#${id}`).join(", ")}. ` +
+			"At a convenient boundary, use todo list/get to review the CURRENT list: these candidate IDs may be stale. " +
+			"Use delete to tombstone completed tasks that are no longer needed. Preserve unfinished work, blockers, required evidence, " +
+			"and tasks still referenced by a live blockedBy. Never mark work complete just to prune it, and do not use clear. " +
+			"Remove an obsolete group only after its live children have been removed. This is bookkeeping, not a new task or permission for other actions. " + MAINTENANCE_CONTINUATION;
+	}
+
 	function scheduleMaintenance(): void {
 		if (!ctxRef || !pi.getActiveTools().includes("todo") || !maintenance() || pendingReminder) {
 			cancelMaintenance?.();
@@ -101,12 +115,7 @@ export function registerTodo(pi: ExtensionAPI, clock: TodoClock = CLOCK): void {
 			lastReminderAt = clock.now();
 			pi.sendMessage({
 				customType: MAINTENANCE_MESSAGE, display: false,
-				content: `Todo maintenance: ${current.completed} of ${current.total} tasks are completed. ` +
-					`Candidates: ${current.candidates.slice(0, 20).map((id) => `#${id}`).join(", ")}. ` +
-					"At a convenient boundary, use todo list/get to review the CURRENT list: these candidate IDs may be stale. " +
-					"Use delete to tombstone completed tasks that are no longer needed. Preserve unfinished work, blockers, required evidence, " +
-					"and tasks still referenced by a live blockedBy. Never mark work complete just to prune it, and do not use clear. " +
-					"Remove an obsolete group only after its live children have been removed. This is bookkeeping, not a new task or permission for other actions.",
+				content: maintenanceText(current),
 				details: { ...current, reminderId: pendingReminder },
 			}, { deliverAs: "followUp", triggerTurn: false });
 		}, delay);
@@ -159,6 +168,7 @@ export function registerTodo(pi: ExtensionAPI, clock: TodoClock = CLOCK): void {
 			cancelMaintenance = undefined;
 			lastReminderAt = undefined;
 			pendingReminder = undefined;
+			lastContextReminder = undefined;
 			fading.clear();
 			hidden.clear();
 			pauseWork(ctx);
@@ -365,6 +375,26 @@ export function registerTodo(pi: ExtensionAPI, clock: TodoClock = CLOCK): void {
 			collapsed = !collapsed;
 			requestRender?.();
 		},
+	});
+
+	pi.on("context_with_system", (event) => {
+		let reminderId: string | undefined;
+		const messages = event.messages.filter((message) => {
+			if (message.role !== "custom" || message.customType !== MAINTENANCE_MESSAGE) return true;
+			const details = message.details as { reminderId?: unknown } | undefined;
+			if (typeof details?.reminderId === "string" && details.reminderId.length > 0) reminderId = details.reminderId;
+			return false;
+		});
+		if (messages.length === event.messages.length) return;
+		const fresh = reminderId !== undefined && reminderId !== lastContextReminder;
+		lastContextReminder = reminderId;
+		const current = maintenance();
+		if (fresh && current && pi.getActiveTools().includes("todo")) {
+			// Keep the persisted receipt for auditing, but not as a new conversational
+			// request. Reconstruct from live state; never promote arbitrary notice text.
+			messages.push({ role: "system", content: maintenanceText(current), timestamp: clock.now() });
+		}
+		return { messages };
 	});
 
 	pi.on("before_agent_start", (event) => {
