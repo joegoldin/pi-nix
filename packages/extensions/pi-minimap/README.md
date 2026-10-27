@@ -3,14 +3,16 @@
 A source-linked semantic sidebar for fullscreen Pi. It observes the conversation;
 it cannot run tools, edit files, steer the agent or inject chat messages.
 
-Enable the package with `programs.pi.coding-agent.minimap.enable = true`, then use
-`/minimap` to open it. Loading the extension does not start inference. Its visible
-state and selected model are restored from the current session branch.
+Enable the package with `programs.pi.coding-agent.minimap.enable = true`, and it opens by
+default in new fullscreen sessions. Use `/minimap off` to hide it and pause
+inference. Explicit visibility choices and the selected model are restored from
+the current session branch.
 
 ## Controls
 
-- `/minimap [on|off|model|refresh]` toggles the panel, switches the summarizer or
-  retries a failed update.
+- `/minimap [on|off|model|refresh|history]` toggles the panel, switches the summarizer or
+  retries a failed update. `/minimap history` (or `/minimap log`) opens the full
+  call journal and saved sidebar snapshots without making a model request.
 - **Ctrl+M** toggles and **Ctrl+Shift+M** switches models when the terminal sends
   distinct Kitty key encodings. Ordinary Enter is never intercepted: legacy
   terminals encode Ctrl+M as Enter. **Alt+m / Alt+Shift+m** are safe fallbacks.
@@ -18,7 +20,7 @@ state and selected model are restored from the current session branch.
 - Click the model button to switch between Cerebras Qwen and OpenAI Luna with low
   reasoning. Existing summaries and usage totals survive the switch.
 - Click a summary to scroll the main conversation to its source without moving
-  editor focus. Milestones and recaps link to the beginning of their source span.
+  editor focus. The destination is highlighted once for about 1.4 seconds. Milestones and recaps link to the beginning of their source span.
   A compacted-away source produces a notice rather than jumping elsewhere.
 - Wheel over the panel to scroll its history independently. “Now,” runtime status,
   and minimap-only token/cost totals stay pinned at the bottom. New summaries do
@@ -26,8 +28,9 @@ state and selected model are restored from the current session branch.
 
 ## Bounds and accounting
 
-The default panel is 38 columns wide and hides when fewer than 72 chat columns
-remain. Hiding, including automatic hiding on resize, cancels the current request
+The panel grows to 44 columns on wide terminals and uses at most half the width
+on narrow ones. It hides only below 48 terminal columns (24 per pane) or 14 rows
+of conversation space above the editor. Hiding, including automatic hiding on resize, cancels the current request
 and pauses new requests. Reopening shows catching-up state and a distinct recap.
 
 Routine updates need five new message/tool-result records and wait at least
@@ -49,7 +52,7 @@ Target paths and task labels are retained; common credential forms are redacted
 before clipping. This text goes to the selected provider when the panel is open.
 Redaction is not a guarantee that arbitrary private text can safely be shared.
 
-History is bounded to six recent entries, two milestones and up to three short
+The sidebar view is bounded to six recent entries, two milestones and up to three short
 EARLIER bullets. Empty model beats do not produce tool-call spam. Entries can be
 revised rather than appended; exact repeats are merged. Source IDs link back to the
 original transcript. Branch-local snapshots use Pi's append-only custom-entry
@@ -85,6 +88,22 @@ change. The runtime status is separate: active agent,
 running tools, an open question, idle, or a confirmed goal wait/block. A tool failure
 alone does not prove that the whole task is blocked. The observer never invents
 runtime state from summary prose.
+
+## Full history
+
+The compact view does not limit retention. From this version onward, each attempt
+appends its bounded input, system prompt, model, timestamps, complete text response,
+reported usage and pricing to the session journal. Failed, cancelled, invalid and
+superseded results are recorded too. Hidden reasoning and credentials are excluded.
+Folding and revisions do not overwrite earlier calls or displayed snapshots.
+
+Use `/minimap history` to choose a call or a saved sidebar snapshot. Scroll with
+arrows, PageUp/PageDown or Home/End; Escape or Enter closes the viewer. Earlier
+versions' snapshots remain available, but their unrecorded calls cannot be recovered.
+The journal is session-wide; inherited fork records are labelled. Late results
+and their accounting stay in the originating session rather than charging a fork.
+Persistent sessions retain records through resume and compaction; in-memory
+sessions do not retain retired sessions after switching away.
 
 ## Configuration
 

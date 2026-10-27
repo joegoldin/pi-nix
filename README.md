@@ -192,7 +192,7 @@ Hidden panels pause inference, including when the terminal is too narrow.
 
 Ctrl+M / Ctrl+Shift+M work with distinct Kitty key encodings; Alt+m /
 Alt+Shift+m are the safe fallbacks where Ctrl+M is indistinguishable from Enter.
-Loading the extension does not start inference. See
+New fullscreen sessions show it by default; hiding it pauses inference. See
 [pi-minimap](packages/extensions/pi-minimap/README.md) for bounds, privacy,
 accounting and configuration.
 

@@ -811,3 +811,9 @@ test("structured focus does not need a duplicate prose purpose field", () => {
 	expect(result.now).toBe("Minimap");
 	expect(result.focus?.[0]?.subtopics).toEqual(["Check batching"]);
 });
+
+ test("new sessions show the minimap, while saved hidden sessions stay hidden", () => {
+ expect(emptySnapshot().enabled).toBe(true);
+ const hidden = {...emptySnapshot(), enabled: false};
+ expect(restore([{type: "custom", customType: STATE_TYPE, data: hidden}]).enabled).toBe(false);
+ });

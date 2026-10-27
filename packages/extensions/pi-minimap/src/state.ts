@@ -57,6 +57,7 @@ export interface Batch {
 	omitted: number;
 	events: Array<{ id: string; text: string }>;
 }
+export const CALL_TYPE = "pi-minimap:call";
 export const STATE_TYPE = "pi-minimap:state";
 export const emptyUsage = (): Usage => ({
 	requests: 0,
@@ -70,7 +71,7 @@ export const emptyUsage = (): Usage => ({
 });
 export const emptySnapshot = (): Snapshot => ({
 	version: 1,
-	enabled: false,
+	enabled: true,
 	model: "qwen",
 	lastId: "",
 	chapters: [],
@@ -88,8 +89,8 @@ export function clean(value: string, limit: number): string {
 		.trim()
 		.slice(0, limit);
 }
-function excerpt(value: string, limit = 480, keepEnds = false): string {
-	const redacted = value
+export function redact(value: string): string {
+	return value
 		.replace(
 			/-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?(?:-----END [^-]*PRIVATE KEY-----|$)/g,
 			"[redacted private key]",
@@ -103,6 +104,9 @@ function excerpt(value: string, limit = 480, keepEnds = false): string {
 			/\b((?:[\w]+[_-])?(?:api[_-]?key|private[_-]?key|password|secret|(?:access[_-]?)?token))["']?\s*[:=]\s*(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s"',;]+)/gi,
 			"$1=[redacted]",
 		);
+}
+function excerpt(value: string, limit = 480, keepEnds = false): string {
+	const redacted = redact(value);
 	const text = clean(
 		redacted.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, ""),
 		keepEnds ? redacted.length : limit,
@@ -250,10 +254,13 @@ export function restoreUsage(entries: unknown[], sessionId: string): Usage {
 		if (
 			!record(entry) ||
 			entry.type !== "custom" ||
-			entry.customType !== STATE_TYPE ||
+			![STATE_TYPE, CALL_TYPE].includes(String(entry.customType)) ||
 			!record(entry.data) ||
 			entry.data.version !== 1 ||
-			entry.data.usageSessionId !== sessionId
+			(entry.customType === STATE_TYPE
+				? entry.data.usageSessionId !== sessionId
+				: entry.data.phase !== "accounting" ||
+					entry.data.sessionId !== sessionId)
 		)
 			continue;
 		const usage = decodeUsage(entry.data.usage);

@@ -1,3 +1,5 @@
+import { showHistory } from "./history.ts";
+import { randomUUID } from "node:crypto";
 import type { Component, TUI } from "@earendil-works/pi-tui";
 import type {
 	ExtensionAPI,
@@ -21,6 +23,11 @@ import {
 } from "./state.ts";
 import { MinimapView } from "./view.ts";
 import { CerebrasRates, costAtRates } from "./pricing.ts";
+import {
+	createAuditWriter,
+	type AuditInput,
+	type AuditWriter,
+} from "./audit.ts";
 
 interface SidebarUI {
 	setSidebar?(
@@ -138,6 +145,7 @@ export default function register(pi: ExtensionAPI): void {
 		prompt: string,
 		signal: AbortSignal,
 		started: () => void,
+		audit: AuditWriter,
 	): Promise<Completion> {
 		if (inFlight) await inFlight.catch(() => {});
 		if (signal.aborted) throw new Error("Cancelled");
@@ -157,56 +165,95 @@ export default function register(pi: ExtensionAPI): void {
 								(process.env.PI_MINIMAP_LUNA_PROVIDER || "openai") &&
 							model.id === (process.env.PI_MINIMAP_LUNA_MODEL || "gpt-6-luna"),
 					);
-		if (!model) throw new Error("Selected model unavailable");
+		const callId = randomUUID();
+		const sessionId = owner.sessionManager.getSessionId();
+		const parameters = {
+			maxTokens: 600,
+			sessionId: `pi-minimap:${sessionId}:${choice}`,
+			...(choice === "luna" ? { reasoning: "low" as const } : {}),
+		};
+		audit({
+			id: callId,
+			phase: "request",
+			at: Date.now(),
+			model: model ? `${model.provider}/${model.id}` : choice,
+			prompt,
+			systemPrompt: SYSTEM_PROMPT,
+			parameters,
+			sourceId: owner.sessionManager.getLeafId?.(),
+		});
 		const pending = (async (): Promise<Completion> => {
-			const prices = await rates.get(
-				model,
-				async () => {
-					const auth = await owner.modelRegistry.getApiKeyAndHeaders(model);
-					if (
-						!auth.ok ||
-						(auth.baseUrl &&
-							auth.baseUrl.replace(/\/$/, "") !== "https://api.cerebras.ai/v1")
-					)
-						return;
-					return auth.apiKey;
-				},
-				signal,
-			);
-			if (signal.aborted) throw new Error("Cancelled");
-			started();
-			const response = await owner.modelRegistry
-				.streamSimple(
+			try {
+				if (!model) throw new Error("Selected model unavailable");
+				const prices = await rates.get(
 					model,
-					{
-						systemPrompt: SYSTEM_PROMPT,
-						messages: [
-							{ role: "user", content: prompt, timestamp: Date.now() },
-						],
+					async () => {
+						const auth = await owner.modelRegistry.getApiKeyAndHeaders(model);
+						if (
+							!auth.ok ||
+							(auth.baseUrl &&
+								auth.baseUrl.replace(/\/$/, "") !==
+									"https://api.cerebras.ai/v1")
+						)
+							return;
+						return auth.apiKey;
 					},
-					{
-						signal,
-						maxTokens: 600,
-						sessionId: `pi-minimap:${owner.sessionManager.getSessionId()}:${choice}`,
-						...(choice === "luna" ? { reasoning: "low" as const } : {}),
-					},
-				)
-				.result();
-			const priced = Object.values(model.cost).some(
-				(value) => typeof value === "number" && value > 0,
-			);
-			const usage = reportedUsage(response.usage, priced);
-			if (usage && prices) usage.cost = costAtRates(usage, prices);
-			return {
-				text: response.content
+					signal,
+				);
+				if (signal.aborted) throw new Error("Cancelled");
+				audit({ id: callId, phase: "started", at: Date.now() });
+				started();
+				const response = await owner.modelRegistry
+					.streamSimple(
+						model,
+						{
+							systemPrompt: SYSTEM_PROMPT,
+							messages: [
+								{ role: "user", content: prompt, timestamp: Date.now() },
+							],
+						},
+						{ signal, ...parameters },
+					)
+					.result();
+				const priced = Object.values(model.cost).some(
+					(value) => typeof value === "number" && value > 0,
+				);
+				const usage = reportedUsage(response.usage, priced);
+				if (usage && prices) usage.cost = costAtRates(usage, prices);
+				const text = response.content
 					.filter((block) => block.type === "text")
 					.map((block) => block.text)
-					.join("\n"),
-				usage,
-				error: ["error", "aborted", "length"].includes(response.stopReason)
-					? "Incomplete summary"
-					: undefined,
-			};
+					.join("\n");
+				audit({
+					id: callId,
+					phase: "response",
+					at: Date.now(),
+					text,
+					stopReason: response.stopReason,
+					reportedUsage: usage,
+					pricing: { perToken: prices, configuredPerMillion: model.cost },
+				});
+				return {
+					callId,
+					text,
+					usage,
+					error: ["error", "aborted", "length"].includes(response.stopReason)
+						? "Incomplete summary"
+						: undefined,
+				};
+			} catch (error) {
+				audit({
+					id: callId,
+					phase: "error",
+					at: Date.now(),
+					error: signal.aborted
+						? "Cancelled"
+						: !model
+							? "Selected model unavailable"
+							: "Summary request failed",
+				});
+				throw error;
+			}
 		})();
 		inFlight = pending;
 		try {
@@ -251,7 +298,7 @@ export default function register(pi: ExtensionAPI): void {
 				return view;
 			},
 			{
-				width: setting("PI_MINIMAP_WIDTH", 38, 24, 60),
+				width: setting("PI_MINIMAP_WIDTH", 44, 24, 60),
 				onVisibilityChange: (shown) => {
 					if (current !== engine) return;
 					stopAgeTimer();
@@ -298,6 +345,26 @@ export default function register(pi: ExtensionAPI): void {
 		// History is branch-local; actual spend must not disappear when changing branches.
 		state.usage =
 			usage ?? restoreUsage(context.sessionManager.getEntries(), id);
+		const writeAudit = createAuditWriter(
+			context.sessionManager,
+			() => ctx?.sessionManager,
+			(type, data) => pi.appendEntry(type, data),
+		);
+		const audit: AuditWriter = (event) => {
+			try {
+				writeAudit(event);
+			} catch (error) {
+				context.ui.notify("Minimap history could not be saved", "error");
+				throw error;
+			}
+		};
+		const trace = (event: AuditInput) => {
+			try {
+				audit(event);
+			} catch {
+				/* Report ancillary failures without losing already received usage. */
+			}
+		};
 		const current = new MinimapEngine(
 			state,
 			{
@@ -307,9 +374,28 @@ export default function register(pi: ExtensionAPI): void {
 					return readBatch(entries, lastId, recap);
 				},
 				request: (choice, prompt, signal, started) =>
-					request(context, choice, prompt, signal, started),
+					request(context, choice, prompt, signal, started, audit),
 				changed,
-				accounted: () => {
+				settled: (result, phase) => {
+					if (result.callId)
+						trace({
+							id: result.callId,
+							phase,
+							at: Date.now(),
+							stateEntryId:
+								phase === "applied"
+									? context.sessionManager.getLeafId?.()
+									: undefined,
+						});
+				},
+				accounted: (result) => {
+					if (result.callId)
+						trace({
+							id: result.callId,
+							phase: "accounting",
+							at: Date.now(),
+							usage: structuredClone(current.state.usage),
+						});
 					if (engine !== current && engine?.state.usage === current.state.usage)
 						engine.persist();
 				},
@@ -399,9 +485,19 @@ export default function register(pi: ExtensionAPI): void {
 		);
 		changed();
 	});
+	pi.registerShortcut("alt+m", {
+		description: "Toggle minimap",
+		handler: async () => toggle(),
+	});
+	pi.registerShortcut("alt+shift+m", {
+		description: "Switch minimap model",
+		handler: async () => {
+			engine?.switchModel();
+		},
+	});
 	pi.registerCommand("minimap", {
 		description:
-			"Semantic sidebar: /minimap [on|off|model|refresh]. Ctrl+M/Ctrl+Shift+M with distinct Kitty keys, or Alt+m/Alt+Shift+m.",
+			"Semantic sidebar: /minimap [on|off|model|refresh|history]. Ctrl+M/Ctrl+Shift+M with distinct Kitty keys, or Alt+m/Alt+Shift+m.",
 		handler: async (args, context) => {
 			if (context.mode !== "tui") {
 				context.ui.notify("Minimap requires fullscreen TUI mode.", "warning");
@@ -414,13 +510,20 @@ export default function register(pi: ExtensionAPI): void {
 			)
 				load({}, context);
 			const action = args.trim().toLowerCase();
+			if (action === "history" || action === "log") {
+				await showHistory(context);
+				return;
+			}
 			if (action === "" || action === "toggle") toggle();
 			else if (action === "on" || action === "off") {
 				if (engine!.state.enabled !== (action === "on")) toggle();
 			} else if (action === "model") engine!.switchModel();
 			else if (action === "refresh") engine!.schedule(true);
 			else
-				context.ui.notify("Usage: /minimap [on|off|model|refresh]", "warning");
+				context.ui.notify(
+					"Usage: /minimap [on|off|model|refresh|history]",
+					"warning",
+				);
 		},
 	});
 }

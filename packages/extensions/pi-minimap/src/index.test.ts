@@ -1,3 +1,4 @@
+import { STATE_TYPE } from "./state.ts";
 import { afterEach, expect, test } from "bun:test";
 import register from "./index.ts";
 import { MinimapView } from "./view.ts";
@@ -7,6 +8,7 @@ afterEach(() => {
 });
 function harness() {
 	const handlers = new Map<string, (event: any, ctx: any) => any>();
+	const shortcuts = new Map<string, any>();
 	let command!: (args: string, ctx: any) => Promise<void>;
 	let view: MinimapView | undefined,
 		input: ((data: string) => unknown) | undefined;
@@ -104,13 +106,14 @@ function harness() {
 	};
 	register({
 		on: (name: string, handler: any) => handlers.set(name, handler),
+		registerShortcut: (key: string, spec: any) => shortcuts.set(key, spec),
 		registerCommand: (_name: string, spec: any) => {
 			command = spec.handler;
 		},
 		appendEntry: (customType: string, data: any) => {
-			persisted.push(data);
+			if (customType === STATE_TYPE) persisted.push(data);
 			branch.push({
-				id: `state${persisted.length}`,
+				id: `entry${branch.length}`,
 				type: "custom",
 				customType,
 				data,
@@ -121,6 +124,7 @@ function harness() {
 	shutdown.push(() => handlers.get("session_shutdown")!({}, ctx));
 	return {
 		ctx,
+		shortcuts,
 		calls,
 		persisted,
 		notices,
@@ -135,9 +139,10 @@ function harness() {
 	};
 }
 
-test("starts hidden; runtime adapter uses no tools, limits output and asks Luna for low reasoning", async () => {
+test("starts visible; runtime adapter uses no tools, limits output and asks Luna for low reasoning", async () => {
 	const h = harness();
 	expect(h.calls).toHaveLength(0);
+	expect(h.view().engine.state.enabled).toBe(true);
 	expect(h.input("\r")).toBeUndefined();
 	await h.command("on");
 	await h.view().engine.refresh();
@@ -287,6 +292,11 @@ test("branch replacement waits for cancellation and accounts a late paid reply w
 		},
 	});
 	await Promise.all([old, next]);
+	const { readCalls } = await import("./audit.ts");
+	const stale = readCalls(h.ctx.sessionManager.getEntries()).find((call) =>
+		call.events.some((event) => event.text === "stale reply"),
+	);
+	expect(stale?.events.some((event) => event.phase === "discarded")).toBe(true);
 	expect(requests).toBe(2);
 	expect(h.view().engine.state.recent.map((beat) => beat.from)).toEqual([
 		"other",
@@ -393,4 +403,52 @@ test("minute ticks refresh ages locally and hiding clears the timer", async () =
 		intervals.mockRestore();
 		clear.mockRestore();
 	}
+});
+
+test("minimap shortcuts are discoverable and do not claim Intercom's Alt+j", async () => {
+	const h = harness();
+	expect(h.shortcuts.get("alt+m").description).toBe("Toggle minimap");
+	expect(h.shortcuts.has("alt+shift+m")).toBe(true);
+	expect(h.shortcuts.has("alt+j")).toBe(false);
+	await h.shortcuts.get("alt+m").handler(h.ctx);
+	expect(h.persisted.at(-1).enabled).toBe(false);
+});
+
+test("call journal retains full inputs, excludes reasoning, and records rejected replies", async () => {
+	const { readCalls } = await import("./audit.ts");
+	const h = harness();
+	h.ctx.modelRegistry.streamSimple = () => ({
+		result: async () => ({
+			content: [
+				{ type: "thinking", thinking: "PRIVATE_REASONING" },
+				{ type: "text", text: "malformed visible response" },
+			],
+			stopReason: "stop",
+			usage: {
+				input: 20,
+				output: 10,
+				cacheRead: 0,
+				cacheWrite: 0,
+				cost: { total: 0.001 },
+			},
+		}),
+	});
+	await h.command("on");
+	await h.view().engine.refresh();
+	const calls = readCalls(h.ctx.sessionManager.getEntries());
+	expect(calls).toHaveLength(1);
+	expect(calls[0]!.events.map((e) => e.phase)).toEqual([
+		"request",
+		"started",
+		"response",
+		"accounting",
+		"invalid",
+	]);
+	expect(calls[0]!.events[0]!.prompt).toContain("Build a minimap");
+	expect(calls[0]!.events[0]!.parameters).toMatchObject({
+		maxTokens: 600,
+		sessionId: "pi-minimap:fake-session:qwen",
+	});
+	expect(JSON.stringify(calls)).toContain("malformed visible response");
+	expect(JSON.stringify(calls)).not.toContain("PRIVATE_REASONING");
 });
