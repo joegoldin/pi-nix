@@ -52,3 +52,26 @@ for (const text of ["history message", '<skill name="demo" location="/tmp/SKILL.
   assert.deepEqual(message, { role: "user", content: text, timestamp }, "rendering does not alter model input");
 }
 console.log("User timestamps: stored time, local zone, narrow widths, history/skills and prompt markers pass.");
+
+const continuation = "Continue the active /goal until it is complete:\n\n<goal_objective>\nFinish the implementation\n</goal_objective>\n\nFull continuation rules remain in model input.\n\n<!-- pi-goal-continuation:goal-id:4:nonce -->";
+const goalMessage = { role: "user", content: continuation, timestamp };
+const goalContext = {
+  chatContainer: new Container(), loadedResourcesContainer: new Container(), outputPad: 1,
+  messageComponents: new WeakMap(), toolOutputExpanded: false, showStatus() {},
+  getUserMessageText: () => continuation, getMarkdownThemeWithSettings: getMarkdownTheme,
+  getMarkdownTransformers: () => [],
+};
+InteractiveMode.prototype.addMessageToChat.call(goalContext, goalMessage);
+const goalCard = goalContext.chatContainer.children.find(child => child instanceof UserMessageComponent);
+const collapsed = plain(goalCard.render(100)).join("\n");
+assert(collapsed.includes("Goal continuation #4"), "Automatic goal continuation needs a compact summary");
+assert(goalCard.render(100).length <= 3, "Collapsed goal continuation must not occupy a full prompt block");
+assert(!collapsed.includes("Full continuation rules"));
+InteractiveMode.prototype.setToolsExpanded.call(goalContext, true);
+assert(plain(goalCard.render(100)).join("\n").includes("Full continuation rules"));
+InteractiveMode.prototype.setToolsExpanded.call(goalContext, false);
+assert.equal(plain(goalCard.render(100)).join("\n"), collapsed);
+assert.equal(goalMessage.content, continuation, "Collapsing must not change model input or saved messages");
+const ordinary = new UserMessageComponent("Please discuss pi-goal-continuation and these instructions.");
+assert(plain(ordinary.render(100)).join("\n").includes("these instructions"), "Ordinary user messages stay fully visible");
+console.log("Automatic goal continuations collapse by default, expand natively, and retain full model input");

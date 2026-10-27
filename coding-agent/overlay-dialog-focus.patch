@@ -1,0 +1,40 @@
+--- a/packages/tui/src/tui.ts
++++ b/packages/tui/src/tui.ts
+@@ -474,7 +474,7 @@
+ 	setShowHardwareCursor(enabled: boolean): void;
+ 	getClearOnShrink(): boolean;
+ 	setClearOnShrink(enabled: boolean): void;
+-	setFocus(component: Component | null): void;
++	setFocus(component: Component | null, options?: { preserveOverlayFocus?: boolean }): void;
+ 	showOverlay(component: Component, options?: OverlayOptions): OverlayHandle;
+ 	hideOverlay(): void;
+ 	hasOverlay(): boolean;
+@@ -618,7 +618,16 @@
+ 		return this.focusedComponent;
+ 	}
+ 
+-	setFocus(component: Component | null): void {
++	setFocus(component: Component | null, options?: { preserveOverlayFocus?: boolean }): void {
++		if (options?.preserveOverlayFocus) {
++			// Editor-slot dialogs can arrive beneath an inspector. Keep its input owner,
++			// but restore the current dialog rather than the old editor when it closes.
++			const overlayComponents = new Set(this.overlayStack.map((entry) => entry.component));
++			for (const entry of this.overlayStack) {
++				if (!entry.preFocus || !overlayComponents.has(entry.preFocus)) entry.preFocus = component;
++			}
++			if (this.isOverlayFocused()) return;
++		}
+ 		this.setFocusInternal({ component, overlayFocusRestore: "clear" });
+ 	}
+ 
+--- a/packages/coding-agent/src/modes/interactive/interactive-mode.ts
++++ b/packages/coding-agent/src/modes/interactive/interactive-mode.ts
+@@ -2785,7 +2785,7 @@
+ 		const component = top?.component ?? this.editor;
+ 		this.editorContainer.clear();
+ 		this.editorContainer.addChild(component);
+-		this.ui.setFocus(component);
++		this.ui.setFocus(component, { preserveOverlayFocus: true });
+ 		this.programStatus.setBlocked("extension-dialog", top?.blocked);
+ 		this.ui.requestRender();
+ 	}

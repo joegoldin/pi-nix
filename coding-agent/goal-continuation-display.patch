@@ -1,0 +1,49 @@
+--- a/packages/coding-agent/src/modes/interactive/components/user-message.ts
++++ b/packages/coding-agent/src/modes/interactive/components/user-message.ts
+@@ -1,4 +1,5 @@
+ import { Container, Markdown, type MarkdownTheme, visibleWidth } from "@earendil-works/pi-tui";
+ import type { MarkdownTransformer } from "../../../core/extensions/types.ts";
+ import { getMarkdownTheme, theme } from "../theme/theme.ts";
++import { keyText } from "./keybinding-hints.ts";
+ import { createMarkdownTransform } from "./markdown-transform.ts";
+@@ -12,6 +13,8 @@
+  */
+ export class UserMessageComponent extends Container {
+ 	private text: string;
++	private expanded = false;
++	private continuationNumber: string | undefined;
+ 	private markdownTheme: MarkdownTheme;
+ 	private outputPad: number;
+ 	private timestamp?: number;
+@@ -26,10 +29,20 @@
+ 	) {
+ 		super();
+ 		this.text = text;
++		// Only automatically generated continuations fold; ordinary user instructions stay visible.
++		this.continuationNumber = text.startsWith("Continue the active /goal until it is complete:")
++			? /<!-- pi-goal-continuation:[^:\s]+:(\d+):[^\s]+ -->\s*$/.exec(text)?.[1]
++			: undefined;
+ 		this.markdownTheme = markdownTheme;
+ 		this.outputPad = outputPad;
+ 		this.timestamp = timestamp;
+ 		this.markdownTransformers = markdownTransformers;
++		this.rebuild();
++	}
++
++	setExpanded(expanded: boolean): void {
++		if (this.continuationNumber === undefined || this.expanded === expanded) return;
++		this.expanded = expanded;
+ 		this.rebuild();
+ 	}
+ 
+@@ -44,7 +57,9 @@
+ 		// line, with identical output.
+ 		this.addChild(
+ 			new Markdown(
+-				this.text,
++				this.continuationNumber !== undefined && !this.expanded
++					? `Goal continuation #${this.continuationNumber} (${keyText("app.tools.expand")} to expand)`
++					: this.text,
+ 				this.outputPad,
+ 				1,
+ 				this.markdownTheme,

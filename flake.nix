@@ -99,6 +99,8 @@
               ./coding-agent/editor-input.patch
               ./coding-agent/sidebar.patch
               ./coding-agent/shortcuts-popup.patch
+              ./coding-agent/overlay-dialog-focus.patch
+              ./coding-agent/goal-continuation-display.patch
             ];
           };
 

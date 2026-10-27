@@ -62,3 +62,55 @@ if (process.argv[3]) {
   assert.equal(container.children[0], editor);
   console.log("Native send-now cancels the real questionnaire before sending queued input, without granting approval");
 }
+
+// A background editor-slot dialog must not steal input from a visible inspector.
+const { TuiMainScreen, TuiAltScreen, Container } = await load("@earendil-works/pi-tui/dist/index.js");
+for (const Host of [TuiMainScreen, TuiAltScreen]) {
+  const terminal = { columns: 100, rows: 30, start() {}, stop() {}, write() {}, hideCursor() {}, showCursor() {} };
+  const ui = new Host(terminal);
+  ui.requestRender = () => {};
+  const editor = { text: "draft", render: () => ["EDITOR"], invalidate() {}, getText() { return this.text; }, setText(text) { this.text = text; } };
+  const editorContainer = new Container();
+  editorContainer.addChild(editor);
+  ui.addChild(editorContainer);
+  ui.setFocus(editor);
+  const host = Object.assign(Object.create(InteractiveMode.prototype), {
+    editor, editorContainer, extensionDialogs: [], ui, keybindings: {}, disposeActiveSelector() {},
+    programStatus: { setBlocked() {} },
+  });
+  const api = host.createExtensionUIContext();
+  let inspector;
+  const inspection = api.custom((_ui, _theme, _keys, done) => {
+    inspector = { render: () => ["INSPECTOR"], invalidate() {}, handleInput(key) { if (key === "\x1b") done("closed"); } };
+    return inspector;
+  }, { overlay: true });
+  await flush();
+  let answered = false;
+  const permission = api.confirm("Background permission", "Allow?").then(value => { answered = true; return value; });
+  await flush();
+  assert.equal(ui.getFocusedComponent(), inspector, `${Host.name}: hidden prompt stole focus`);
+  ui.handleTerminalInput("\r");
+  await flush();
+  assert.equal(answered, false, "Enter must not approve a hidden permission");
+  const abort = new AbortController();
+  const cancelled = api.confirm("Cancelled background prompt", "Allow?", { signal: abort.signal });
+  await flush();
+  abort.abort();
+  assert.equal(await cancelled, false);
+  assert.equal(ui.getFocusedComponent(), inspector, "Aborting a hidden prompt must leave inspector focused");
+  let nestedHandle;
+  nestedHandle = ui.showOverlay({ render: () => ["NESTED"], invalidate() {}, handleInput(key) { if (key === "\x1b") nestedHandle.hide(); } });
+  ui.handleTerminalInput("\x1b");
+  assert.equal(ui.getFocusedComponent(), inspector, "Nested overlay closes before inspector");
+  ui.handleTerminalInput("\x1b");
+  await flush();
+  assert.equal(await inspection, "closed");
+  assert.equal(answered, false, "Inspector Escape must not answer the hidden permission");
+  assert.equal(ui.getFocusedComponent(), editorContainer.children[0], "Pending permission must receive focus after inspector closes");
+  ui.handleTerminalInput("\x1b");
+  assert.equal(await permission, false);
+  assert.equal(ui.getFocusedComponent(), editor);
+  assert.equal(editor.text, "draft");
+  ui.stop();
+}
+console.log("Both TUI modes defer hidden permission input until the inspector closes");
