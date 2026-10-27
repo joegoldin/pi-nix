@@ -4,7 +4,8 @@
 // the same protocol ("pi-intercom" version 1).
 //
 // Run as `bun <abs path>/broker.ts` by spawn.ts, detached from the session that
-// started it; it exits 5 s after the last session leaves. It imports nothing
+// started it; it exits 5 s after the last session leaves when no mail waits.
+// Queued mail keeps it alive until delivery or its 24-hour expiry. It imports nothing
 // but its siblings in this directory, so it runs without pi.
 //
 // Differences from upstream, each deliberate:
@@ -259,6 +260,11 @@ class IntercomBroker {
 		this.shutdownTimer = setTimeout(() => {
 			this.shutdownTimer = null;
 			if (this.sessions.size === 0) {
+				this.pruneMailboxMessages();
+				if (this.mailboxMessages.length > 0) {
+					this.scheduleShutdownCheck();
+					return;
+				}
 				console.log("No sessions connected, shutting down");
 				this.shutdown();
 			}

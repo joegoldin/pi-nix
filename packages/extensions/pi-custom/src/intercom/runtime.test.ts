@@ -11,7 +11,7 @@ type Handler = (payload: unknown) => void;
 function fakePi(sessionName?: string) {
 	const handlers = new Map<string, Handler[]>();
 	const pi = {
-		sent: [] as Array<{ message: { customType: string; content: string; details?: unknown }; options?: { deliverAs?: string } }>,
+		sent: [] as Array<{ message: { customType: string; content: string; details?: unknown }; options?: { deliverAs?: string; triggerTurn?: boolean } }>,
 		prompts: [] as string[],
 		entries: [] as Array<{ type: string; data: unknown }>,
 		name: sessionName,
@@ -111,7 +111,8 @@ describe("pi-subagents contract", () => {
 		pi.events.emit("subagent:result-intercom", { to: "subagent-chat-0123456789abcdefgh", message: "child done", requestId: "r1" });
 		expect(acks).toEqual([{ requestId: "r1", delivered: true }]);
 		expect(pi.sent[0]?.message.customType).toBe("intercom_message");
-		expect(pi.prompts).toEqual(["New intercom message above."]);
+		expect(pi.prompts).toEqual([]);
+		expect(pi.sent[0]?.options).toEqual({ triggerTurn: true });
 		off();
 		await runtime.shutdown();
 	});

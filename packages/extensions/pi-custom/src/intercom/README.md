@@ -45,7 +45,7 @@ Messages render as a rounded box headed by the sender (ctrl+o expands).
 
 ## Commands
 
-- `/intercom` (alt+m): pick a session and write it a message.
+- `/intercom` (alt+j): pick a session and write it a message.
 - `/handover [target] [next task]`: summarise this session with the current
   model, edit the summary, send it.
 - `/intercom-id`: put a snippet addressing this session into the editor.
@@ -95,3 +95,8 @@ extension. `PI_INTERCOM_ASK_TIMEOUT_MS` sets how long an `ask` waits.
 | `config.ts` | The config file |
 | `broker/` | pi↔pi transport |
 | `claude/` | pi↔Claude Code transport |
+
+On Pi 1.4, an idle wake uses the native custom-message turn lifecycle, not an
+extra user prompt. Queued broker mail keeps the broker alive while all sessions
+are disconnected, until delivery or the existing 24-hour expiry. Mail is still
+in memory and does not survive a broker crash or reboot.

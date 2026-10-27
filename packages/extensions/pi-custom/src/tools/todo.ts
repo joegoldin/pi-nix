@@ -309,62 +309,74 @@ export function registerTodo(pi: ExtensionAPI, clock: TodoClock = CLOCK): void {
 		},
 	});
 
+	const showTodos = async (args: string, ctx: ExtensionContext) => {
+		if (!ctx.hasUI) {
+			ctx.ui.notify("/todos requires interactive mode", "error");
+			return;
+		}
+		const live = state.tasks.filter((t) => t.status !== "deleted");
+		if (args.trim()) {
+			const id = /^\d+$/.test(args.trim()) ? Number(args.trim()) : NaN;
+			if (!live.some((t) => t.id === id && t.kind === "group")) {
+				ctx.ui.notify("Usage: /todos [live group id]", "error");
+				return;
+			}
+			if (collapsedGroups.has(id)) collapsedGroups.delete(id);
+			else collapsedGroups.add(id);
+			collapsed = false;
+			for (const t of live) if (t.id === id || t.parentId === id) hidden.delete(t.id);
+			cleanCompleted();
+			show(ctx);
+			return;
+		}
+		if (live.some((t) => t.kind === "group")) {
+			ctx.ui.notify(widgetLines(state, new Set(), MAX_WIDGET_LINES, { fg: (_slot, text) => text }, true).join("\n"), "info");
+			return;
+		}
+		if (live.length === 0) {
+			ctx.ui.notify("No todos yet. Ask the agent to add some!", "info");
+			return;
+		}
+		const count = (s: string) => live.filter((t) => t.status === s).length;
+		const header = [
+			count("completed") ? `${count("completed")}/${live.length} completed` : "",
+			count("in_progress") ? `${count("in_progress")} in progress` : "",
+			count("pending") ? `${count("pending")} pending` : "",
+		]
+			.filter(Boolean)
+			.join(" · ");
+		const section = (title: string, status: string, glyph: string) => {
+			const rows = live.filter((t) => t.status === status);
+			if (!rows.length) return [];
+			return [
+				`── ${title} ──`,
+				...rows.map(
+					(t) =>
+						`  ${glyph} #${t.id} ${t.subject}${t.activeForm && status === "in_progress" ? ` (${t.activeForm})` : ""}${
+							t.blockedBy?.length ? `    ⛓ ${t.blockedBy.map((b) => `#${b}`).join(",")}` : ""
+						}`,
+				),
+			];
+		};
+		ctx.ui.notify(
+			[header, ...section("Pending", "pending", "○"), ...section("In Progress", "in_progress", "◐"), ...section("Completed", "completed", "✓")].join(
+				"\n",
+			),
+			"info",
+		);
+	};
 	pi.registerCommand("todos", {
 		description: "Show all todos; /todos <group-id> collapses or expands one group",
+		handler: showTodos,
+	});
+	pi.registerCommand("todo", {
+		description: "Add work to the current batch; /todo without text shows the list",
 		handler: async (args, ctx) => {
-			if (!ctx.hasUI) {
-				ctx.ui.notify("/todos requires interactive mode", "error");
-				return;
-			}
-			const live = state.tasks.filter((t) => t.status !== "deleted");
-			if (args.trim()) {
-				const id = /^\d+$/.test(args.trim()) ? Number(args.trim()) : NaN;
-				if (!live.some((t) => t.id === id && t.kind === "group")) {
-					ctx.ui.notify("Usage: /todos [live group id]", "error");
-					return;
-				}
-				if (collapsedGroups.has(id)) collapsedGroups.delete(id);
-				else collapsedGroups.add(id);
-				collapsed = false;
-				for (const t of live) if (t.id === id || t.parentId === id) hidden.delete(t.id);
-				cleanCompleted();
-				show(ctx);
-				return;
-			}
-			if (live.some((t) => t.kind === "group")) {
-				ctx.ui.notify(widgetLines(state, new Set(), MAX_WIDGET_LINES, { fg: (_slot, text) => text }, true).join("\n"), "info");
-				return;
-			}
-			if (live.length === 0) {
-				ctx.ui.notify("No todos yet. Ask the agent to add some!", "info");
-				return;
-			}
-			const count = (s: string) => live.filter((t) => t.status === s).length;
-			const header = [
-				count("completed") ? `${count("completed")}/${live.length} completed` : "",
-				count("in_progress") ? `${count("in_progress")} in progress` : "",
-				count("pending") ? `${count("pending")} pending` : "",
-			]
-				.filter(Boolean)
-				.join(" · ");
-			const section = (title: string, status: string, glyph: string) => {
-				const rows = live.filter((t) => t.status === status);
-				if (!rows.length) return [];
-				return [
-					`── ${title} ──`,
-					...rows.map(
-						(t) =>
-							`  ${glyph} #${t.id} ${t.subject}${t.activeForm && status === "in_progress" ? ` (${t.activeForm})` : ""}${
-								t.blockedBy?.length ? `    ⛓ ${t.blockedBy.map((b) => `#${b}`).join(",")}` : ""
-							}`,
-					),
-				];
-			};
-			ctx.ui.notify(
-				[header, ...section("Pending", "pending", "○"), ...section("In Progress", "in_progress", "◐"), ...section("Completed", "completed", "✓")].join(
-					"\n",
-				),
-				"info",
+			const task = args.trim();
+			if (!task) return showTodos("", ctx);
+			pi.sendUserMessage(
+				"Add this to the todo list as additional work in the current batch. Keep the existing tasks and continue the work already underway; this is an addition, not a replacement.\n\n" + task,
+				{ deliverAs: "steer", expandPromptTemplates: false },
 			);
 		},
 	});

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, spyOn } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -72,6 +72,27 @@ describe("live broker claim", () => {
 			const pidPath = join(root, "broker.pid");
 			writeFileSync(pidPath, `${process.pid}\n`);
 			expect(() => assertNoLiveBroker(pidPath)).toThrow(`Refusing to replace live intercom broker process ${process.pid}`);
+		}));
+
+	it.skipIf(process.platform !== "linux")("ignores a stale PID reused by a different user's process", () =>
+		withTempDir((root) => {
+			const pidPath = join(root, "broker.pid");
+			writeFileSync(pidPath, `${process.pid}\n`);
+			// PID 1 can belong to the build user inside a PID namespace.
+			// Keep real /proc ownership, but simulate another caller's EPERM.
+			const uid = spyOn(process, "getuid").mockReturnValue(process.getuid!() + 100000);
+			const kill = spyOn(process, "kill").mockImplementation(() => { throw Object.assign(new Error("EPERM"), { code: "EPERM" }); });
+			try { expect(() => assertNoLiveBroker(pidPath)).not.toThrow(); }
+			finally { uid.mockRestore(); kill.mockRestore(); }
+		}));
+
+	it("does not bypass EPERM for our own live process", () =>
+		withTempDir((root) => {
+			const pidPath = join(root, "broker.pid");
+			writeFileSync(pidPath, String(process.pid));
+			const kill = spyOn(process, "kill").mockImplementation(() => { throw Object.assign(new Error("EPERM"), { code: "EPERM" }); });
+			try { expect(() => assertNoLiveBroker(pidPath)).toThrow(); }
+			finally { kill.mockRestore(); }
 		}));
 
 	it("tolerates absent, invalid and stale pid files", () =>

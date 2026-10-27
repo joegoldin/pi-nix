@@ -9,11 +9,13 @@ function harness(active = true, clock?: TodoClock) {
 	const commands = new Map<string, any>();
 	const entries: any[] = [];
 	const messages: { message: any; options: any }[] = [];
+	const userMessages: {message: string; options: any}[] = [];
 	let tool: any;
 	registerTodo({
 		on: (name: string, handler: Function) => handlers.set(name, handler),
 		registerTool: (definition: unknown) => { tool = definition; },
 		registerCommand: (name: string, command: unknown) => commands.set(name, command), registerShortcut() {},
+		sendUserMessage: (message: string, options: any) => userMessages.push({ message, options }),
 		sendMessage: (message: unknown, options: unknown) => messages.push({ message, options }),
 		appendEntry: (customType: string, data: unknown) => entries.push({ type: "custom", customType, data }),
 		getActiveTools: () => active ? ["todo"] : [],
@@ -23,7 +25,7 @@ function harness(active = true, clock?: TodoClock) {
 		toolSnippets: { todo: tool.promptSnippet }, toolGuidelines: { todo: tool.promptGuidelines },
 	});
 	const apply = (systemPrompt: string) => handlers.get("before_agent_start")?.({ systemPrompt })?.systemPrompt ?? systemPrompt;
-	return { tool, base, apply, handlers, commands, entries, messages };
+	return { tool, base, apply, handlers, commands, entries, messages, userMessages };
 }
 
 test("custom system prompts retain proactive milestone-level task guidance", () => {
@@ -345,4 +347,23 @@ test("stale maintenance cannot elicit an already-pruned final acknowledgement", 
 	const user = { role: "user", content: "Keep researching", timestamp: 1 };
 	const messages = [user, { role: "custom", ...h.messages[0].message, timestamp: 2 }];
 	expect(h.emit("context_with_system", { messages })?.messages ?? messages).toEqual([user]);
+});
+
+for (const idle of [false, true]) test(`/todo adds work asynchronously (${idle ? "idle" : "busy"})`, async () => {
+ const h = uiHarness();
+ h.ctx.isIdle = () => idle;
+ await h.commands.get("todo").handler("  Check auth\nKeep the existing tests  ", h.ctx);
+ expect(h.userMessages).toHaveLength(1);
+ expect(h.userMessages[0].message).toContain("additional work in the current batch");
+ expect(h.userMessages[0].message).toContain("not a replacement");
+ expect(h.userMessages[0].message).toEndWith("Check auth\nKeep the existing tests");
+ expect(h.userMessages[0].options).toEqual({deliverAs: "steer", expandPromptTemplates: false});
+ expect(h.entries).toHaveLength(0);
+});
+test("bare /todo displays the list without asking the model", async () => {
+ const h = uiHarness();
+ await h.commands.get("todo").handler("  ", h.ctx);
+ expect(h.userMessages).toHaveLength(0);
+ expect(h.notices.at(-1)).toBe("No todos yet. Ask the agent to add some!");
+ expect(h.commands.has("todos")).toBe(true);
 });

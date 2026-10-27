@@ -130,7 +130,7 @@ export default function intercom(pi: ExtensionAPI): void {
 		handler: async (_args, ctx) => compose(ctx),
 	});
 
-	pi.registerShortcut("alt+m", {
+	pi.registerShortcut("alt+j", {
 		description: "Message another session",
 		handler: async (ctx) => compose(ctx),
 	});

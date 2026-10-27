@@ -119,3 +119,17 @@ interoperability and copies none of Claude Code's code.
 
 [@ff-labs/fff-bun](https://github.com/dmtrKovalenko/fff), licensed under the
 MIT License, provides the file index behind `find`, `grep` and `@` completion.
+
+## Pi 1.4 compatibility review
+
+Reviewed pi-intercom 0.18.1 (`02913edcd7b1`). Adopted its queued-mail broker
+lifetime fix (`85a2fa742e84`) and native idle-turn wakeup (`8f0750bb9c8b`),
+without importing the extension bus, relay or identity-takeover behavior.
+The Linux stale-PID ownership check is local; uncertain ownership still fails
+closed. The inbox shortcut is Alt+j, leaving Alt+m to the minimap.
+
+Reviewed pi-cc-extensions 1.0.12 and pi-pretty 0.8.0. Their Shiki omission and
+module-global group-cache fixes do not map directly to this renderer: diffs are
+parsed from Pi's display rows, and card caches are instance-local, include width
+and group identity/revision, and are invalidated on streaming updates.
+pi-claude-link remains at the already reviewed `7fdccbd`; no new port is needed.

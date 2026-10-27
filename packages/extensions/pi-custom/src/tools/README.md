@@ -18,6 +18,11 @@ async subagent runs only.
 
 ## Todo list (`todo.ts`, `todo-state.ts`)
 
+`/todo <task>` sends the agent a steering message to add that task to the current
+batch without replacing the existing work. It does not interrupt a running tool
+or edit the list behind the agent's back. When idle, it starts a new turn. Bare
+`/todo` shows the list, like `/todos`; `/todos <group-id>` keeps its group controls.
+
 The `todo` tool tracks tasks and optional top-level groups. Groups contain
 one level of tasks, never other groups or grandchildren. `kind: "group"`
 creates a group or converts an existing umbrella task; `parentId` attaches a
@@ -156,3 +161,8 @@ line marks where it ended: `✻ Worked for 57s · done 11:11 AM · 1 shell still
 running`, or `✗ Failed after 57s · …` when the run ended on an error. Interrupted runs get none. It is written once
 pi settles, stays in the transcript, and is filtered out of every model request.
 Claude Code's line after a turn, with its plain verb and not the rotating ones.
+
+Automatic `/goal` continuation prompts are collapsed in the native transcript by
+default. The tool-output expansion toggle reveals the full prompt; collapsing
+changes only its display, not the saved message or the instructions sent to the
+model.

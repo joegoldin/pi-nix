@@ -633,6 +633,8 @@ export class Intercom {
 		const where = entry.from.transport === "claude" ? "Claude Code" : entry.from.cwd;
 		const hint = replyCommand ? `\n\nTo reply, use the intercom tool: ${replyCommand}` : "";
 		const trigger = delivery === "trigger" && this.triggers(entry, force);
+		const startTurn = trigger && !this.wakePending() && this.ctx?.isIdle();
+		if (startTurn) this.wakeAt = Date.now();
 		this.pi.sendMessage(
 			{
 				customType: "intercom_message",
@@ -640,14 +642,9 @@ export class Intercom {
 				display: true,
 				details: { from: entry.from, message, replyCommand, bodyText: entry.bodyText },
 			},
-			trigger ? undefined : { deliverAs: "steer" },
+			startTurn ? { triggerTurn: true } : trigger ? undefined : { deliverAs: "steer" },
 		);
-		// pi skips before_agent_start for sendMessage turns (pi#5581), so an idle
-		// session is woken with a user prompt that runs the normal lifecycle.
-		if (trigger && !this.wakePending() && this.ctx?.isIdle()) {
-			this.wakeAt = Date.now();
-			this.pi.sendUserMessage("New intercom message above.");
-		}
+
 		this.receipt(entry, "injected");
 	}
 

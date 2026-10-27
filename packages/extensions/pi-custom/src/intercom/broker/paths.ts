@@ -80,9 +80,24 @@ export function assertNoLiveBroker(pidPath: string): void {
 		process.kill(pid, 0);
 	} catch (error) {
 		if ((error as NodeJS.ErrnoException).code === "ESRCH") return;
+		if ((error as NodeJS.ErrnoException).code === "EPERM" && belongsToAnotherUser(pid)) return;
 		throw error;
 	}
 	throw new Error(`Refusing to replace live intercom broker process ${pid}`);
+}
+
+// A PID can be reused after a reboot. EPERM alone is not proof of that: a
+// sandbox can also deny probing our own broker. Only discard the claim when
+// Linux confirms that none of the process's credentials belong to this user.
+function belongsToAnotherUser(pid: number): boolean {
+	if (process.platform !== "linux" || !process.getuid) return false;
+	try {
+		const status = readFileSync(`/proc/${pid}/status`, "utf8");
+		const uids = /^Uid:\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)$/m.exec(status);
+		return !!uids && uids.slice(1).every((uid) => Number(uid) !== process.getuid!());
+	} catch {
+		return false;
+	}
 }
 
 // A relaunch can report the same directory differently: a trailing slash, a

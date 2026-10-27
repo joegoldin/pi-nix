@@ -451,3 +451,45 @@ describe("lifecycle", () => {
 		}
 	}, 15_000);
 });
+
+it("keeps queued mail alive after the last session disconnects", async () => {
+	const dir = mkdtempSync("/tmp/pib-mail-");
+	const previous = process.env.PI_CODING_AGENT_DIR;
+	const child = await startBroker(dir);
+	process.env.PI_CODING_AGENT_DIR = dir;
+	let sender: Peer | undefined,
+		target: Peer | undefined,
+		back: Peer | undefined;
+	try {
+		sender = await connect(unique("mail-sender"));
+		const name = unique("mail-target"),
+			id = unique("mail-id");
+		target = await connect(name, { id });
+		await target.client.disconnect();
+		const queued = await sender.client.send(name, {
+			text: "survive idle shutdown",
+		});
+		expect(queued.delivery).toBe("queued");
+		await sender.client.disconnect();
+		await new Promise((resolve) => setTimeout(resolve, 5500));
+		expect(child.exitCode).toBeNull();
+		back = await connect(name, { id });
+		await until(
+			() => back!.messages.find((m) => m.message.id === queued.id),
+			"mail after idle gap",
+		);
+	} finally {
+		await Promise.all(
+			[sender, target, back].map((peer) =>
+				peer?.client.disconnect().catch(() => {}),
+			),
+		);
+		if (child.exitCode === null) {
+			child.kill("SIGTERM");
+			await once(child, "exit");
+		}
+		if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
+		else process.env.PI_CODING_AGENT_DIR = previous;
+		rmSync(dir, { recursive: true, force: true });
+	}
+}, 15000);
