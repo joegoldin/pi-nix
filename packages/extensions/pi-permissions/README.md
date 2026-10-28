@@ -45,6 +45,29 @@ restrictions. Non-shell approvals retain the exact-call session override; older
 exact grants are unchanged. The agent is told so it can retry. A block's reason
 tells the agent this when there is a terminal UI to open the menu in.
 
+The automatic popup is the normal approval request. A timeout does not tell the
+agent to ask you again: it should continue independent work. During an active
+`/goal`, it should enter `goal_wait(waiting_for="user")` only when the approval
+actually blocks the goal and no independent work remains. An explicit rejection
+must not trigger another request without a new instruction.
+
+For a separate review that is genuinely needed, the agent can call
+`ask_for_approval({ denialId: "d1" })`, using the reference in the blocked result.
+The dialog links to the recorded action, shows its original input and bounded
+scope, and records your answer directly. There is no second permissions-menu
+approval. It does not execute the action: a retry still passes policy and risk
+checks. This tool offers scope approval, not an exact-call execution bypass.
+Hard restrictions, classifier failures, explicit rejections, stale or changed
+requests, and child-owned or historical denials without review metadata are not
+eligible. Cancellation and timeout grant nothing; a denial cannot open repeated
+linked questions. The existing menu remains available for direct user review.
+
+A shell command can have effects beyond its parser-proven directory access.
+For example, `cd worktree` proves traversal, not the effects of a following
+Python heredoc. The displayed approval now includes both the command scope and
+the directory scope, and stores both. A read-directory grant is never silently
+promoted to write access.
+
 Reusable approvals live in that same ledger and Allowed tab. For shell calls,
 `y` approves similar `bash` or `bg_run` actions for the same task and targets:
 its hosts, repositories, directories, services, recipients and side-effect types.

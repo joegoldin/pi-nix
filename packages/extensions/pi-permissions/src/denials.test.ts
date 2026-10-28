@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { DENIAL_LIMIT, grantKey, PermissionLedger } from "./denials.ts";
+import { DENIAL_LIMIT, approvalLabel, grantKey, PermissionLedger } from "./denials.ts";
 
 const blocked = (command: string, toolCallId = "c1") => ({ toolCallId, toolName: "bash", input: { command }, reason: "no" });
 
@@ -196,4 +196,32 @@ it("shares conversation directory grants downward, never child-only grants upwar
   expect(ledger.directoryApprovals(child)).toHaveLength(2);
   expect(ledger.directoryApprovals(sibling)).toHaveLength(1);
   expect(ledger.isGranted("edit", { path: "/tmp/project/file" }, child)).toBe(false);
+});
+
+it("keeps the approved shell effects alongside a parser-proven read directory", () => {
+  const ledger = new PermissionLedger();
+  const input = { command: "cd /tmp/release && python3 - <<'PY'\nfrom pathlib import Path\nPath('README.md').write_text('updated')\nPY" };
+  const denial = ledger.record({ toolCallId: "mixed-shell", toolName: "bash", input, reason: "access required", directories: [{ path: "/tmp/release", access: "read" }] });
+  ledger.approve(denial.id, "/tmp/main");
+  expect(ledger.directoryApprovals()).toMatchObject([{ path: "/tmp/release", access: "read" }]);
+  expect(ledger.scenarioApprovals("bash", "/tmp/main")).toMatchObject([{ toolName: "bash", input }]);
+  expect(ledger.isSimilarlyGranted("bash", input, "/tmp/main")).toBe(true);
+  expect(ledger.isGranted("bash", input)).toBe(false);
+  expect(ledger.directoryApprovals(undefined, { toolName: "write", input: { path: "/tmp/release/other.txt" }, cwd: "/tmp/main" })).toEqual([]);
+  const restored = new PermissionLedger();
+  restored.restore(ledger.snapshot());
+  expect(restored.scenarioApprovals("bash", "/tmp/main")).toHaveLength(1);
+  restored.clearSimilar();
+  expect(restored.scenarioApprovals("bash", "/tmp/main")).toEqual([]);
+  expect(restored.directoryApprovals()).toMatchObject([{ access: "read" }]);
+});
+
+
+it("shows both approved scopes without claiming a read directory is writable", () => {
+  const label = approvalLabel("bash", { command: "cd /tmp/release && python3 update.py" }, "/tmp/main", [{ path: "/tmp/release", access: "read" }]);
+  expect(label).toContain("Command scope: Similar shell actions");
+  expect(label).toContain("same targets");
+  expect(label).toContain("Directory scope: Read-only access under /tmp/release");
+  expect(label).not.toContain("Read/write");
+  expect(approvalLabel("bash", { command: "python3 update.py" }, undefined, [{ path: "/tmp/release", access: "read" }])).not.toContain("Command scope");
 });

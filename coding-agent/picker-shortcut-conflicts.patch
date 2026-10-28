@@ -1,0 +1,11 @@
+--- a/packages/coding-agent/src/core/extensions/runner.ts
++++ b/packages/coding-agent/src/core/extensions/runner.ts
+@@ -121,6 +121,8 @@
+ const buildBuiltinKeybindings = (resolvedKeybindings: KeybindingsConfig): BuiltInKeyBindings => {
+ 	const builtinKeybindings = {} as BuiltInKeyBindings;
+ 	for (const [keybinding, keys] of Object.entries(resolvedKeybindings)) {
++		// These Ctrl+P actions run in pickers, where editor extension shortcuts are inactive.
++		if (keybinding === "app.models.toggleProvider" || keybinding === "app.session.togglePath") continue;
+ 		if (keys === undefined) continue;
+ 		const keyList = Array.isArray(keys) ? keys : [keys];
+ 		const restrictOverride = (RESERVED_KEYBINDINGS_FOR_EXTENSION_CONFLICTS as readonly string[]).includes(keybinding);

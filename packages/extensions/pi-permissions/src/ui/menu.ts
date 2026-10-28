@@ -1,11 +1,10 @@
-import { directoryScopeLabel } from "../directory-access.ts";
 // The /permissions menu, the one place for permissions: what was blocked, to
 // approve or dismiss; what you approved, to revoke; auto mode; and the
 // permission system's settings. Drawn as pi-custom draws /context and /ui:
 // framed, in the editor's place, with full denial details on demand.
 
 import { matchesKey, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
-import { approvalScope, type Denial, type Grant } from "../denials.ts";
+import { approvalLabel, type Denial, type Grant } from "../denials.ts";
 import { callExplanation, callLabel, shortReason } from "./call-label.ts";
 import { Framed, type FrameTheme } from "./frame.ts";
 import { ago, type MenuEffect, type MenuKey, type MenuTab, type PermissionsMenu, type SettingRow } from "./menu-state.ts";
@@ -128,7 +127,7 @@ export class PermissionsMenuView {
 			if (here) focus = rows.length;
 			rows.push(this.headline(d.toolName, d.input, ago(d.at, this.now()), here, width));
 			if (d.owner) rows.push(theme.fg("muted", truncateToWidth(`     Child: ${d.owner.agentName} · ${d.owner.sessionId}${d.incomplete ? " · call metadata unavailable" : ""}`, width, "…")));
-			if (d.directories?.length) rows.push(...wrapTextWithAnsi(`     Access scope: ${directoryScopeLabel(d.directories)}`, Math.max(1, width)).map(line => theme.fg("muted", line)));
+			if (d.directories?.length) rows.push(...wrapTextWithAnsi(`     Approval scope: ${approvalLabel(d.toolName, d.input, d.owner ? d.owner.cwd : this.cwd, d.directories)}`, Math.max(1, width)).map(line => theme.fg("muted", line)));
 			rows.push(theme.fg("muted", truncateToWidth(`     Does: ${callExplanation(d.toolName, d.input).replace(/\s+/g, " ")}`, width, "…")));
 			rows.push(theme.fg("muted", truncateToWidth(`     Denied: ${shortReason(d.reason).replace(/\s+/g, " ")}`, width, "…")));
 		});
@@ -140,7 +139,9 @@ export class PermissionsMenuView {
 		const wrap = (text: string) => wrapTextWithAnsi(text, Math.max(1, width));
 		const input = denial.input && typeof denial.input === "object" ? (denial.input as Record<string, unknown>) : {};
 		const cwd = denial.owner ? denial.owner.cwd : this.cwd;
-		const scope = denial.directories?.length ? { label: directoryScopeLabel(denial.directories) } : cwd && (denial.toolName === "bash" || denial.toolName === "bg_run") ? approvalScope(denial.toolName, denial.input, cwd) : undefined;
+		const label = denial.directories?.length || denial.toolName === "bash" || denial.toolName === "bg_run"
+			? approvalLabel(denial.toolName, denial.input, cwd, denial.directories) : undefined;
+		const scope = label ? { label } : undefined;
 		const body = [
 			...(denial.owner ? [theme.bold("Child owner"), ...wrap(`${denial.owner.agentName} · ${denial.owner.sessionId}`), ""] : []),
 			...(denial.policyDenied ? [...wrap("Explicit rule denial: menu approval cannot override this policy."), ""] : []),

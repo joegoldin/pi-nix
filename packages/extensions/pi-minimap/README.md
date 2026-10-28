@@ -52,8 +52,12 @@ Target paths and task labels are retained; common credential forms are redacted
 before clipping. This text goes to the selected provider when the panel is open.
 Redaction is not a guarantee that arbitrary private text can safely be shared.
 
-The sidebar view is bounded to six recent entries, two milestones and up to three short
-EARLIER bullets. Empty model beats do not produce tool-call spam. Entries can be
+The sidebar view is bounded to six recent entries, two milestones and up to three
+EARLIER bullets. Their complete text wraps in the scrollable history instead of
+being cut at 100 or 180 characters. Provider fields above the 4096-character safety
+limit are rejected; observer input still uses bounded excerpts, independently of
+the displayed text. Previously saved, already-cut summaries cannot recover their
+missing text merely by reloading. Empty model beats do not produce tool-call spam. Entries can be
 revised rather than appended; exact repeats are merged. Source IDs link back to the
 original transcript. Branch-local snapshots use Pi's append-only custom-entry
 persistence; they are not model-context messages.

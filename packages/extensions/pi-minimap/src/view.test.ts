@@ -249,7 +249,7 @@ test("NOW fits two parent topics and one child level into four physical lines", 
 	expect(rows.every((row) => visibleWidth(row) <= 24)).toBe(true);
 });
 
-test("legacy earlier paragraphs render as at most three short source-linked bullets", () => {
+test("legacy earlier paragraphs render as three complete source-linked bullets", () => {
 	const { engine, view } = fixture();
 	engine.state.earlier = {
 		from: "old",
@@ -268,7 +268,7 @@ test("legacy earlier paragraphs render as at most three short source-linked bull
 		),
 	];
 	expect(bullets).toHaveLength(3);
-	expect(bullets.every((text) => text.length <= 100)).toBe(true);
+	expect(bullets[2]).toBe("Preserved original source links ".repeat(30).trim());
 });
 
 test("catch-up notices explain sampling and leave a blank line before the summary", () => {
@@ -284,4 +284,20 @@ test("catch-up notices explain sampling and leave a blank line before the summar
 	const lines = view.log.render(38);
 	expect(lines).toContain("↻ Catch-up summary");
 	expect(lines[lines.findIndex(line => line.includes("Work continued.")) - 1]).toBe("");
+});
+
+
+test("long log entries wrap fully and their endings remain reachable by scrolling", () => {
+	const { engine, view } = fixture();
+	engine.state.recent = [{ text: "Full context rather than clipping. ".repeat(30) + "RECENT_END", tone: "neutral", from: "e0", to: "e0" }];
+	engine.state.chapters = [{ text: "Milestone context. ".repeat(30) + "MILESTONE_END", tone: "neutral", from: "e1", to: "e1" }];
+	engine.state.earlier = { text: "Earlier context. ".repeat(30) + "EARLIER_END", bullets: ["Earlier context. ".repeat(30) + "EARLIER_END"], tone: "neutral", from: "e2", to: "e2" };
+	renderLayoutFrame(view, 38, 24, () => {});
+	for (const marker of ["EARLIER_END", "MILESTONE_END", "RECENT_END"]) {
+		const row = view.log.rows.findIndex(row => row.text.includes(marker));
+		expect(row).toBeGreaterThan(0);
+		view.scroll.scrollTo(Math.max(0, row - 2), { disableFollow: true });
+		expect(renderLayoutFrame(view, 38, 24, () => {}).lines.join("\n")).toContain(marker);
+	}
+	engine.dispose();
 });

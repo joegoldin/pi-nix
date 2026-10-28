@@ -1,0 +1,26 @@
+--- a/packages/coding-agent/src/core/extensions/types.ts
++++ b/packages/coding-agent/src/core/extensions/types.ts
+@@ -1544,6 +1544,8 @@
+ 
+ export interface MessageRenderOptions {
+ 	expanded: boolean;
++	/** Toggle native expansion, shared with the keyboard and retained across redraws. */
++	toggleExpanded?: () => void;
+ 	/** Horizontal padding configured by the outputPad setting. */
+ 	outputPad: number;
+ }
+--- a/packages/coding-agent/src/modes/interactive/components/custom-message.ts
++++ b/packages/coding-agent/src/modes/interactive/components/custom-message.ts
+@@ -70,7 +70,11 @@
+ 			try {
+ 				const component = this.customRenderer(
+ 					this.message,
+-					{ expanded: this._expanded, outputPad: this.outputPad },
++					{
++						expanded: this._expanded,
++						outputPad: this.outputPad,
++						toggleExpanded: () => this.setExpanded(!this._expanded),
++					},
+ 					theme,
+ 				);
+ 				if (component) {

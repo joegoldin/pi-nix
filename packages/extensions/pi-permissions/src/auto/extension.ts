@@ -1,4 +1,5 @@
 import { coordinationKind } from "./coordination.ts";
+import type { ApprovalReview } from "../denials.ts";
 import { realpathSync, statSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -123,6 +124,8 @@ function projectIsTrusted(
 }
 
 export type PiAutomodeOptions = {
+  /** Trusted block provenance for a later native approval request; never model-supplied. */
+  onDenied?: (review: ApprovalReview) => void;
   /** Shared session ledger, owned by pi-permissions rather than this classifier. */
   approvals?: {
     context?(toolName: string, cwd: string, input: Record<string, unknown>): readonly VerifiedApproval[];
@@ -381,7 +384,9 @@ export function createPiAutomode(options: PiAutomodeOptions = {}) {
       ctx: ExtensionContext,
       denial: DenialRecord,
       logCtx: LogCtx,
+      review: ApprovalReview = { eligible: false, response: "unasked" },
     ): { block: true; reason: string } {
+      options.onDenied?.(review);
       if (logCtx.deterministicOnly) state.checkedActions += 1;
       state.blockedActions += 1;
       state.lastDecision = "block";
@@ -952,7 +957,7 @@ export function createPiAutomode(options: PiAutomodeOptions = {}) {
 
       // Asking the operator is not executing the operation described in the
       // question. Deterministic denials above still apply to the tool itself.
-      if (event.toolName === "ask_user_question") {
+      if (event.toolName === "ask_user_question" || event.toolName === "ask_for_approval") {
         return allow(ctx, "user", "Local operator questionnaire; no action is executed", event.toolName, summary, logCtx);
       }
 
@@ -1023,7 +1028,7 @@ export function createPiAutomode(options: PiAutomodeOptions = {}) {
             : decision.reason,
         action: summary,
         kind: "classifier",
-      }, logCtx);
+      }, logCtx, { eligible: !!scope, response: answer === "deny" ? "denied" : answer === "timeout" ? "timeout" : "unasked" });
     });
 
     pi.registerTool({

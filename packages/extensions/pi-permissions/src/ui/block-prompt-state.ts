@@ -24,12 +24,13 @@ export class BlockPrompt {
 		timeoutMs: number,
 		private readonly now: () => number = Date.now,
 		private readonly canRemember = false,
+		private readonly scopeOnly = false,
 	) {
 		this.deadline = now() + timeoutMs;
 	}
 
 	get choices() {
-		return BLOCK_CHOICES.filter((choice) => this.canRemember || choice.answer !== "allow-session");
+		return BLOCK_CHOICES.filter((choice) => (this.canRemember || choice.answer !== "allow-session") && (!this.scopeOnly || choice.answer !== "allow"));
 	}
 
 	/** Whole seconds left, never below zero. */

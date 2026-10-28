@@ -1,11 +1,11 @@
 // How an inbound peer message is drawn: a rounded box headed by who sent it.
 //
 // Collapsed (the default) it shows one line of the body and the reply hint;
-// ctrl+o expands it to the whole body. Messages recorded by pi-intercom carry
+// clicking or ctrl+o expands it to the whole body. Messages recorded by pi-intercom carry
 // a SessionInfo as `from` instead of a PeerRef; both have the fields read
 // here, so old sessions still draw.
 
-import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { type Component, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import type { Message } from "./broker/types.ts";
 
 export interface InboundDetails {
@@ -22,6 +22,18 @@ interface Theme {
 export function senderLabel(from: InboundDetails["from"]): string {
 	const name = from.name || from.id.slice(0, 8);
 	return from.transport === "claude" ? `${name} · Claude Code` : name;
+}
+
+export function messageComponent(details: InboundDetails, options: { expanded: boolean; toggleExpanded?: () => void }, theme: Theme): Component {
+	return {
+		render: (width) => messageLines(details, width, !options.expanded, theme),
+		invalidate() {},
+		handleMouse(event) {
+			if (event.type !== "click" || event.button !== "left" || !options.toggleExpanded) return undefined;
+			options.toggleExpanded();
+			return { handled: true };
+		},
+	};
 }
 
 export function messageLines(details: InboundDetails, width: number, collapsed: boolean, theme: Theme): string[] {
@@ -43,7 +55,7 @@ export function messageLines(details: InboundDetails, width: number, collapsed: 
 	if (replyTo && !expectsReply) notes.push(`Reply to ${replyTo.slice(0, 8)}`);
 	if (collapsed) {
 		lines.push(row(theme.fg("text", body.replace(/\s+/g, " ").trim())));
-		lines.push(row(theme.fg("dim", ` ${[...notes, "ctrl+o to expand"].join(" · ")}`)));
+		if (notes.length) lines.push(row(theme.fg("dim", ` ${notes.join(" · ")}`)));
 	} else {
 		for (const line of wrapTextWithAnsi(body, inner)) lines.push(row(theme.fg("text", line)));
 		if (notes.length) {

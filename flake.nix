@@ -101,6 +101,8 @@
               ./coding-agent/shortcuts-popup.patch
               ./coding-agent/overlay-dialog-focus.patch
               ./coding-agent/goal-continuation-display.patch
+              ./coding-agent/custom-message-expansion.patch
+              ./coding-agent/picker-shortcut-conflicts.patch
             ];
           };
 

@@ -138,3 +138,12 @@ describe("short reasons", () => {
 		expect(shortReason("[pi-permission-system] Denied by policy: 'bash' call.")).toBe("Denied by policy: 'bash' call.");
 	});
 });
+
+it("linked reviews offer only rechecked scope approval, never an execution bypass", () => {
+	const prompt = new BlockPrompt(1000, () => 0, true, true);
+	expect(prompt.choices.map(c => c.answer)).toEqual(["allow-session", "deny"]);
+	prompt.press("Y");
+	expect(prompt.result).toBeUndefined();
+	prompt.press("y");
+	expect(prompt.result).toBe("allow-session");
+});

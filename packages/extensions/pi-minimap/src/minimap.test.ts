@@ -296,14 +296,15 @@ describe("bounded history and input", () => {
 		).toThrow();
 		const parsed = parseSummary(
 			JSON.stringify({
-				beat: "\x1b" + "x".repeat(10000),
+				beat: "\x1b" + "x".repeat(1000),
 				tone: "neutral",
 				now: "\x07work",
 			}),
 			false,
 			false,
 		);
-		expect(parsed.beat.length).toBe(180);
+		expect(parsed.beat.length).toBe(1000);
+		expect(() => parseSummary(summary("x".repeat(10000)), false, false)).toThrow("Invalid minimap summary");
 		expect(parsed.beat).not.toContain("\x1b");
 		expect(parsed.now).toBe("work");
 	});
@@ -817,3 +818,39 @@ test("structured focus does not need a duplicate prose purpose field", () => {
  const hidden = {...emptySnapshot(), enabled: false};
  expect(restore([{type: "custom", customType: STATE_TYPE, data: hidden}]).enabled).toBe(false);
  });
+
+
+test("scrollable summary text survives parsing and session restoration without short cuts", () => {
+	const text = "Complete history with useful context. ".repeat(12) + "END_MARKER";
+	const parsed = parseSummary(JSON.stringify({ beat: text, chapter: text, earlier: [text], tone: "neutral", now: "Working" }), true, true);
+	expect(parsed.beat).toBe(text);
+	expect(parsed.chapter).toBe(text);
+	expect(parsed.earlierBullets).toEqual([text]);
+	const state = emptySnapshot();
+	const beat = { text, from: "a", to: "a", tone: "neutral" as const };
+	state.recent = [beat];
+	state.chapters = [beat];
+	state.earlier = { ...beat, bullets: [text] };
+	const restored = restore([{ id: "a" }, { type: "custom", customType: STATE_TYPE, data: state }]);
+	expect(restored.recent[0]?.text).toBe(text);
+	expect(restored.chapters[0]?.text).toBe(text);
+	expect(restored.earlier?.bullets).toEqual([text]);
+});
+
+test("full display text does not enlarge the next observer's history input", async () => {
+	const h = harness();
+	h.engine.setVisible(true);
+	await h.engine.refresh();
+	const text = "A complete retained summary. ".repeat(100);
+	h.engine.state.recent = Array.from({ length: 6 }, (_, i) => ({ text, tone: "neutral" as const, from: `x${i}`, to: `x${i}` }));
+	h.engine.state.chapters = Array.from({ length: 2 }, (_, i) => ({ text, tone: "neutral" as const, from: `c${i}`, to: `c${i}` }));
+	h.engine.state.earlier = { text, bullets: [text, text, text], tone: "neutral", from: "a", to: "a" };
+	h.batch({ from: "next", to: "next", omitted: 0, events: Array.from({ length: 5 }, (_, i) => ({ id: `next${i}`, text: "A useful result" })) });
+	await h.engine.refresh(false);
+	const prompt = JSON.parse(h.calls.at(-1)!.prompt);
+	expect(prompt.recent.every((item: { text: string }) => item.text.length <= 180)).toBe(true);
+	expect(prompt.compact.chapters.every((item: string) => item.length <= 180)).toBe(true);
+	expect(prompt.compact.earlier.every((item: string) => item.length <= 100)).toBe(true);
+	expect(SYSTEM_PROMPT).toContain("complete sentences");
+	expect(SYSTEM_PROMPT).not.toContain("at most 180 characters");
+});

@@ -6,5 +6,7 @@ pkgs.runCommand "pi-extension-dialogs-tests" { nativeBuildInputs = [ pkgs.bun ];
   export HOME="$TMPDIR"
   export NODE_PATH=${pi}/lib/node_modules
   bun ${./extension-dialogs.mjs} ${pi}/lib/node_modules ${../packages/extensions/pi-custom/src}/tools/ask.ts
+  bun ${./custom-message-expansion.mjs} ${pi}/lib/node_modules ${../packages/extensions/pi-custom/src}/intercom/render.ts
+  bun ${./extension-shortcuts.mjs} ${pi}/lib/node_modules
   touch $out
 ''

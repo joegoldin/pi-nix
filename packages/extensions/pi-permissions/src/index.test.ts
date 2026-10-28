@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { EventEmitter } from "node:events";
 import piPermissions from "./index.ts";
@@ -19,6 +20,7 @@ function session() {
 		},
 	};
 	const tools: string[] = [];
+	const definitions = new Map<string, any>();
 	const shortcuts = new Map<string, { handler: (ctx: unknown) => unknown }>();
 	const handlers = new Map<string, ((event: unknown, ctx: unknown) => unknown)[]>();
 	const commands = new Map<string, { handler: (args: string, ctx: unknown) => unknown; getArgumentCompletions?: (prefix: string) => { value: string; label: string }[] | null }>();
@@ -29,7 +31,7 @@ function session() {
 			on: (name: string, handler: (event: unknown, ctx: unknown) => unknown) =>
 				handlers.set(name, [...(handlers.get(name) ?? []), handler]),
 			events: { emit: bus.emit, on: bus.on },
-			registerTool: (tool: { name: string }) => tools.push(tool.name),
+			registerTool: (tool: { name: string }) => { tools.push(tool.name); definitions.set(tool.name, tool); },
 			registerCommand: (name: string, command: { handler: (args: string, ctx: unknown) => unknown }) => commands.set(name, command),
 			sendMessage: (message: { customType: string; content: string }, options: unknown) => sent.push({ message, options }),
 			registerShortcut: (key: string, shortcut: { handler: (ctx: unknown) => unknown }) => shortcuts.set(key, shortcut),
@@ -48,7 +50,7 @@ function session() {
 		}
 		return undefined;
 	};
-	return { api, tools, handlers, commands, shortcuts, sent, entries, toolCall, bus };
+	return { api, tools, definitions, handlers, commands, shortcuts, sent, entries, toolCall, bus };
 }
 
 describe("loading", () => {
@@ -349,4 +351,63 @@ it("Ctrl+P opens the permissions menu without submitting a message", async () =>
  expect(opened).toBe(1);
  expect(s.sent).toEqual([]);
  expect(s.shortcuts.has("ctrl+shift+p")).toBe(false);
+});
+
+it("a linked native answer authorizes retry through the real gates but never a later hard denial", async () => {
+	if (process.env.PI_APPROVAL_INTEGRATION_CHILD !== "1") {
+		const home = mkdtempSync(join(tmpdir(), "pi-approval-integration-"));
+		try {
+			const directory = join(home, "extensions", "pi-permission-system");
+			mkdirSync(directory, { recursive: true });
+			writeFileSync(join(directory, "config.json"), JSON.stringify({ authorizerChain: ["pi-automode"] }));
+			const child = Bun.spawn([process.execPath, "test", import.meta.path, "--test-name-pattern", "linked native answer"], { env: { ...process.env, HOME: home, PI_CODING_AGENT_DIR: home, PI_APPROVAL_INTEGRATION_CHILD: "1" }, stdout: "pipe", stderr: "pipe" });
+			const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
+			expect({ code, output: code === 0 ? "passed" : stdout + stderr }).toEqual({ code: 0, output: "passed" });
+		} finally { rmSync(home, { recursive: true, force: true }); }
+		return;
+	}
+	const s = session();
+	let hard = false;
+	let classifications = 0;
+	const api = s.api() as any;
+	api.getAllTools = () => [{ name: "bash", description: "Shell" }, ...s.definitions.values()];
+	api.getActiveTools = () => ["bash", ...s.tools];
+	piPermissions(api, {
+		loadConfig: () => ({ enabled: true, classifyReadOnlyTools: false, allowInsideWorkingDirectory: true, deniedPaths: [], protectedPaths: [], permissionDeny: [], permissionAsk: [], permissionAllow: [], environment: [], allow: [], softDeny: [], hardDeny: [], log: { enabled: false, classifierIo: false }, askOnBlock: { enabled: false, timeoutSeconds: 1 } }) as never,
+		classifyAction: async () => { classifications++; return { decision: "block", tier: hard ? "hard_deny" : "soft_deny", reason: "Approval test" }; },
+	});
+	let questions = 0;
+	const ctx = {
+		cwd: "/tmp", hasUI: true, mode: "tui", isIdle: () => true, isProjectTrusted: () => true,
+		ui: { notify() {}, setStatus() {}, theme: { fg: (_slot: string, text: string) => text }, custom: async (factory: any) => {
+			questions++; let answer;
+			const component = factory({ requestRender() {} }, { fg: (_slot: string, text: string) => text, bold: (text: string) => text }, {}, (value: unknown) => { answer = value; });
+			component.handleInput("y"); component.dispose(); return answer;
+		} },
+		sessionManager: { getEntries: () => s.entries, getSessionId: () => "linked", getSessionName: () => "Linked approval test", getSessionFile: () => undefined, getSessionDir: () => "/tmp", getBranch: () => s.entries },
+	};
+	for (const start of s.handlers.get("session_start") ?? []) await start({}, ctx);
+	const call = { toolName: "bash", toolCallId: "first", input: { command: "echo approval-test" } };
+	const blocked = await s.toolCall(call, ctx);
+	expect(blocked?.block).toBe(true);
+	const record = s.entries.filter(e => e.customType === "pi-permissions").at(-1)!.data as PermissionRecord;
+	const denial = record.denials[0]!;
+	expect(denial.review).toEqual({ eligible: true, response: "unasked" });
+	expect(blocked?.reason).toContain(`Denial reference: ${denial.id}`);
+	expect(questions).toBe(0);
+	expect(await s.toolCall({ toolName: "ask_for_approval", toolCallId: "review-gate", input: { denialId: denial.id } }, ctx)).toBeUndefined();
+	expect(questions).toBe(0);
+	const approval = await s.definitions.get("ask_for_approval").execute("review", { denialId: denial.id }, new AbortController().signal, undefined, ctx);
+	expect(approval.details.status).toBe("approved");
+	expect(questions).toBe(1);
+	expect(await s.toolCall({ ...call, toolCallId: "retry" }, ctx)).toBeUndefined();
+	expect(questions).toBe(1);
+	expect(classifications).toBeGreaterThanOrEqual(2);
+	hard = true;
+	expect((await s.toolCall({ ...call, toolCallId: "hard" }, ctx))?.block).toBe(true);
+	const latest = s.entries.filter(e => e.customType === "pi-permissions").at(-1)!.data as PermissionRecord;
+	expect(latest.denials[0]!.review?.eligible).toBe(false);
+	const refused = await s.definitions.get("ask_for_approval").execute("hard-review", { denialId: latest.denials[0]!.id }, new AbortController().signal, undefined, ctx);
+	expect(refused.details.status).toBe("unavailable");
+	expect(questions).toBe(1);
 });

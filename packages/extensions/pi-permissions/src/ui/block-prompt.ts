@@ -19,6 +19,9 @@ interface BlockTheme extends FrameTheme {
 }
 
 export interface BlockAsk {
+	title?: string;
+	/** A later retry must use a rechecked ledger scope, never a one-shot execution bypass. */
+	scopeOnly?: boolean;
 	toolName: string;
 	input: unknown;
 	reason: string;
@@ -56,7 +59,7 @@ export class BlockPromptView {
 		lines.push("");
 		const left = prompt.secondsLeft();
 		lines.push(theme.fg(!prompt.explaining && left < URGENT_SECONDS ? "warning" : "dim", prompt.explaining ? "Timer stopped — waiting for your decision" : `No answer in ${left}s keeps the block`));
-		lines.push(theme.fg("dim", `${ask.scope ? "y allow scope · " : ""}Y allow once · n or Esc deny · e explain/stop timer`));
+		lines.push(theme.fg("dim", `${ask.scope ? "y allow scope · " : ""}${ask.scopeOnly ? "" : "Y allow once · "}n or Esc deny · e explain/stop timer`));
 		return lines;
 	}
 
@@ -115,8 +118,8 @@ export async function askBeforeBlock(ctx: ExtensionContext, ask: BlockAsk): Prom
 	// The terminal bell, as pi-custom's questions ring it: the call is waiting.
 	if (process.stdout.isTTY) process.stdout.write("\x07");
 	return ctx.ui.custom<BlockAnswer>((tui, theme, _keybindings, done) => {
-		const prompt = new BlockPrompt(timeoutMs, Date.now, !!ask.scope);
-		const view = new Framed(new BlockPromptView(prompt, ask, theme as never, () => process.stdout.rows || 24), "Auto mode would block this", theme as never);
+		const prompt = new BlockPrompt(timeoutMs, Date.now, !!ask.scope, ask.scopeOnly);
+		const view = new Framed(new BlockPromptView(prompt, ask, theme as never, () => process.stdout.rows || 24), ask.title ?? "Auto mode would block this", theme as never);
 		let finished = false;
 		const onAbort = () => {
 			prompt.cancel();

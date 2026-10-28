@@ -944,3 +944,14 @@ test("bookkeeping wrappers still classify every action and cannot hide a remote 
   expect(h.classifierCalls()).toBe(2);
   expect(seen[1]).toContain("git push origin main");
 });
+
+test("linked approval questions do not classify the requested action but retain explicit tool denials", async () => {
+  const call = { toolName: "ask_for_approval", toolCallId: "review", input: { denialId: "d1" } };
+  const h = await realHost(() => ({}));
+  expect(await h.emit("tool_call", call)).toBeUndefined();
+  expect(await h.service.links.get("pi-automode")({ toolName: call.toolName, toolCallId: call.toolCallId }, {}, log)).toEqual({ kind: "allow" });
+  expect(h.classifierCalls()).toBe(0);
+  const denied = await realHost(() => ({ permissionDeny: [parseToolPattern("ask_for_approval")] }));
+  expect((await denied.emit("tool_call", call))?.block).toBe(true);
+  expect(denied.classifierCalls()).toBe(0);
+});

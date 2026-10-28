@@ -45,6 +45,16 @@ export function approvalScope(toolName: string, input: unknown, cwd: string): Ap
 	return { key: `scope\u0000${directory}\u0000${toolName}\u0000${canonicalJson(args)}`, label: `${label}; until your next instruction or questionnaire answer`, ...(scenario ? { scenario } : {}) };
 }
 
+/** A parser-proven directory read does not describe every effect of a shell program. */
+export function approvalLabel(toolName: string, input: unknown, cwd: string | undefined, directories: readonly DirectoryAccess[] = []): string | undefined {
+	const command = cwd ? approvalScope(toolName, input, cwd)?.label : undefined;
+	if (!directories.length) return command;
+	const directory = directoryScopeLabel(directories);
+	return (toolName === "bash" || toolName === "bg_run") && command
+		? `Command scope: ${command}\nDirectory scope: ${directory}`
+		: directory;
+}
+
 export type DenialState = "open" | "approved" | "dismissed";
 
 export interface PermissionOwner {
@@ -53,7 +63,16 @@ export interface PermissionOwner {
 	cwd?: string;
 }
 
+export interface ApprovalReview {
+	eligible: boolean;
+	response: "denied" | "timeout" | "unasked";
+}
+
 export interface Denial {
+	sessionId?: string;
+	cwd?: string;
+	review?: ApprovalReview;
+	reviewRequested?: boolean;
 	directories?: DirectoryAccess[];
 	owner?: PermissionOwner;
 	incomplete?: boolean;
@@ -126,7 +145,7 @@ export class PermissionLedger {
 		const key = grantKey(denial.toolName, denial.input, denial.owner);
 		const directories = cwd ? denial.directories : undefined;
 		if (directories?.length) {
-			for (const access of directories) this.approveDirectory(access, denial.owner);
+			this.rememberScope(denial.toolName, denial.input, denial.owner?.cwd ?? cwd!, directories, denial.owner);
 			denial.state = "approved";
 			return denial;
 		}
@@ -172,6 +191,13 @@ export class PermissionLedger {
 			if (grant.owner && (grant.owner.sessionId !== owner?.sessionId || grant.owner.cwd !== owner?.cwd)) return [];
 			return [{ kind: "directory" as const, ...grant.directory, scope: grant.scope.label, at: grant.at }];
 		});
+	}
+
+	/** Store exactly the combined command/directory scope displayed at approval. */
+	rememberScope(toolName: string, input: unknown, cwd: string, directories: readonly DirectoryAccess[] = [], owner?: PermissionOwner): void {
+		for (const directory of directories) this.approveDirectory(directory, owner);
+		if ((!owner || owner.cwd) && (!directories.length || toolName === "bash" || toolName === "bg_run"))
+			this.approveSimilar(toolName, input, cwd, owner);
 	}
 
 	approveSimilar(toolName: string, input: unknown, cwd: string, owner?: PermissionOwner): Grant | undefined {

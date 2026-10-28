@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { directoryScopeLabel, requestedDirectories } from "./directory-access.ts";
+import { requestedDirectories } from "./directory-access.ts";
 import { createForwardedGate } from "./forwarded-gate.ts";
 // pi-permissions: permissions and auto mode for pi in one extension.
 //
@@ -19,9 +19,10 @@ import { createForwardedGate } from "./forwarded-gate.ts";
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { type AutoModeControls, createPiAutomode } from "./auto/extension.ts";
+import { type AutoModeControls, type PiAutomodeOptions, createPiAutomode } from "./auto/extension.ts";
 import { withPermissionChain } from "./auto/permission-chain.ts";
-import { approvalScope, type Denial, type PermissionRecord, PermissionLedger } from "./denials.ts";
+import { approvalLabel, approvalScope, type ApprovalReview, type Denial, type PermissionRecord, PermissionLedger } from "./denials.ts";
+import { denialGuidance, registerApprovalRequest } from "./approval-request.ts";
 import { applySetting, buildSettingItems, type PermissionSystemConfigController } from "./engine/config/config-modal.ts";
 import permissionSystem from "./engine/index.ts";
 import { callLabel } from "./ui/call-label.ts";
@@ -82,10 +83,6 @@ const LEDGER_ENTRY = "pi-permissions";
 /** The message that tells the agent a blocked call was approved. */
 const APPROVED_MESSAGE = "pi-permissions:approved";
 
-/** Said to the agent after a block it can be approved out of. */
-const APPROVABLE =
-	" The user can review and approve this call from /permissions; shell approvals inform the classifier without bypassing hard restrictions. If approved and still needed, retry it.";
-
 interface ToolCallEventLike {
 	toolCallId?: string;
 	toolName?: string;
@@ -109,7 +106,7 @@ function wasInterruption(reason: string): boolean {
 	return /interrupted the turn/i.test(reason);
 }
 
-export default function piPermissions(pi: ExtensionAPI): void {
+export default function piPermissions(pi: ExtensionAPI, autoOverrides: Pick<PiAutomodeOptions, "loadConfig" | "classifyAction"> = {}): void {
 	const probe = { loaded: false };
 	pi.events.emit(PROBE, probe);
 	if (probe.loaded) return;
@@ -121,6 +118,7 @@ export default function piPermissions(pi: ExtensionAPI): void {
 	const persist = () => pi.appendEntry(LEDGER_ENTRY, ledger.snapshot());
 	const forwarded = createForwardedGate(ledger, persist);
 	const requestDetails = new AsyncLocalStorage<Record<string, unknown>>();
+	const reviewContext = new AsyncLocalStorage<ApprovalReview>();
 	const directories = (cwd: string) => requestedDirectories(requestDetails.getStore(), cwd);
 	const clearSimilar = () => {
 		if (ledger.clearSimilar()) persist();
@@ -138,17 +136,17 @@ export default function piPermissions(pi: ExtensionAPI): void {
 		(handler: ToolCallHandler): ToolCallHandler =>
 		async (event, ctx) => {
 			if (event.toolName && ledger.isGranted(event.toolName, event.input)) return undefined;
-			const result = await handler(event, ctx);
+			const review: ApprovalReview = { eligible: false, response: "unasked" };
+			const result = await reviewContext.run(review, () => handler(event, ctx));
 			if (!result?.block || !event.toolName) return result;
 			const reason = result.reason ?? "";
 			if (wasInterruption(reason)) return result;
-			if (!ledger.open().some(d => !d.owner && d.toolCallId === event.toolCallId && d.toolName === event.toolName)) {
-				ledger.record({ toolCallId: event.toolCallId ?? "", toolName: event.toolName, input: event.input ?? {}, reason });
-			}
+			const denial = ledger.open().find(d => !d.owner && d.toolCallId === event.toolCallId && d.toolName === event.toolName)
+				?? ledger.record({ toolCallId: event.toolCallId ?? "", toolName: event.toolName, input: event.input ?? {}, reason, cwd: ctx.cwd, sessionId: ctx.sessionManager.getSessionId(), review: { ...review } });
 			persist();
 			// Only where someone can open the menu; a headless session's agent
 			// would be told of a way out it cannot use.
-			return ctx.hasUI && ctx.mode === "tui" ? { ...result, reason: reason + APPROVABLE } : result;
+			return ctx.hasUI && ctx.mode === "tui" ? { ...result, reason: reason + denialGuidance(denial) } : result;
 		};
 	const menuCommands = new Map<MenuTab, MenuCommand>();
 	const gated = new Proxy(pi, {
@@ -175,15 +173,18 @@ export default function piPermissions(pi: ExtensionAPI): void {
 	let autoControls: AutoModeControls | undefined;
 	let settingsController: PermissionSystemConfigController | undefined;
 	withPermissionChain(createPiAutomode({
+		...autoOverrides,
 		onControls: (controls) => (autoControls = controls),
+		onDenied: (review) => {
+			const current = reviewContext.getStore();
+			if (current) Object.assign(current, review);
+		},
 		approvals: {
 			context: (toolName, cwd, input) => [...ledger.scenarioApprovals(toolName, cwd, forwarded.owner()), ...ledger.directoryApprovals(forwarded.owner(), { toolName, input, cwd })],
-			scope: (toolName, input, cwd) => directories(cwd).length ? directoryScopeLabel(directories(cwd)) : approvalScope(toolName, input, cwd)?.label,
+			scope: (toolName, input, cwd) => approvalLabel(toolName, input, cwd, directories(cwd)),
 			has: (toolName, input, cwd) => ledger.isSimilarlyGranted(toolName, input, cwd, forwarded.owner()),
 			remember: (toolName, input, cwd) => {
-				const requested = directories(cwd);
-				if (requested.length) for (const directory of requested) ledger.approveDirectory(directory, forwarded.owner());
-				else ledger.approveSimilar(toolName, input, cwd, forwarded.owner());
+				ledger.rememberScope(toolName, input, cwd, directories(cwd), forwarded.owner());
 				persist();
 			},
 		},
@@ -193,13 +194,14 @@ export default function piPermissions(pi: ExtensionAPI): void {
 			const result = await handler(event, ctx);
 			const requested = directories(ctx.cwd);
 			if (!details.forwarding && result?.block && requested.length && !wasInterruption(result.reason ?? "")) {
-				ledger.record({ toolCallId: event.toolCallId, toolName: event.toolName, input: event.input, reason: result.reason ?? "", directories: requested });
+				ledger.record({ toolCallId: event.toolCallId, toolName: event.toolName, input: event.input, reason: result.reason ?? "", directories: requested, cwd: ctx.cwd, sessionId: ctx.sessionManager.getSessionId(), review: { ...(reviewContext.getStore() ?? { eligible: false, response: "unasked" }) } });
 				persist();
 			}
 			return result;
 		}),
 	})(gated);
 	permissionSystem(gated, { onForwardedDecision: forwarded.recordDecision, onSettings: (controller) => (settingsController = controller) });
+	registerApprovalRequest(pi, ledger, persist);
 
 	function restoreLedger(ctx: ExtensionContext): void {
 		const entries = ctx.sessionManager.getBranch() as { type?: string; customType?: string; data?: unknown }[];
@@ -231,7 +233,7 @@ export default function piPermissions(pi: ExtensionAPI): void {
 			return;
 		}
 		const cwd = denial.owner?.cwd ?? ctx.cwd;
-		const directoryScope = !exact && denial.directories?.length ? { label: directoryScopeLabel(denial.directories) } : undefined;
+		const directoryScope = !exact && denial.directories?.length ? { label: approvalLabel(denial.toolName, denial.input, cwd, denial.directories)! } : undefined;
 		const scope = directoryScope ?? (!exact && (!denial.owner || denial.owner.cwd) && (denial.toolName === "bash" || denial.toolName === "bg_run") ? approvalScope(denial.toolName, denial.input, cwd) : undefined);
 		ledger.approve(denial.id, exact ? undefined : ctx.cwd);
 		persist();

@@ -105,7 +105,7 @@ export function redact(value: string): string {
 			"$1=[redacted]",
 		);
 }
-function excerpt(value: string, limit = 480, keepEnds = false): string {
+export function excerpt(value: string, limit = 480, keepEnds = false): string {
 	const redacted = redact(value);
 	const text = clean(
 		redacted.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, ""),
@@ -371,6 +371,7 @@ function beat(value: unknown, ids: Set<string>, limit: number): value is Beat {
 		record(value) &&
 		typeof value.text === "string" &&
 		value.text.length <= limit &&
+		(value.bullets === undefined || (Array.isArray(value.bullets) && value.bullets.length <= 3 && value.bullets.every(text => typeof text === "string" && text.length <= MAX_SUMMARY_TEXT))) &&
 		tones.includes(value.tone as Tone) &&
 		typeof value.from === "string" &&
 		ids.has(value.from) &&
@@ -448,21 +449,21 @@ export function restore(branch: unknown[]): Snapshot {
 			continue;
 		const usage = decodeUsage(value.usage);
 		if (!usage) continue;
-		if (value.earlier !== undefined && !beat(value.earlier, ids, 500)) continue;
+		if (value.earlier !== undefined && !beat(value.earlier, ids, MAX_SUMMARY_TEXT * 3 + 2)) continue;
 		if (
 			!Array.isArray(value.chapters) ||
 			value.chapters.length > 2 ||
-			!value.chapters.every((item) => beat(item, ids, 180))
+			!value.chapters.every((item) => beat(item, ids, MAX_SUMMARY_TEXT))
 		)
 			continue;
 		if (
 			!Array.isArray(value.recent) ||
 			value.recent.length > 6 ||
-			!value.recent.every((item) => beat(item, ids, 180))
+			!value.recent.every((item) => beat(item, ids, MAX_SUMMARY_TEXT))
 		)
 			continue;
 		const copy = (item: Beat): Beat => ({
-			text: clean(item.text, 500),
+			text: clean(item.text, MAX_SUMMARY_TEXT * 3 + 2),
 			tone: item.tone,
 			from: item.from,
 			to: item.to,
@@ -526,6 +527,9 @@ const indices = (value: unknown): value is number[] =>
 	value.every((index) => Number.isInteger(index) && index >= 0 && index < 6) &&
 	new Set(value).size === value.length;
 
+// A safety bound on provider data, not a display-width or short-summary cut.
+const MAX_SUMMARY_TEXT = 4096;
+
 export function earlierBullets(value: unknown): string[] {
 	const parts =
 		typeof value === "string"
@@ -536,10 +540,7 @@ export function earlierBullets(value: unknown): string[] {
 	return parts
 		.filter((text): text is string => typeof text === "string" && !!text.trim())
 		.slice(0, 3)
-		.map((text) => {
-			const line = clean(text.replace(/^\s*[-•*]\s*/, ""), 101);
-			return line.length > 100 ? `${line.slice(0, 99)}…` : line;
-		});
+		.map((text) => clean(text.replace(/^\s*[-•*]\s*/, ""), MAX_SUMMARY_TEXT));
 }
 export interface Summary {
 	earlierBullets?: string[];
@@ -568,6 +569,10 @@ export function parseSummary(
 	if (
 		!record(value) ||
 		typeof value.beat !== "string" ||
+		value.beat.length > MAX_SUMMARY_TEXT ||
+		(typeof value.chapter === "string" && value.chapter.length > MAX_SUMMARY_TEXT) ||
+		(typeof value.earlier === "string" && value.earlier.length > MAX_SUMMARY_TEXT) ||
+		(Array.isArray(value.earlier) && value.earlier.some(text => typeof text === "string" && text.length > MAX_SUMMARY_TEXT)) ||
 		((typeof value.now !== "string" || !value.now.trim()) && !focus) ||
 		!tones.includes(value.tone as Tone) ||
 		(value.dropRecent != null && !indices(value.dropRecent)) ||
@@ -595,14 +600,14 @@ export function parseSummary(
 		kind: eventKinds.includes(value.kind as EventKind)
 			? (value.kind as EventKind)
 			: undefined,
-		beat: clean(value.beat, 180),
+		beat: clean(value.beat, MAX_SUMMARY_TEXT),
 		tone: value.tone as Tone,
 		now:
 			typeof value.now === "string" && value.now.trim()
 				? clean(value.now, 180)
 				: focus!.map((topic) => topic.topic).join("; "),
 		focus,
-		chapter: typeof value.chapter === "string" ? clean(value.chapter, 180) : "",
+		chapter: typeof value.chapter === "string" ? clean(value.chapter, MAX_SUMMARY_TEXT) : "",
 		earlier: earlierBullets(value.earlier).join(" "),
 		earlierBullets: earlierBullets(value.earlier),
 	};

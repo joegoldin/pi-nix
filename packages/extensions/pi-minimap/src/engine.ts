@@ -1,5 +1,6 @@
 import {
 	applySummary,
+	excerpt,
 	parseSummary,
 	type Batch,
 	type ModelChoice,
@@ -40,10 +41,10 @@ Use plain, everyday language: short concrete sentences. Say "Fixed duplicate ent
 Keep meaningful requests, decisions, changes, checks and blockers. Omit routine file reads, inspections, task-list bookkeeping, tool-call announcements and generic "outcome unknown/unverified" entries. If no useful outcome is available, leave beat empty. A specific unresolved requirement can remain a blocker.
 Return only JSON:
 {"beat":"","tone":"neutral","kind":"note","focus":[{"topic":"","subtopics":[]}],"replaceRecent":null,"dropRecent":[],"chapter":"","earlier":[]}
-beat: at most 180 characters. tone: neutral|success|warning|error. kind: ask|decision|change|check|blocker|note. A running check is neutral, not success.
+beat: concise, complete sentences. The history display wraps and scrolls; do not cut words or sentences to fit a character count. Prior-summary excerpts may contain …, which marks sampled input, not unfinished work. tone: neutral|success|warning|error. kind: ask|decision|change|check|blocker|note. A running check is neutral, not success.
 focus: one or two broad active topics, each with one level of short subtopics; at most four topics/subtopics total. Keep parent goals stable while current steps change. Remove finished work from focus, preserving important results in history.
 Use replaceRecent (zero-based index) to revise an existing event as it progresses or finishes instead of appending a paraphrase. dropRecent lists redundant or meaningless recent indices to remove; use original indices and never drop the entry being revised. On recap, reconcile old entries with the latest work, not a play-by-play of every missed step.
-Use events only for recent changes and focus. fold contains indices into recent: only if appending, summarize those entries into chapter (<=180 characters), without repeating their text in your input. compact contains older summaries: combine only those into earlier, two or three short bullets (<=100 characters each), about lasting decisions/results/blockers, not file inspections. Never rescan new raw events for older history. rewriteEarlier, when present, asks you to rewrite just that old opening as succinct bullets in earlier. recapBackground is context only. No markdown fences, terminal controls or secrets.`;
+Use events only for recent changes and focus. fold contains indices into recent: only if appending, summarize those entries into a concise chapter, without repeating their text in your input. compact contains older summaries: combine only those into earlier, two or three concise, complete bullets, about lasting decisions/results/blockers, not file inspections. Never rescan new raw events for older history. rewriteEarlier, when present, asks you to rewrite just that old opening as succinct bullets in earlier. recapBackground is context only. No markdown fences, terminal controls or secrets.`;
 
 export class MinimapEngine {
 	visible = false;
@@ -129,25 +130,26 @@ export class MinimapEngine {
 		const fold = this.state.recent.length >= 6;
 		const compact = fold && this.state.chapters.length >= 2;
 		const rewriteEarlier = this.catchingUp && !!this.state.earlier && !compact;
+		// Keep observer input bounded independently of the complete scrollable display.
+		const earlier = this.state.earlier?.bullets?.map(text => excerpt(text, 100, true))
+			?? (this.state.earlier ? excerpt(this.state.earlier.text, 500, true) : undefined);
 		const prompt = JSON.stringify({
 			focus: this.state.focus ?? this.state.now,
 			recent: this.state.recent.map((item, index) => ({
 				index,
-				text: item.text,
+				text: excerpt(item.text, 180, true),
 			})),
 			fold: fold ? [0, 1, 2] : undefined,
 			compact: compact
 				? {
-						earlier: this.state.earlier?.bullets ?? this.state.earlier?.text,
-						chapters: this.state.chapters.map((item) => item.text),
+						earlier,
+						chapters: this.state.chapters.map((item) => excerpt(item.text, 180, true)),
 					}
 				: undefined,
-			rewriteEarlier: rewriteEarlier
-				? (this.state.earlier?.bullets ?? this.state.earlier?.text)
-				: undefined,
+			rewriteEarlier: rewriteEarlier ? earlier : undefined,
 			recapBackground:
 				this.catchingUp && !compact && this.state.chapters.length
-					? this.state.chapters.map((item) => item.text)
+					? this.state.chapters.map((item) => excerpt(item.text, 180, true))
 					: undefined,
 			recap,
 			omittedEvents: batch.omitted,

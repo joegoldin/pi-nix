@@ -17,7 +17,7 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { loadConfig } from "./config.ts";
-import { type InboundDetails, messageLines } from "./render.ts";
+import { type InboundDetails, messageComponent } from "./render.ts";
 import { Intercom, type ToolResult } from "./runtime.ts";
 import { registerIntercomTool } from "./tool.ts";
 import { resolveTarget } from "./peers.ts";
@@ -54,7 +54,7 @@ export default function intercom(pi: ExtensionAPI): void {
 	pi.registerMessageRenderer("intercom_message", (message, options, theme) => {
 		const details = message.details as InboundDetails | undefined;
 		if (!details?.message) return undefined;
-		return { render: (width: number) => messageLines(details, width, !options.expanded, theme), invalidate() {} };
+		return messageComponent(details, options, theme);
 	});
 
 	pi.on("tool_result", (event) => {
