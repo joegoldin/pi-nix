@@ -1,3 +1,4 @@
+import { observeSubagents } from "./subagent-activity.ts";
 import { showHistory } from "./history.ts";
 import { randomUUID } from "node:crypto";
 import type { Component, TUI } from "@earendil-works/pi-tui";
@@ -326,12 +327,15 @@ export default function register(pi: ExtensionAPI): void {
 		mount();
 		engine.persist();
 	}
+	let stopSubagents: (() => void) | undefined;
+
 	function load(_event: unknown, context: ExtensionContext): void {
 		const id = context.sessionManager.getSessionId();
 		// SessionManager is reused and mutates its ID on new/fork/resume.
 		const usage = sessionId === id ? engine?.state.usage : undefined;
 		sessionId = id;
 		engine?.dispose();
+		stopSubagents?.();
 		unsubscribe?.();
 		ctx = context;
 		view = undefined;
@@ -407,6 +411,7 @@ export default function register(pi: ExtensionAPI): void {
 			setting("PI_MINIMAP_INTERVAL_MS", 30000, 2000, 60000),
 		);
 		engine = current;
+		stopSubagents = observeSubagents(pi, context, () => current.schedule());
 		const ui = context.ui as ExtensionContext["ui"] & SidebarUI;
 		if (context.mode !== "tui") return;
 		mount();
@@ -435,6 +440,7 @@ export default function register(pi: ExtensionAPI): void {
 	});
 	pi.on("session_shutdown", () => {
 		engine?.dispose();
+		stopSubagents?.();
 		unsubscribe?.();
 		unsubscribe = undefined;
 		(ctx?.ui as SidebarUI | undefined)?.setSidebar?.("pi-minimap", undefined);

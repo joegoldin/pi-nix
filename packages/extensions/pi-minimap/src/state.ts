@@ -115,8 +115,116 @@ function excerpt(value: string, limit = 480, keepEnds = false): string {
 	const head = Math.floor(limit / 4);
 	return `${text.slice(0, head)} … ${text.slice(-(limit - head - 3))}`;
 }
+/** Only public child metadata is read; nested transcripts and argument bodies stay private. */
+function subagentText(
+	details: unknown,
+	limit: number,
+	visibleOutput?: unknown,
+): string {
+	const data = record(details) ? details : {};
+	const rows: Array<{ child: Record<string, unknown>; parent?: string }> = [];
+	const add = (items: unknown, parent?: string) => {
+		if (!Array.isArray(items)) return;
+		for (const child of items.slice(0, 100)) {
+			if (!record(child)) continue;
+			rows.push({ child, parent });
+			if (Array.isArray(child.childRuns)) {
+				for (const nested of child.childRuns.slice(0, 100)) {
+					if (record(nested))
+						rows.push({
+							child: nested,
+							parent: typeof child.runId === "string" ? child.runId : parent,
+						});
+				}
+			}
+		}
+	};
+	const parent = typeof data.runId === "string" ? data.runId : undefined;
+	add(data.runs);
+	add(data.results, parent);
+	if (Array.isArray(data.completions)) {
+		for (const completion of data.completions.slice(0, 100)) {
+			if (!record(completion)) continue;
+			if (Array.isArray(completion.results) && completion.results.length)
+				add(
+					completion.results,
+					typeof completion.runId === "string" ? completion.runId : undefined,
+				);
+			else rows.push({ child: completion });
+		}
+	}
+	if (!rows.length) {
+		const id =
+			typeof data.asyncId === "string" ? ` ${excerpt(data.asyncId, 40)}` : "";
+		return `Subagent control/status response${id}; child completion unknown.`;
+	}
+	const count = Math.min(rows.length, 3);
+	const suffix =
+		rows.length > count ? `; ${rows.length - count} more children omitted` : "";
+	const budget = Math.floor((limit - suffix.length - 35) / count);
+	const texts = rows.slice(0, count).map(({ child, parent }) => {
+		parent = typeof child.parentRunId === "string" ? child.parentRunId : parent;
+		const identity =
+			typeof child.runId === "string"
+				? child.runId
+				: typeof child.index === "number" && parent
+					? `${parent}/child-${child.index}`
+					: (parent ?? "identity unavailable");
+		const known = [
+			"queued",
+			"running",
+			"completed",
+			"failed",
+			"paused",
+			"stopping",
+			"stopped",
+			"cancelled",
+		];
+		const stated = child.status ?? child.state;
+		const status =
+			child.stopped === true || child.interrupted === true
+				? "stopped"
+				: child.timedOut === true
+					? "timed out"
+					: typeof stated === "string" && known.includes(stated)
+						? stated
+						: child.detached === true
+							? "running"
+							: child.success === false ||
+									(typeof child.exitCode === "number" && child.exitCode !== 0)
+								? "failed"
+								: child.success === true || child.exitCode === 0
+									? "completed"
+									: "outcome unknown";
+		const agent =
+			typeof child.agent === "string" ? excerpt(child.agent, 24) : "child";
+		const task =
+			typeof child.taskInfo === "string"
+				? child.taskInfo
+				: typeof child.task === "string"
+					? child.task
+					: "";
+		return excerpt(
+			`${agent} [${excerpt(identity, 40)}] reported ${status}${parent && identity !== parent ? ` (parent ${excerpt(parent, 32)})` : ""}${task ? ` · ${excerpt(task, 100)}` : ""}`,
+			budget,
+		);
+	});
+	const summary = `Subagents: ${texts.join("; ")}${suffix}`;
+	const output =
+		rows.length === 1
+			? (rows[0]!.child.finalOutput ?? visibleOutput)
+			: undefined;
+	return typeof output === "string" &&
+		output.trim() &&
+		summary.length + 35 < limit
+		? `${summary}. Child-reported output: ${excerpt(output, limit - summary.length - 25)}`
+		: summary;
+}
+
 function messageText(message: Record<string, unknown>, limit: number): string {
 	const role = String(message.role);
+	if (role === "custom" && message.customType === "subagent-notify")
+		return subagentText(message.details, limit, message.content);
 	if (role === "toolResult") {
 		let output =
 			typeof message.content === "string"
@@ -147,6 +255,8 @@ function messageText(message: Record<string, unknown>, limit: number): string {
 		const blocked = /tool did not run|authorizer denied|action blocked/i.test(
 			output,
 		);
+		if (!blocked && ["subagent", "bg_wait"].includes(String(message.toolName)))
+			return subagentText(message.details, limit, output);
 		const outcome = blocked
 			? "did not run (permission gate blocked execution)"
 			: message.isError === true
@@ -182,19 +292,59 @@ export function readBatch(
 	lastId: string,
 	recap = true,
 ): Batch | undefined {
-	const messages = branch.filter(
-		(
-			entry,
-		): entry is Record<string, unknown> & {
-			id: string;
-			message: Record<string, unknown>;
-		} =>
-			record(entry) &&
-			entry.type === "message" &&
-			typeof entry.id === "string" &&
-			record(entry.message) &&
-			["user", "assistant", "toolResult"].includes(String(entry.message.role)),
-	);
+	const messages = branch
+		.map((entry) => {
+			if (
+				record(entry) &&
+				entry.type === "custom" &&
+				entry.customType === "pi-minimap:subagent-activity" &&
+				record(entry.data)
+			)
+				return {
+					...entry,
+					type: "message",
+					message: {
+						role: "custom",
+						customType: "subagent-notify",
+						details: entry.data,
+						timestamp: entry.data.at,
+					},
+				};
+			if (
+				record(entry) &&
+				entry.type === "custom_message" &&
+				entry.customType === "subagent-notify"
+			)
+				return {
+					...entry,
+					type: "message",
+					message: {
+						role: "custom",
+						customType: entry.customType,
+						details: entry.details,
+						content: entry.content,
+						timestamp: entry.timestamp,
+					},
+				};
+			return entry;
+		})
+		.filter(
+			(
+				entry,
+			): entry is Record<string, unknown> & {
+				id: string;
+				message: Record<string, unknown>;
+			} =>
+				record(entry) &&
+				entry.type === "message" &&
+				typeof entry.id === "string" &&
+				record(entry.message) &&
+				(["user", "assistant", "toolResult"].includes(
+					String(entry.message.role),
+				) ||
+					(entry.message.role === "custom" &&
+						entry.message.customType === "subagent-notify")),
+		);
 	const at = lastId ? messages.findIndex((entry) => entry.id === lastId) : -1;
 	const fresh = messages.slice(at + 1);
 	if (!fresh.length) return;

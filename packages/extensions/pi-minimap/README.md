@@ -120,3 +120,14 @@ hooks; RPC and ordinary scrollback mode do not mount a sidebar or spend tokens.
 
 Tests use fake providers. They do not contact Cerebras, OpenAI or any other model
 service.
+
+### Subagent attribution
+
+The observer includes bounded child lifecycle metadata, saved completion notices,
+and structured subagent/wait results. It keeps agent and run identities (including
+workflow parents) so concurrent children are not described as the main agent.
+Dispatch or status-tool success is not child completion; a child's reported
+completion is not verification of the main task. Visible single-child result
+excerpts are redacted and bounded. Child reasoning, argument bodies, private
+side-chat messages and arbitrary custom messages are excluded. Forks retain
+historical summaries but do not adopt their parent's live child events.

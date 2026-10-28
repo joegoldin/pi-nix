@@ -8,6 +8,7 @@ afterEach(() => {
 });
 function harness() {
 	const handlers = new Map<string, (event: any, ctx: any) => any>();
+	const bus = new Map<string, (event: any) => void>();
 	const shortcuts = new Map<string, any>();
 	let command!: (args: string, ctx: any) => Promise<void>;
 	let view: MinimapView | undefined,
@@ -35,6 +36,7 @@ function harness() {
 		isIdle: () => true,
 		sessionManager: {
 			getSessionId: () => "fake-session",
+			getSessionFile: () => "/tmp/fake-session.jsonl",
 			getBranch: () => branch,
 			getEntries: () => [
 				...branch,
@@ -105,6 +107,12 @@ function harness() {
 		},
 	};
 	register({
+		events: {
+			on(name: string, handler: any) {
+				bus.set(name, handler);
+				return () => bus.delete(name);
+			},
+		},
 		on: (name: string, handler: any) => handlers.set(name, handler),
 		registerShortcut: (key: string, spec: any) => shortcuts.set(key, spec),
 		registerCommand: (_name: string, spec: any) => {
@@ -124,6 +132,7 @@ function harness() {
 	shutdown.push(() => handlers.get("session_shutdown")!({}, ctx));
 	return {
 		ctx,
+		event: (name: string, data: unknown) => bus.get(name)?.(data),
 		shortcuts,
 		calls,
 		persisted,
@@ -451,4 +460,72 @@ test("call journal retains full inputs, excludes reasoning, and records rejected
 	});
 	expect(JSON.stringify(calls)).toContain("malformed visible response");
 	expect(JSON.stringify(calls)).not.toContain("PRIVATE_REASONING");
+});
+
+test("records owned child lifecycle metadata, deduplicates it and stops observing on shutdown", async () => {
+	const { readBatch } = await import("./state.ts");
+	const h = harness();
+	h.branch([]);
+	h.event("subagent:async-started", {
+		sessionId: "another-session",
+		id: "foreign",
+		agent: "foreign",
+	});
+	h.event("subagent:async-started", {
+		sessionId: "fake-session",
+		id: "run-a",
+		agent: "reviewer",
+		task: "PRIVATE_TASK",
+	});
+	h.event("subagent:async-started", {
+		sessionId: "fake-session",
+		id: "run-a",
+		agent: "reviewer",
+	});
+	h.event("subagent:child-status", {
+		version: 1,
+		runId: "run-a",
+		childId: "nested",
+		childRunId: "run-b",
+		agent: "tester",
+		status: "stopping",
+	});
+	const batch = readBatch(h.ctx.sessionManager.getBranch(), "")!;
+	expect(batch?.events).toHaveLength(2);
+	expect(batch.events[0]!.text).toContain("run-a");
+	expect(batch.events[1]!.text).toContain("run-b");
+	expect(batch.events[1]!.text).toContain("stopping");
+	expect(JSON.stringify(batch)).not.toContain("PRIVATE_TASK");
+	expect(JSON.stringify(batch)).not.toContain("foreign");
+	h.emit("session_shutdown");
+	h.event("subagent:child-status", {
+		version: 1,
+		runId: "run-a",
+		childId: "nested",
+		status: "stopped",
+	});
+	expect(readBatch(h.ctx.sessionManager.getBranch(), batch.to)).toBeUndefined();
+});
+
+test("a fork does not adopt inherited parent-run lifecycle events", async () => {
+	const { readBatch } = await import("./state.ts");
+	const h = harness();
+	h.event("subagent:async-started", {
+		sessionId: "fake-session",
+		id: "parent-run",
+		agent: "worker",
+	});
+	const before = readBatch(h.ctx.sessionManager.getBranch(), "")!;
+	h.ctx.sessionManager.getSessionId = () => "fork-session";
+	h.ctx.sessionManager.getSessionFile = () => "/tmp/fork-session.jsonl";
+	h.emit("session_tree");
+	h.event("subagent:child-status", {
+		version: 1,
+		runId: "parent-run",
+		childId: "parent-child",
+		status: "stopped",
+	});
+	expect(
+		readBatch(h.ctx.sessionManager.getBranch(), before.to),
+	).toBeUndefined();
 });
