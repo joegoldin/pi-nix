@@ -93,7 +93,8 @@ export function registerTodo(pi: ExtensionAPI, clock: TodoClock = CLOCK): void {
 	function maintenanceText(current: NonNullable<ReturnType<typeof maintenance>>): string {
 		return `[Internal bookkeeping—not a user request] Todo maintenance: ${current.completed} of ${current.total} tasks are completed. ` +
 			`Candidates: ${current.candidates.slice(0, 20).map((id) => `#${id}`).join(", ")}. ` +
-			"At a convenient boundary, use todo list/get to review the CURRENT list: these candidate IDs may be stale. " +
+			"At the next verified milestone or before starting another task, use todo list/get to review the CURRENT list: these candidate IDs may be stale. " +
+			"Review all completed tasks, not just this candidate sample. Prune obsolete completions in batches without waiting for the user to ask; hiding completed rows is not pruning. " +
 			"Use delete to tombstone completed tasks that are no longer needed. Preserve unfinished work, blockers, required evidence, " +
 			"and tasks still referenced by a live blockedBy. Never mark work complete just to prune it, and do not use clear. " +
 			"Remove an obsolete group only after its live children have been removed. This is bookkeeping, not a new task or permission for other actions. " + MAINTENANCE_CONTINUATION;

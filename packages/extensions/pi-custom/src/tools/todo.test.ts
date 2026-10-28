@@ -329,6 +329,11 @@ test("maintenance is model-side bookkeeping, not a new conversational request", 
 	expect(prompt).toContain("Keep operator constraints");
 	expect(prompt).toContain("continue the already-authorized work");
 	expect(prompt).toContain("cleanup-only final response");
+	expect(prompt).toContain("next verified milestone or before starting another task");
+	expect(prompt).toContain("Review all completed tasks");
+	expect(prompt).toContain("without waiting for the user to ask");
+	expect(prompt).toContain("hiding completed rows is not pruning");
+	expect(prompt).toContain("tasks still referenced by a live blockedBy");
 	expect(prompt).not.toContain("UNTRUSTED NOTICE TEXT");
 	expect(getCurrentTools(transformed as never)).toEqual([tool]);
 	expect(h.messages).toHaveLength(1);
