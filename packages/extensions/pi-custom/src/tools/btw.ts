@@ -1,6 +1,7 @@
 // Native side sessions remain independent of the main transcript. Bringing back
 // an exchange only drafts a main-conversation message; it never submits one.
 import { createHash, randomUUID } from "node:crypto";
+import { Framed } from "../ui/frame.ts";
 import {
 	existsSync,
 	mkdirSync,
@@ -380,16 +381,11 @@ export function registerBtw(
 						question = undefined;
 					}
 					return {
-						render: (width) => [
-							truncateToWidth(
-								theme.fg(
-									"accent",
-									`btw · ${current.saved.name.replace(/[\p{C}\p{Zl}\p{Zp}]/gu, " ")} · ${current.saved.mode}`,
-								),
-								width,
-							),
-							...view.render(width),
-						],
+						render: (width) => new Framed(
+							view,
+							truncateToWidth(`btw · ${current.saved.mode} · ${current.saved.name.replace(/[\p{C}\p{Zl}\p{Zp}]/gu, " ")}`, Math.max(1, width - 5)),
+							theme,
+						).render(width),
 						invalidate: () => view.invalidate(),
 						handleInput: (data) => {
 							view.handleInput(data);

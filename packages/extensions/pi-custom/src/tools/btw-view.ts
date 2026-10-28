@@ -200,31 +200,38 @@ export class BtwView {
 				);
 		}
 		const height = Math.max(1, Math.floor(this.height()));
-		const historyHeight = Math.max(0, height - 4);
-		this.pageSize = Math.max(1, historyHeight);
-		this.maxTop = Math.max(0, transcript.length - historyHeight);
-		this.top = this.followTail ? this.maxTop : Math.min(this.top, this.maxTop);
-		// The composer is never part of the scrolling transcript, even on resize.
+		// Keep the composer separate and readable; only history scrolls.
 		const input = this.input.render(width)[0] ?? "";
-		const status = theme.fg("muted", this.busy ? "Answering…" : this.status);
-		const keys = theme.fg(
-			"dim",
+		const status = this.busy ? "Answering…" : this.status;
+		const hints = [
 			"Enter ask · Ctrl+r latest · Ctrl+Shift+r all",
-		);
-		const navigation = theme.fg(
-			"dim",
 			this.actions
 				? "Esc/Ctrl+c main · Alt+s switch · Alt+f fork · Alt+n new · Alt+t mode · Alt+x stop"
 				: "Esc close",
-		);
-		const footer =
-			height >= 4
-				? [status, input, keys, navigation]
-				: [input, keys, navigation].slice(0, height);
+		].flatMap(text => wrapTextWithAnsi(text, Math.max(1, width)));
+		const footer = height < 4 ? [input] : [
+			theme.fg("border", "─".repeat(Math.max(1, width))),
+			...(status ? [theme.fg("muted", status)] : []),
+			input,
+			"",
+			...hints.slice(0, Math.max(0, height - (status ? 6 : 5))).map(line => theme.fg("dim", line)),
+		];
+		const padding = height >= 4 ? 1 : 0;
+		const historyHeight = Math.max(0, height - footer.length - padding);
+		this.pageSize = Math.max(1, historyHeight);
+		this.maxTop = Math.max(0, transcript.length - historyHeight);
+		this.top = this.followTail ? this.maxTop : Math.min(this.top, this.maxTop);
+		const history = transcript.slice(this.top, this.top + historyHeight);
+		if (height >= 4 && historyHeight > 0 && this.maxTop > 0) {
+			const position = truncateToWidth(` ${this.top + 1}–${this.top + history.length}/${transcript.length} · Wheel/PgUp/PgDn `, width, "");
+			footer[0] = theme.fg("muted", position) + theme.fg("border", "─".repeat(Math.max(0, width - visibleWidth(position))));
+		}
 		return [
-			...transcript.slice(this.top, this.top + historyHeight),
+			...Array(padding).fill(""),
+			...history,
+			...Array(Math.max(0, historyHeight - history.length)).fill(""),
 			...footer,
-		].map((line) =>
+		].slice(-height).map((line) =>
 			visibleWidth(line) > width ? truncateToWidth(line, width, "…") : line,
 		);
 	}

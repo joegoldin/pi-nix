@@ -123,11 +123,14 @@ it("full-thread import retains every visible exchange, including failed or unans
 it("mouse scrolling preserves the draft and does not jump to the tail on new content", () => {
 	const { view, thread } = panel();
 	view.handleInput("x");
-	view.render(80);
+	const before = view.render(80);
+	expect(before.join("\n")).toContain("Wheel/PgUp/PgDn");
 	expect(
 		view.handleMouse({ type: "wheel", wheelDelta: -100 } as never),
 	).toMatchObject({ handled: true, render: true });
 	expect(view.render(80).join("\n")).toContain("FIRST QUESTION");
+	expect(view.render(80).slice(-4)).toEqual(before.slice(-4));
+	expect(view.render(80).join("\n")).toMatch(/1–\d+\/\d+/);
 	thread.turns.push({ question: "New", answer: "NEW TAIL" });
 	expect(view.render(80).join("\n")).toContain("FIRST QUESTION");
 	view.handleMouse({ type: "wheel", wheelDelta: 100 } as never);
@@ -310,11 +313,11 @@ it("importing during a request aborts it without dropping a newer question after
 	expect(h.draft()).toContain("User:\nNew question\n\nAssistant:\nNew answer");
 });
 
-it("keeps BTW controls without the line counter or scrolling hints", () => {
+it("keeps BTW controls alongside a compact scroll-position indicator", () => {
 	const { view } = panel();
 	const text = view.render(100).join("\n");
-	expect(text).not.toMatch(/\d+[–-]\d+\/\d+/);
-	expect(text).not.toContain("PgUp/PgDn");
+	expect(text).toMatch(/\d+[–-]\d+\/\d+/);
+	expect(text).toContain("Wheel/PgUp/PgDn");
 	expect(text).not.toContain("wheel scroll");
 	expect(text).not.toContain("Ctrl+Home/End");
 	expect(text).toContain("Enter ask · Ctrl+r latest · Ctrl+Shift+r all");
@@ -444,5 +447,10 @@ it("keeps a long side-conversation title within the native overlay width", async
 	const rows = h.component().render(35);
 	h.component().handleInput("\x03");
 	await opened;
-	expect(rows.every((row: string) => visibleWidth(row) <= 35)).toBe(true);
+	expect(rows.every((row: string) => visibleWidth(row) === 35)).toBe(true);
+	expect(rows[0]).toStartWith("╭");
+	expect(rows[0]).toContain("read-only");
+	expect(rows.at(-1)).toEndWith("╯");
+	expect(rows.slice(1, -1).every((row: string) => row.startsWith("│ ") && row.endsWith(" │"))).toBe(true);
+	expect(rows.some((row: string) => row.includes("────"))).toBe(true);
 });
