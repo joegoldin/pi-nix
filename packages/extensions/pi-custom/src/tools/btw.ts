@@ -1,340 +1,545 @@
-// /btw: a side question answered from the conversation so far, without
-// adding anything to it.
-//
-// The side model gets a snapshot of the conversation (its text and tool
-// calls, the last 40k characters) and the question, and no tools. Follow-ups
-// continue the same thread. Nothing reaches the main conversation unless you
-// bring it back with ctrl+r, which puts the latest exchange into your editor
-// as a draft for you to send or not. Ctrl+Shift+R brings the whole thread.
-// Threads last for the session; their viewport stays bounded above the editor.
-
-import { randomUUID } from "node:crypto";
+// Native side sessions remain independent of the main transcript. Bringing back
+// an exchange only drafts a main-conversation message; it never submits one.
+import { createHash, randomUUID } from "node:crypto";
 import {
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	renameSync,
+	writeFileSync,
+} from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import {
+	SessionManager,
+	type AgentSession,
 	type ExtensionAPI,
-	type ExtensionCommandContext,
-	getMarkdownTheme,
+	type ExtensionContext,
+	type ExtensionUIContext,
 } from "@earendil-works/pi-coding-agent";
-import { clampThinkingLevel } from "@earendil-works/pi-ai";
-import { Input, Markdown, matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi, type TuiMouseEvent, type TuiMouseEventResult } from "@earendil-works/pi-tui";
-import { Framed } from "../ui/frame.ts";
+import {
+	BtwView,
+	bringBackDraft,
+	bringBackThreadDraft,
+	type Thread,
+	type Turn,
+} from "./btw-view.ts";
+import {
+	createSideRuntime,
+	disposeSideRuntime,
+	type SideMode,
+} from "./btw-runtime.ts";
+import { registerSideConversations } from "./btw-fleet.ts";
+import { forkSideSession } from "./btw-session.ts";
+import { truncateToWidth } from "@earendil-works/pi-tui";
+export { BtwView, bringBackDraft, bringBackThreadDraft } from "./btw-view.ts";
 
-const CONTEXT_CHARS = 40_000;
-
-const SYSTEM_PROMPT = `You answer quick side questions for a coding-agent user.
-
-Use the provided conversation context only as background. Answer the user's side question directly and concisely. Do not claim to have changed files, run tools, or affected the main task. If the context is insufficient, say what is unknown and give the best next step.`;
-
-interface Turn {
-	question: string;
-	answer?: string;
-	/** The full assistant message, replayed as-is into follow-up requests. */
-	response?: unknown;
-	error?: string;
-}
-
-interface Thread {
+const ENTRY = "pi-custom:btw-session";
+interface SavedThread {
+	version: 1;
 	id: string;
 	sessionId: string;
-	context: string;
-	turns: Turn[];
+	file: string;
+	baseline: string | null;
+	name: string;
+	mode: SideMode;
+	draft: string;
 	updatedAt: number;
+	parentId?: string;
+}
+interface LiveThread extends Thread {
+	saved: SavedThread;
+	manager: SessionManager;
+	runtime?: AgentSession;
+	render?: () => void;
+	unsubscribe?: () => void;
 }
 
-interface EntryLike {
-	type?: string;
-	message?: { role?: string; content?: unknown; stopReason?: string };
-}
-
-/** The conversation as plain text for the side model: what was said and what tools were called. */
-export function conversationContext(entries: EntryLike[]): string {
-	const blocks: string[] = [];
-	for (const e of entries) {
-		const m = e.message;
-		if (e.type !== "message" || (m?.role !== "user" && m?.role !== "assistant")) continue;
-		const parts = typeof m.content === "string" ? [{ type: "text", text: m.content }] : Array.isArray(m.content) ? m.content : [];
-		const text = (parts as Array<{ type?: string; text?: string; name?: string; arguments?: unknown }>)
-			.map((p) => (p.type === "text" ? (p.text ?? "").trim() : p.type === "toolCall" ? `Tool call: ${p.name}(${JSON.stringify(p.arguments ?? {})})` : ""))
-			.filter(Boolean)
-			.join("\n");
-		if (!text) continue;
-		const who = m.role === "user" ? "User" : m.stopReason && m.stopReason !== "stop" ? `Assistant (${m.stopReason})` : "Assistant";
-		blocks.push(`${who}: ${text}`);
+type SideMessage = ReturnType<
+	SessionManager["buildSessionContext"]
+>["messages"][number];
+export function sideTurns(
+	manager: SessionManager,
+	baseline: string | null,
+	partial?: SideMessage,
+): Turn[] {
+	const branch = manager.getBranch();
+	const start = baseline
+		? branch.findIndex((entry) => entry.id === baseline) + 1
+		: 0;
+	const messages = branch
+		.slice(start)
+		.flatMap((entry) => (entry.type === "message" ? [entry.message] : []));
+	if (partial) messages.push(partial);
+	const turns: Turn[] = [];
+	for (const message of messages) {
+		if (
+			message.role !== "user" &&
+			message.role !== "assistant" &&
+			message.role !== "toolResult"
+		)
+			continue;
+		const text =
+			typeof message.content === "string"
+				? message.content
+				: message.content
+						.filter((part) => part.type === "text")
+						.map((part) => part.text)
+						.join("\n");
+		if (message.role === "user") turns.push({ question: text });
+		else if (turns.length && message.role === "assistant") {
+			const turn = turns.at(-1)!;
+			if (text) turn.answer = [turn.answer, text].filter(Boolean).join("\n\n");
+			if (message.stopReason === "error")
+				turn.error =
+					message.errorMessage ?? "The side model returned an error.";
+		} else if (turns.length && message.role === "toolResult") {
+			const turn = turns.at(-1)!;
+			turn.answer = [
+				turn.answer,
+				`Tool ${message.toolName}: ${message.isError ? "failed" : "returned"}.\n${text}`,
+			]
+				.filter(Boolean)
+				.join("\n\n");
+		}
 	}
-	const all = blocks.join("\n\n");
-	return all.length > CONTEXT_CHARS
-		? `[Earlier context omitted; showing the last ${CONTEXT_CHARS} characters.]\n${all.slice(all.length - CONTEXT_CHARS)}`
-		: all;
+	return turns;
 }
 
-export function firstMessage(question: string, context: string): string {
-	return `Answer this side question without modifying the main conversation.
-
-<side_question>
-${question}
-</side_question>
-
-<conversation_context>
-${context || "No prior conversation context was available."}
-</conversation_context>`;
-}
-
-export function followUpMessage(question: string): string {
-	return `Continue the same side conversation.
-
-<side_question>
-${question}
-</side_question>`;
-}
-
-/** The latest exchange, framed so the main model reads it as discussion, not as done work. */
-export function bringBackDraft(turn: Turn): string {
-	return discussionDraft(`User:\n${turn.question}\n\nAssistant:\n${turn.answer ?? ""}`);
-}
-
-export function bringBackThreadDraft(turns: readonly Turn[]): string {
-	return discussionDraft(turns.map((turn) => `User:\n${turn.question}\n\nAssistant:\n${turn.answer ?? (turn.error ? `[No answer: ${turn.error}]` : "[No completed answer.]")}`).join("\n\n"));
-}
-
-function discussionDraft(content: string): string {
-	return `The following context was brought back from a /btw side discussion.
-Treat it as discussion context, not as work already completed.
-
-<btw_context>
-${content}
-</btw_context>`;
-}
-
-export class BtwView {
-	private input = new Input();
-	private busy: AbortController | undefined;
-	private status = "";
-	private top = 0;
-	private maxTop = 0;
-	private pageSize = 1;
-	private followTail = true;
-
-	constructor(
-		private thread: Thread,
-		private theme: { fg(slot: string, text: string): string; bold(text: string): string },
-		private ask: (question: string, signal: AbortSignal) => Promise<void>,
-		private bringBack: (all: boolean) => void,
-		private close: () => void,
-		private rerender: () => void,
-		private height: () => number = () => 16,
-	) {
-		this.input.focused = true;
-	}
-
-	start(question: string): void {
-		this.followTail = true;
-		const controller = new AbortController();
-		this.busy = controller;
-		this.status = "Answering…";
-		this.rerender();
-		void this.ask(question, controller.signal).finally(() => {
-			if (this.busy === controller) this.busy = undefined;
-			this.status = "";
-			this.rerender();
+export function registerBtw(
+	pi: ExtensionAPI,
+	createRuntime = createSideRuntime,
+): void {
+	const threads = new Map<string, LiveThread>();
+	let shuttingDown = false;
+	const fleetBindings = new Map<string, () => void>();
+	const directory = (ctx: ExtensionContext) => {
+		const file = ctx.sessionManager.getSessionFile();
+		if (!file)
+			throw new Error("Side conversations require a disk-backed main session.");
+		return join(
+			dirname(file),
+			"btw",
+			createHash("sha256")
+				.update(ctx.sessionManager.getSessionId())
+				.digest("hex"),
+		);
+	};
+	const save = (thread: LiveThread) => {
+		thread.saved.draft = thread.draft ?? "";
+		thread.saved.updatedAt = Date.now();
+		const temporary = `${thread.saved.file}.btw-${randomUUID()}.tmp`;
+		writeFileSync(temporary, JSON.stringify(thread.saved), {
+			mode: 0o600,
+			flag: "wx",
 		});
-	}
-
-	handleInput(data: string): void {
-		if (matchesKey(data, "escape") || matchesKey(data, "ctrl+c")) {
-			this.busy?.abort();
-			this.close();
-			return;
-		}
-		if (matchesKey(data, "ctrl+shift+r")) {
-			if (this.thread.turns.length) { this.busy?.abort(); this.bringBack(true); }
-			return;
-		}
-		if (matchesKey(data, "ctrl+r")) {
-			if (this.thread.turns.some((t) => t.answer)) { this.busy?.abort(); this.bringBack(false); }
-			return;
-		}
-		if (matchesKey(data, "pageUp")) { this.scroll(-this.pageSize); return; }
-		if (matchesKey(data, "pageDown")) { this.scroll(this.pageSize); return; }
-		if (matchesKey(data, "ctrl+home")) { this.scroll(-this.maxTop); return; }
-		if (matchesKey(data, "ctrl+end")) { this.scroll(this.maxTop); return; }
-		if (matchesKey(data, "enter")) {
-			const question = this.input.getValue().trim();
-			if (!question) {
-				this.status = "Question cannot be empty";
-				return;
+		renameSync(temporary, `${thread.saved.file}.btw.json`);
+	};
+	const live = (saved: SavedThread, manager: SessionManager): LiveThread => ({
+		id: saved.id,
+		sessionId: saved.sessionId,
+		draft: saved.draft,
+		turns: sideTurns(manager, saved.baseline),
+		saved,
+		manager,
+	});
+	function restore(ctx: ExtensionContext): void {
+		const owner = ctx.sessionManager.getSessionId();
+		const root = directory(ctx);
+		for (const entry of ctx.sessionManager.getBranch()) {
+			if (entry.type !== "custom" || entry.customType !== ENTRY) continue;
+			const ref = entry.data as SavedThread;
+			if (
+				!ref ||
+				ref.sessionId !== owner ||
+				typeof ref.file !== "string" ||
+				resolve(dirname(ref.file)) !== resolve(root) ||
+				threads.has(ref.id)
+			)
+				continue;
+			try {
+				const saved = JSON.parse(
+					readFileSync(`${ref.file}.btw.json`, "utf8"),
+				) as SavedThread;
+				if (
+					saved.version !== 1 ||
+					saved.id !== ref.id ||
+					saved.sessionId !== owner ||
+					saved.file !== ref.file ||
+					!["read-only", "edit"].includes(saved.mode) ||
+					typeof saved.draft !== "string"
+				)
+					throw new Error("Invalid saved side conversation");
+				if (!existsSync(saved.file))
+					throw new Error("Side-conversation session file is missing");
+				const manager = SessionManager.open(saved.file);
+				if (manager.getSessionId() !== saved.id)
+					throw new Error("Side-conversation session identity changed");
+				threads.set(saved.id, live(saved, manager));
+			} catch (error) {
+				ctx.ui.notify(
+					`Cannot resume /btw: ${(error as Error).message}`,
+					"error",
+				);
 			}
-			if (this.busy) return;
-			this.input.setValue("");
-			this.start(question);
-			return;
-		}
-		this.input.handleInput(data);
-	}
-
-	private scroll(delta: number): void {
-		this.top = Math.max(0, Math.min(this.maxTop, this.top + delta));
-		this.followTail = this.top === this.maxTop;
-	}
-
-	handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
-		if (event.type !== "wheel") return;
-		this.scroll((event.wheelDelta ?? 0) * 3);
-		return { handled: true, render: true };
-	}
-
-	render(width: number): string[] {
-		const { theme } = this;
-		const transcript: string[] = [];
-		for (const turn of this.thread.turns) {
-			transcript.push(...wrapTextWithAnsi(turn.question, Math.max(1, width - 2)).map((line, i) =>
-				(i ? "  " : theme.fg("accent", "❯ ")) + theme.bold(line)), "");
-			if (turn.error) transcript.push(...wrapTextWithAnsi(`Error: ${turn.error}`, Math.max(1, width)).map((line) => theme.fg("error", line)), "");
-			else if (turn.answer !== undefined) transcript.push(...new Markdown(turn.answer, 0, 0, getMarkdownTheme()).render(width), "");
-		}
-		const height = Math.max(1, Math.floor(this.height()));
-		const historyHeight = Math.max(0, height - 4);
-		this.pageSize = Math.max(1, historyHeight);
-		this.maxTop = Math.max(0, transcript.length - historyHeight);
-		this.top = this.followTail ? this.maxTop : Math.min(this.top, this.maxTop);
-		// The composer is never part of the scrolling transcript, even on resize.
-		const input = this.input.render(width)[0] ?? "";
-		const status = theme.fg("muted", this.status);
-		const keys = theme.fg("dim", "Enter ask · Ctrl+r latest · Ctrl+Shift+r all");
-		const navigation = theme.fg("dim", "Esc close");
-		const footer = height >= 4 ? [status, input, keys, navigation] : [input, keys, navigation].slice(0, height);
-		return [...transcript.slice(this.top, this.top + historyHeight), ...footer]
-			.map((line) => visibleWidth(line) > width ? truncateToWidth(line, width, "…") : line);
-	}
-
-	invalidate(): void {}
-}
-
-export function registerBtw(pi: ExtensionAPI): void {
-	const threads = new Map<string, Thread>();
-
-	async function answer(ctx: ExtensionCommandContext, thread: Thread, question: string, signal: AbortSignal): Promise<void> {
-		const model = ctx.model;
-		const turn: Turn = { question };
-		thread.turns.push(turn);
-		thread.updatedAt = Date.now();
-		const discard = () => {
-			// A closed thread may already have been resumed before cancellation settles.
-			const index = thread.turns.indexOf(turn);
-			if (index >= 0) thread.turns.splice(index, 1);
-		};
-		if (!model) {
-			turn.error = "No model is selected.";
-			return;
-		}
-		const answered = thread.turns.filter((t) => t.response && !t.error);
-		const messages: unknown[] = [];
-		answered.forEach((t, i) => {
-			messages.push({ role: "user", content: i === 0 ? firstMessage(t.question, thread.context) : followUpMessage(t.question), timestamp: Date.now() });
-			messages.push(t.response);
-		});
-		messages.push({
-			role: "user",
-			content: answered.length === 0 ? firstMessage(question, thread.context) : followUpMessage(question),
-			timestamp: Date.now(),
-		});
-		const level = clampThinkingLevel(model, pi.getThinkingLevel() as never);
-		try {
-			const response = (await ctx.modelRegistry
-				.streamSimple(model, { systemPrompt: SYSTEM_PROMPT, messages: messages as never }, {
-					signal,
-					// Its own session id, so side requests never share the main thread's cache or routing.
-					sessionId: thread.id,
-					...(level !== "off" ? { reasoning: level as never } : {}),
-				})
-				.result()) as { stopReason?: string; errorMessage?: string; content?: Array<{ type: string; text?: string }> };
-			if (signal.aborted || response.stopReason === "aborted") {
-				discard();
-				return;
-			}
-			if (response.stopReason === "error") {
-				turn.error = response.errorMessage ?? "The side model returned an error.";
-				return;
-			}
-			turn.answer = (response.content ?? []).filter((p) => p.type === "text").map((p) => p.text ?? "").join("\n") || "No response received.";
-			turn.response = response;
-		} catch (err) {
-			if (signal.aborted) discard();
-			else turn.error = (err as Error).message;
 		}
 	}
-
-	async function open(ctx: ExtensionCommandContext, thread: Thread, question: string | undefined): Promise<void> {
-		// Written after the side thread closes: while it is drawn in the
-		// editor's place, pi restores the editor's earlier text on close and
-		// would overwrite a draft set before then.
-		let draft: string | undefined;
-		let importedAll = false;
-		await ctx.ui.custom<void>((tui, theme, _keybindings, done) => {
-			const view: BtwView = new BtwView(
-				thread,
-				theme,
-				(q, signal) => answer(ctx, thread, q, signal),
-				(all) => {
-					const latest = [...thread.turns].reverse().find((t) => t.answer);
-					if (!all && !latest) return;
-					importedAll = all;
-					draft = all ? bringBackThreadDraft(thread.turns) : bringBackDraft(latest!);
-					done();
-				},
-				() => done(),
-				() => tui.requestRender(),
-				() => Math.max(1, Math.min(18, Math.floor(tui.terminal.rows * 0.45)) - 2),
+	function fresh(
+		ctx: ExtensionContext,
+		blank = false,
+		source?: LiveThread,
+	): LiveThread {
+		const root = directory(ctx);
+		mkdirSync(root, { recursive: true, mode: 0o700 });
+		const manager = blank
+			? SessionManager.create(ctx.cwd, root)
+			: forkSideSession(source?.manager ?? ctx.sessionManager, ctx.cwd, root);
+		const file = manager.getSessionFile()!;
+		// Pi delays an empty session's first write until a message. Persist its
+		// native header/entries now so an unsent draft can survive a restart too.
+		if (!existsSync(file))
+			writeFileSync(
+				file,
+				[manager.getHeader(), ...manager.getEntries()]
+					.map((entry) => JSON.stringify(entry))
+					.join("\n") + "\n",
+				{ flag: "wx", mode: 0o600 },
 			);
-			if (question) view.start(question);
-			const framed = new Framed(view, "btw · side thread", theme as never);
-			return {
-				render: (w: number) => framed.render(w),
-				invalidate: () => framed.invalidate(),
-				handleMouse: (event: TuiMouseEvent) => view.handleMouse(event),
-				handleInput: (data: string) => {
-					framed.handleInput(data);
-					tui.requestRender();
-				},
+		const saved: SavedThread = {
+			version: 1,
+			id: manager.getSessionId(),
+			sessionId: ctx.sessionManager.getSessionId(),
+			file,
+			baseline: source ? source.saved.baseline : manager.getLeafId(),
+			name: source ? `Fork of ${source.saved.name}` : "Side conversation",
+			mode: "read-only",
+			draft: "",
+			updatedAt: Date.now(),
+			...(source ? { parentId: source.id } : {}),
+		};
+		const thread = live(saved, manager);
+		save(thread);
+		pi.appendEntry(ENTRY, saved);
+		threads.set(thread.id, thread);
+		return thread;
+	}
+	async function runtime(
+		ctx: ExtensionContext,
+		thread: LiveThread,
+	): Promise<AgentSession> {
+		if (thread.runtime) return thread.runtime;
+		// Child dialogs use the native focus stack, but child status/editor writes
+		// must never overwrite the main prompt, footer, or widgets.
+		const ui = {
+			...ctx.ui,
+			setStatus() {},
+			setWidget() {},
+			setFooter() {},
+			setHeader() {},
+			setWorkingMessage() {},
+			setEditorText(text: string) {
+				thread.draft = text;
+			},
+			getEditorText: () => thread.draft ?? "",
+		} as ExtensionUIContext;
+		const created = await createRuntime(
+			pi,
+			ctx,
+			thread.manager,
+			thread.saved.mode,
+			ui,
+		);
+		if (shuttingDown) {
+			await disposeSideRuntime(created);
+			throw new Error(
+				"The main session shut down before this side conversation started.",
+			);
+		}
+		thread.runtime = created;
+		thread.unsubscribe = thread.runtime.subscribe((event) => {
+			const refresh = () => {
+				thread.turns = sideTurns(
+					thread.manager,
+					thread.saved.baseline,
+					event.type === "message_update" ? event.message : undefined,
+				);
+				thread.render?.();
 			};
+			// Public message_end listeners run before native session persistence.
+			if (event.type === "message_end") queueMicrotask(refresh);
+			else refresh();
 		});
-		if (draft) {
-			const current = ctx.ui.getEditorText();
-			ctx.ui.setEditorText(current.trim() ? `${current}\n\n${draft}` : draft);
-			ctx.ui.notify(importedAll ? "Brought the full /btw thread into your prompt." : "Brought the latest /btw answer into your prompt.", "info");
+		return thread.runtime;
+	}
+	async function answer(
+		ctx: ExtensionContext,
+		thread: LiveThread,
+		question: string,
+		signal: AbortSignal,
+	): Promise<void> {
+		thread.saved.name =
+			thread.saved.name === "Side conversation"
+				? question.slice(0, 70)
+				: thread.saved.name;
+		let session: AgentSession | undefined;
+		const abort = () => {
+			void session?.abort();
+		};
+		signal.addEventListener("abort", abort, { once: true });
+		try {
+			session = await runtime(ctx, thread);
+			if (!signal.aborted) await session.prompt(question);
+			thread.turns = sideTurns(thread.manager, thread.saved.baseline);
+		} catch (error) {
+			thread.turns = sideTurns(thread.manager, thread.saved.baseline);
+			if (thread.turns.at(-1)?.question !== question)
+				thread.turns.push({ question });
+			thread.turns.at(-1)!.error = (error as Error).message;
+		} finally {
+			signal.removeEventListener("abort", abort);
+			try {
+				save(thread);
+			} catch (error) {
+				ctx.ui.notify(`Cannot save /btw: ${(error as Error).message}`, "error");
+			}
 		}
 	}
-
+	async function choose(
+		ctx: ExtensionContext,
+	): Promise<LiveThread | undefined> {
+		restore(ctx);
+		const items = [...threads.values()]
+			.filter(
+				(thread) => thread.sessionId === ctx.sessionManager.getSessionId(),
+			)
+			.sort((a, b) => b.saved.updatedAt - a.saved.updatedAt);
+		const labels = [
+			"Fork main conversation",
+			"New blank conversation",
+			...items.map(
+				(thread) =>
+					`${thread.busy ? "Running" : "Resume"}: ${thread.saved.name} [${thread.id.slice(0, 8)}]`,
+			),
+		];
+		const picked = await ctx.ui.select("Side conversations", labels);
+		if (!picked) return;
+		const index = labels.indexOf(picked);
+		return index === 0
+			? fresh(ctx)
+			: index === 1
+				? fresh(ctx, true)
+				: items[index - 2];
+	}
+	async function open(
+		ctx: ExtensionContext,
+		initial: LiveThread,
+		question?: string,
+	): Promise<void> {
+		let thread: LiveThread | undefined = initial;
+		while (thread) {
+			const current = thread;
+			let draft: string | undefined;
+			const action = await ctx.ui.custom<
+				"close" | "fork" | "fresh" | "switch" | "mode"
+			>(
+				(tui, theme, _keys, done) => {
+					current.render = () => tui.requestRender();
+					const view = new BtwView(
+						current,
+						theme,
+						(q, signal) => answer(ctx, current, q, signal),
+						(all) => {
+							const last = [...current.turns]
+								.reverse()
+								.find((turn) => turn.answer);
+							if (!all && !last) return;
+							draft = all
+								? bringBackThreadDraft(current.turns)
+								: bringBackDraft(last!);
+							done("close");
+						},
+						() => done("close"),
+						current.render,
+						() => Math.max(5, Math.floor(tui.terminal.rows * 0.8) - 3),
+						{
+							fork: () => done("fork"),
+							fresh: () => done("fresh"),
+							switch: () => done("switch"),
+							mode: () => {
+								if (!current.busy) done("mode");
+								else
+									ctx.ui.notify(
+										"Stop or finish the current turn before changing tool mode.",
+										"info",
+									);
+							},
+							stop: () => current.busy?.abort(),
+						},
+					);
+					if (question) {
+						view.start(question);
+						question = undefined;
+					}
+					return {
+						render: (width) => [
+							truncateToWidth(
+								theme.fg(
+									"accent",
+									`btw · ${current.saved.name.replace(/[\p{C}\p{Zl}\p{Zp}]/gu, " ")} · ${current.saved.mode}`,
+								),
+								width,
+							),
+							...view.render(width),
+						],
+						invalidate: () => view.invalidate(),
+						handleInput: (data) => {
+							view.handleInput(data);
+							tui.requestRender();
+						},
+						handleMouse: (event) => view.handleMouse(event),
+					};
+				},
+				{
+					overlay: true,
+					overlayOptions: { width: "90%", maxHeight: "90%", anchor: "center" },
+				},
+			);
+			current.render = undefined;
+			save(current);
+			if (draft) {
+				const previous = ctx.ui.getEditorText();
+				ctx.ui.setEditorText(
+					previous.trim() ? `${previous}\n\n${draft}` : draft,
+				);
+			}
+			if (action === "fork") thread = fresh(ctx, false, current);
+			else if (action === "fresh") thread = fresh(ctx, true);
+			else if (action === "switch") thread = await choose(ctx);
+			else if (action === "mode") {
+				const selected = await ctx.ui.select("Side-conversation tools", [
+					"Read-only",
+					"Editing (permission gates still apply)",
+				]);
+				if (selected) {
+					if (current.runtime) {
+						current.unsubscribe?.();
+						await disposeSideRuntime(current.runtime);
+						current.runtime = undefined;
+					}
+					current.saved.mode = selected === "Read-only" ? "read-only" : "edit";
+					save(current);
+				}
+			} else thread = undefined;
+		}
+	}
+	function installFleet(ctx: ExtensionContext): void {
+		const owner = ctx.sessionManager.getSessionId();
+		const file = ctx.sessionManager.getSessionFile();
+		if (!file) return;
+		fleetBindings.get(file)?.();
+		fleetBindings.set(
+			file,
+			registerSideConversations(file, {
+				snapshot: () => {
+					if (ctx.sessionManager.getSessionId() !== owner) return [];
+					return [...threads.values()]
+						.filter((thread) => thread.sessionId === owner)
+						.map((thread) => ({
+							id: thread.id,
+							label: thread.saved.name,
+							state: thread.busy ? "running" : "idle",
+							startedAt: thread.saved.updatedAt,
+							updatedAt: thread.saved.updatedAt,
+							...(thread.saved.parentId
+								? { parentId: thread.saved.parentId }
+								: {}),
+						}));
+				},
+				open: async (id) => {
+					const thread = threads.get(id);
+					if (
+						!thread ||
+						thread.sessionId !== owner ||
+						ctx.sessionManager.getSessionId() !== owner
+					)
+						return;
+					try {
+						await open(ctx, thread);
+					} catch (error) {
+						ctx.ui.notify(
+							`Cannot open /btw: ${(error as Error).message}`,
+							"error",
+						);
+					}
+				},
+			}),
+		);
+	}
+	pi.on("session_start", (_event, ctx) => {
+		if (ctx.mode !== "tui") return;
+		try {
+			restore(ctx);
+			installFleet(ctx);
+		} catch (error) {
+			ctx.ui.notify(
+				`Cannot restore /btw: ${(error as Error).message}`,
+				"error",
+			);
+		}
+	});
 	pi.registerCommand("btw", {
-		description: "Ask a quick side question without adding it to the main conversation",
+		description:
+			"Independent side conversation; list, new, or a question to fork main",
 		handler: async (args, ctx) => {
 			if (ctx.mode !== "tui") {
 				ctx.ui.notify("/btw requires interactive TUI mode", "error");
 				return;
 			}
-			const sessionId = ctx.sessionManager.getSessionId();
-			const fresh = (): Thread => ({
-				id: `btw-${randomUUID()}`,
-				sessionId,
-				context: conversationContext(ctx.sessionManager.getBranch() as EntryLike[]),
-				turns: [],
-				updatedAt: Date.now(),
-			});
-			const question = args.trim();
-			if (question) {
-				const thread = fresh();
-				threads.set(thread.id, thread);
-				await open(ctx, thread, question);
-				return;
+			try {
+				restore(ctx);
+				installFleet(ctx);
+				const question = args.trim();
+				const thread =
+					question === "new"
+						? fresh(ctx, true)
+						: !question || question === "list"
+							? await choose(ctx)
+							: fresh(ctx);
+				if (thread)
+					await open(
+						ctx,
+						thread,
+						question && !["new", "list"].includes(question)
+							? question
+							: undefined,
+					);
+			} catch (error) {
+				ctx.ui.notify(`Cannot open /btw: ${(error as Error).message}`, "error");
 			}
-			const resumable = [...threads.values()]
-				.filter((t) => t.sessionId === sessionId && t.turns.length > 0)
-				.sort((a, b) => b.updatedAt - a.updatedAt);
-			const labels = ["Start side thread", ...resumable.map((t) => `Resume: ${t.turns[0].question.slice(0, 70)}`)];
-			const picked = resumable.length ? await ctx.ui.select("btw", labels) : labels[0];
-			if (!picked) return;
-			const index = labels.indexOf(picked);
-			const thread = index <= 0 ? fresh() : resumable[index - 1];
-			threads.set(thread.id, thread);
-			await open(ctx, thread, undefined);
 		},
+	});
+	pi.on("session_shutdown", async () => {
+		shuttingDown = true;
+		for (const dispose of fleetBindings.values()) dispose();
+		fleetBindings.clear();
+		const errors: unknown[] = [];
+		for (const thread of threads.values()) {
+			thread.busy?.abort();
+			thread.unsubscribe?.();
+			try {
+				save(thread);
+			} catch (error) {
+				errors.push(error);
+			}
+			try {
+				if (thread.runtime) await disposeSideRuntime(thread.runtime);
+			} catch (error) {
+				errors.push(error);
+			}
+		}
+		if (errors.length)
+			throw new AggregateError(
+				errors,
+				"Could not completely close side conversations",
+			);
 	});
 }

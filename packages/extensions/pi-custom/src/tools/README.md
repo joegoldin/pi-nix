@@ -136,23 +136,43 @@ safety counters or reactivate paused goals.
 
 Replaces pi-goal.
 
-## Side questions (`btw.ts`)
+## Side conversations (`btw.ts`)
 
-`/btw <question>` asks a side model about the conversation so far (a snapshot of
-its last 40k characters, no tools) without adding anything to it. Follow-ups
-continue the thread. Ctrl+r brings the latest exchange into the main editor;
-Ctrl+Shift+r brings the whole thread, including visible errors and unanswered
-questions. Both preserve the existing main draft and never submit it. Full-thread
-import requires a terminal that reports Ctrl+Shift+r distinctly (e.g. Kitty keys).
+`/btw <question>` forks the current saved conversation into an independent native
+Pi session. `/btw new` starts blank; `/btw` or `/btw list` resumes a conversation.
+Sessions, drafts and tool mode survive restarts. A fork made while a parent tool
+is pending records that its result is unavailable; it never claims to have run it.
 
-The framed panel occupies at most 18 rows or 45% of terminal height, with the
-composer and controls outside its scrolling transcript. Mouse wheel and
+Side conversations appear in the existing Down-arrow fleet menu. Select one and
+press Enter to open or continue it. Inside a side conversation:
+
+- Enter sends a follow-up. Responses stream into the native overlay.
+- Alt+s switches conversations; Alt+f forks the current side conversation;
+  Alt+n starts blank.
+- Escape or Ctrl+c returns to main **without stopping ongoing work**. Alt+x
+  explicitly stops the side turn. Reopening cannot start a concurrent second turn.
+- Alt+t chooses read-only or editing tools, when no turn is running. Read-only is
+  the default and blocks write tools even if requested by name. Editing requires
+  the parent's mandatory permission extension; child tools use native execution
+  hooks and their own permission prompts, never direct calls to parent tools.
+- Ctrl+r brings the latest exchange into the main editor; Ctrl+Shift+r brings
+  the full side discussion, including visible errors and unanswered questions.
+  These actions cancel a pending side turn, preserve the main draft, and never
+  submit it. Ctrl+Shift+r requires distinct terminal reporting, such as Kitty keys.
+
+The overlay has a bounded viewport and a separate composer. Mouse wheel and
 Page Up/Down scroll; Ctrl+Home/End jump to the beginning/latest messages. New
-answers follow the tail unless you have scrolled up. Resizing recomputes the
-viewport without losing the draft. Bringing back a thread cancels a pending
-side request; a late cancellation cannot remove a newly resumed question.
+answers follow the tail unless you have scrolled up. The main editor and footer
+remain full-width. Child status and editor writes cannot replace them.
 
-Replaces pi-btw.
+Side transcripts stay in their own session files. The main session stores a
+resume reference, not side messages; the fleet receives only identity/activity
+metadata. Side discussions do not enter the main model context or minimap unless
+you explicitly bring them back. Main-conversation Ctrl+c is unchanged; Ctrl+c in
+the fleet, including its steering forms, returns to main without stopping a child.
+
+Replaces pi-btw; the independent conversation workflow was inspired by
+[pi-side-chat](https://github.com/nicobailon/pi-side-chat).
 
 ## Run summary (`turn.ts`, `turn-text.ts`)
 

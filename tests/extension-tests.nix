@@ -114,6 +114,7 @@ let
       {
         src = ../packages/extensions/pi-custom;
         PI_VOICE_SRC = ../packages/extensions/pi-voice;
+        PI_PERMISSIONS_ENTRY = "${self.packages.${system}.ext-pi-permissions}/src/index.ts";
         TZDIR = "${pkgs.tzdata}/share/zoneinfo";
         nativeBuildInputs = [
           pkgs.bun

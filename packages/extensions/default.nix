@@ -40,6 +40,7 @@ let
       # clipped. Preserve upstream secret redaction and terminal-control safety.
       patchPhaseExtra =
         lib.optionalString (name == "pi-subagents") ''
+          patch -p1 --fuzz=0 < ${./subagent-side-conversations.patch}
           substituteInPlace src/runs/background/steering.js \
             --replace-fail 'import { previewDisplayText }' 'import { previewDisplayText, safeTerminalText }' \
             --replace-fail 'const preview = steeringMessagePreview(message);' 'const preview = safeTerminalText(redactSecretValues(message));'

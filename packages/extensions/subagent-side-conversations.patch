@@ -1,0 +1,111 @@
+--- a/src/tui/fleet.js
++++ b/src/tui/fleet.js
+@@ -4,6 +4,7 @@
+ import { matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+ import { fleetContains, fleetLayout } from "./fleet-layout.js";
+ import { FleetViewport } from "./fleet-viewport.js";
++import { previewDisplayText } from "../shared/display-text.js";
+ import { snapshotExternalRuns } from "../api/external-runs.js";
+ import { getArtifactPaths, getArtifactsDir } from "../shared/artifacts.js";
+ import { formatDuration, formatModelThinking, formatTokens, formatTokenUsage, shortenPath } from "../shared/formatters.js";
+@@ -238,6 +239,25 @@
+     }
+     if (state.currentSessionId) {
+         try {
++            // Only UI metadata crosses this seam. The owning extension retains
++            // session state, inference, permission hooks, and the open action.
++            const registry = globalThis[Symbol.for("pi-custom.side-conversations.v1")];
++            const provider = registry?.version === 1 && registry.owners instanceof Map
++                ? registry.owners.get(state.currentSessionId) : undefined;
++            if (typeof provider?.snapshot === "function" && typeof provider.open === "function") {
++                for (const row of provider.snapshot().slice(0, 100)) {
++                    if (typeof row?.id !== "string" || typeof row.label !== "string"
++                        || !["running", "idle"].includes(row.state)
++                        || !Number.isFinite(row.startedAt) || !Number.isFinite(row.updatedAt)) continue;
++                    const label = previewDisplayText(row.label, 100);
++                    const run = { id: row.id, source: "btw", label, state: row.state,
++                        startedAt: row.startedAt, updatedAt: row.updatedAt,
++                        currentAction: row.parentId ? `Fork of ${previewDisplayText(row.parentId, 100)}` : "Independent side conversation" };
++                    items.push({ key: `btw:${row.id}`, kind: "external", runId: row.id,
++                        agent: `btw · ${label}`, state: row.state, updatedAt: row.updatedAt, run,
++                        openConversation: () => provider.open(row.id) });
++                }
++            }
+             for (const run of snapshotExternalRuns(state.currentSessionId, { ignoreMalformed: true, onMalformedRecord: (message) => reportFleetWarning(state, `Removed ${message}`) })) {
+                 items.push({
+                     key: `external:${run.id}`,
+@@ -562,7 +582,7 @@
+ function externalDetail(item) {
+     return [
+         `Run: ${item.runId}`,
+-        "Source: external · display-only",
++        item.openConversation ? "Source: side conversation · Enter opens" : "Source: external · display-only",
+         `Owner: ${item.run.source}`,
+         `State: ${item.state}`,
+         `Started: ${new Date(item.run.startedAt).toISOString()}`,
+@@ -1011,6 +1031,12 @@
+         return event.type === "wheel" ? { handled: true, render: false } : undefined;
+     }
+     handleInput(data) {
++        // In child views Ctrl+C is navigation, even inside a steering form.
++        if (matchesKey(data, "ctrl+c")) {
++            this.stopRefresh();
++            this.done(undefined);
++            return;
++        }
+         if (this.promptAuditOpen && this.redoGuidanceDraft !== undefined) {
+             if (matchesKey(data, "escape") || matchesKey(data, "ctrl+c")) {
+                 this.resetActionInput();
+@@ -1221,6 +1247,12 @@
+             return;
+         }
+         if (matchesFleetAction(data, this.keybindings, "inspect")) {
++            const selected = this.snapshot.items[this.selected];
++            if (selected?.openConversation) {
++                this.stopRefresh();
++                this.done(selected.openConversation);
++                return;
++            }
+             this.inspectSelected();
+             return;
+         }
+@@ -1355,7 +1387,9 @@
+         ];
+         const lines = [this.theme.fg("border", `╭${"─".repeat(innerWidth)}╮`)];
+         const selected = this.snapshot.items[this.selected];
+-        const title = selected?.kind === "external"
++        const title = selected?.openConversation
++            ? ` ${this.theme.bold("Conversation tree")} ${this.theme.fg("dim", "· side conversation")}`
++            : selected?.kind === "external"
+             ? ` ${this.theme.bold("Fleet inspector")} ${this.theme.fg("dim", "· external display-only")}`
+             : ` ${this.theme.bold("Subagent fleet inspector")} ${this.theme.fg("dim", "· live controls")}`;
+         const selectedStatus = selected
+@@ -1374,7 +1408,9 @@
+         const position = this.snapshot.items.length ? `${this.selected + 1}/${this.snapshot.items.length}` : "0/0";
+         const footer = this.promptAuditOpen
+             ? ` j/k child · 1/2/3 view · g redo with guidance · c copy · Esc close Prompt Audit · ${position}`
+-            : selected?.kind === "external"
++            : selected?.openConversation
++                ? ` ${bindingLabel(this.keybindings, "selectUp")}/${bindingLabel(this.keybindings, "selectDown")} conversation · Enter open/continue · Ctrl+c main · ${position}`
++                : selected?.kind === "external"
+                 ? ` ${bindingLabel(this.keybindings, "selectUp")}/${bindingLabel(this.keybindings, "selectDown")} job · display-only · ${bindingLabel(this.keybindings, "refresh")} refresh · ${bindingLabel(this.keybindings, "close")} close · ${position}`
+                 : ` ${bindingLabel(this.keybindings, "selectUp")}/${bindingLabel(this.keybindings, "selectDown")} agent · p Prompt Audit · ${bindingLabel(this.keybindings, "inspect")} Inspect · ${bindingLabel(this.keybindings, "steer")} steer · ${bindingLabel(this.keybindings, "stop")} stop · ${bindingLabel(this.keybindings, "toggleTools")} tools · ${bindingLabel(this.keybindings, "refresh")} refresh · ${bindingLabel(this.keybindings, "close")} close · ${position}`;
+         lines.push(this.theme.fg("border", "│") + fit(this.theme.fg("dim", footer), innerWidth) + this.theme.fg("border", "│"));
+@@ -1447,8 +1483,9 @@
+             return control.promptAuditRedo(input.index, input.guidance);
+         },
+     };
++    let openConversation;
+     try {
+-        await ctx.ui.custom((tui, theme, _keybindings, done) => new SubagentFleetComponent(tui, theme, state, done, { ...options, actions, copyText }), {
++        openConversation = await ctx.ui.custom((tui, theme, _keybindings, done) => new SubagentFleetComponent(tui, theme, state, done, { ...options, actions, copyText }), {
+             overlay: true,
+             overlayOptions: { anchor: "center", width: "95%", minWidth: 60, maxHeight: "85%", margin: 1 },
+         });
+@@ -1456,4 +1493,5 @@
+     finally {
+         state.fleetInspectorOpen = wasOpen;
+     }
+-}
++    if (typeof openConversation === "function") await openConversation();
++}
