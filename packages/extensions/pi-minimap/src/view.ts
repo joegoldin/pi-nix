@@ -125,16 +125,14 @@ class Log implements Component {
 				const kind = kinds[beat.kind ?? "note"];
 				const slot =
 					beat.tone === "neutral" ? (older ? "muted" : kind.slot) : beat.tone;
-				if (beat.recap)
-					rows.push({
-						text: this.theme.fg(
-							"accent",
-							beat.omitted
-								? `↻ Recap · ${number(beat.omitted)} events omitted`
-								: "↻ Recap · catch-up",
-						),
-						beat,
-					});
+				if (beat.recap) {
+					const notice = beat.omitted
+						? `↻ Catch-up summary · ${number(beat.omitted)} intermediate ${beat.omitted === 1 ? "event" : "events"} not reviewed`
+						: "↻ Catch-up summary";
+					for (const line of wrapTextWithAnsi(notice, contentWidth))
+						rows.push({ text: this.theme.fg("accent", line), beat });
+					rows.push({ text: "" });
+				}
 				const mark =
 					beat.tone === "success"
 						? "✓"

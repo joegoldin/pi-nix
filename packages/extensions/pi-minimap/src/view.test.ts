@@ -270,3 +270,18 @@ test("legacy earlier paragraphs render as at most three short source-linked bull
 	expect(bullets).toHaveLength(3);
 	expect(bullets.every((text) => text.length <= 100)).toBe(true);
 });
+
+test("catch-up notices explain sampling and leave a blank line before the summary", () => {
+	const { engine, view } = fixture();
+	engine.state.recent = [{ text: "Work continued.", tone: "neutral", from: "e0", to: "e1", recap: true, omitted: 11 }];
+	for (const width of [28, 38, 90]) {
+		const lines = view.log.render(width);
+		const summary = lines.findIndex(line => line.includes("Work continued."));
+		expect(lines.slice(1, summary).filter(Boolean).join(" ")).toBe("↻ Catch-up summary · 11 intermediate events not reviewed");
+		expect(lines[summary - 1]).toBe("");
+	}
+	engine.state.recent[0]!.omitted = undefined;
+	const lines = view.log.render(38);
+	expect(lines).toContain("↻ Catch-up summary");
+	expect(lines[lines.findIndex(line => line.includes("Work continued.")) - 1]).toBe("");
+});
