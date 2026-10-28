@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { EMPTY, reduce, replay, sanitize, type TodoState, widgetLines } from "./todo-state.ts";
+import { EMPTY, reduce, replay, sanitize, type TodoState, widgetRows, widgetLines } from "./todo-state.ts";
 
 const plain = { fg: (_s: string, t: string) => t };
 
@@ -364,5 +364,35 @@ describe("completed todo ordering", () => {
 		expect(text).toContain("Finished root");
 		expect(text).toContain("Finished child");
 		expect(text).toContain("Group (1/2)");
+	});
+});
+
+
+describe("completed group headers", () => {
+	const completed = () => run(
+		{ action: "create", kind: "group", subject: "Finished acceptance group" },
+		{ action: "create", parentId: 1, subject: "Check" },
+		{ action: "update", id: 2, status: "completed" },
+	).state;
+	const styled = { fg: (slot: string, text: string) => `<${slot}>${text}</${slot}>`, strikethrough: (text: string) => `<strike>${text}</strike>` };
+	for (const collapsed of [false, true]) it(`marks the completed group without losing its ${collapsed ? "collapsed" : "expanded"} arrow`, () => {
+		const rows = widgetRows(completed(), new Set(), 12, styled, true, undefined, new Set(collapsed ? [1] : []));
+		const header = rows.find(row => row.groupId === 1)!;
+		expect(header.text).toContain(collapsed ? "▸" : "▾");
+		expect(header.text).toContain("<success>✓ </success>");
+		expect(header.text).toContain("<muted><strike>Finished acceptance group</strike></muted>");
+		expect(header.text).toContain("(1/1)");
+	});
+	it("keeps wrapped completed headers clickable and restores open styling when a child is added", () => {
+		const state = completed();
+		const rows = widgetRows(state, new Set(), 12, plain, true, 24);
+		expect(rows.filter(row => row.groupId === 1).length).toBeGreaterThan(1);
+		expect(rows.every(row => row.text.length <= 24)).toBe(true);
+		const reopened = reduce(state, { action: "create", parentId: 1, subject: "Another check" }).state;
+		const header = widgetRows(reopened, new Set(), 12, styled, true).find(row => row.groupId === 1)!;
+		expect(header.text).toContain("<accent>Finished acceptance group</accent>");
+		expect(header.text).not.toContain("<strike>");
+		expect(header.text).not.toContain("✓");
+		expect(header.text).toContain("(1/2)");
 	});
 });

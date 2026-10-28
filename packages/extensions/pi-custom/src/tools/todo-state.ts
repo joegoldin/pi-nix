@@ -391,13 +391,13 @@ export function widgetRows(
 		const last = row.parent ? siblings.at(-1) === row : lastRoot;
 		const branch = row.parent ? (lastRoot ? "   " : "│  ") : "";
 		const group = t.kind === "group";
-		const [glyph, slot] = group ? [collapsedGroups.has(t.id) ? "▸" : "▾", "accent"] : GLYPH[t.status as keyof typeof GLYPH];
+		const completed = t.status === "completed";
+		const [glyph, slot] = group ? [collapsedGroups.has(t.id) ? "▸" : "▾", completed ? "muted" : "accent"] : GLYPH[t.status as keyof typeof GLYPH];
 		const subject = sanitize(t.subject);
-		const body = group ? theme.fg("accent", subject)
-			: t.status === "in_progress" ? theme.fg("accent", subject)
-			: t.status === "completed" ? theme.fg("muted", theme.strikethrough ? theme.strikethrough(subject) : subject)
+		const body = completed ? theme.fg("muted", theme.strikethrough ? theme.strikethrough(subject) : subject)
+			: group || t.status === "in_progress" ? theme.fg("accent", subject)
 			: theme.fg("text", subject);
-		let text = `${showIds ? theme.fg("dim", `#${t.id} `) : ""}${body}`;
+		let text = `${group && completed ? theme.fg("success", "✓ ") : ""}${showIds ? theme.fg("dim", `#${t.id} `) : ""}${body}`;
 		if (group) {
 			const { done, total } = groupProgress(state, t.id);
 			text += theme.fg("muted", ` (${done}/${total})`);
