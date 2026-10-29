@@ -923,7 +923,7 @@ test("directory facts survive follow-ups and restoration but never skip risk rev
   expect(h.classifierCalls()).toBe(6);
 });
 
-test("bookkeeping wrappers still classify every action and cannot hide a remote side effect", async () => {
+test("literal bookkeeping skips classification but mixed wrappers cannot hide a remote side effect", async () => {
   const seen = [];
   const h = await realHost(() => ({}), async (_ctx, _cfg, action) => {
     seen.push(action);
@@ -941,8 +941,8 @@ test("bookkeeping wrappers still classify every action and cannot hide a remote 
     const result = await h.service.links.get("pi-automode")({ ...call, toolCall: call }, {}, log);
     expect(result.kind).toBe(index === 0 ? "allow" : "deny");
   }
-  expect(h.classifierCalls()).toBe(2);
-  expect(seen[1]).toContain("git push origin main");
+  expect(h.classifierCalls()).toBe(1);
+  expect(seen[0]).toContain("git push origin main");
 });
 
 test("linked approval questions do not classify the requested action but retain explicit tool denials", async () => {
@@ -954,4 +954,13 @@ test("linked approval questions do not classify the requested action but retain 
   const denied = await realHost(() => ({ permissionDeny: [parseToolPattern("ask_for_approval")] }));
   expect((await denied.emit("tool_call", call))?.block).toBe(true);
   expect(denied.classifierCalls()).toBe(0);
+});
+
+test("bookkeeping shortcuts retain explicit wrapper and nested-tool denials", async () => {
+  for (const toolName of ["codemode", "todo"]) {
+    const h = await realHost(() => ({ permissionDeny: [parseToolPattern(`${toolName}(*)`)] }));
+    const input = toolName === "todo" ? { action: "delete", id: 37 } : { code: 'await tools.todo({action:"delete",id:37});' };
+    expect((await h.emit("tool_call", { toolName, toolCallId: "denied-bookkeeping", input }))?.block).toBe(true);
+    expect(h.classifierCalls()).toBe(0);
+  }
 });

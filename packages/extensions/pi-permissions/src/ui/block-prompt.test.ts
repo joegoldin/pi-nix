@@ -40,6 +40,21 @@ describe("the ask before a block", () => {
 		expect(unavailable.result).toBeUndefined();
 	});
 
+	it("offers four clear lifetime choices with the session choice as default", () => {
+		const prompt = new BlockPrompt(30_000, Date.now, true, false, true);
+		expect(prompt.choices.map(choice => choice.label)).toEqual([
+			"Allow for this session", "Allow for this and future sessions", "Allow once", "Deny",
+		]);
+		prompt.confirm();
+		expect(prompt.result).toBe("allow-session");
+		const future = new BlockPrompt(30_000, Date.now, true, false, true);
+		future.press("f");
+		expect(future.result).toBe("allow-future");
+		const unavailable = new BlockPrompt(30_000, Date.now, true);
+		unavailable.press("f");
+		expect(unavailable.result).toBeUndefined();
+	});
+
 	it("keeps the block when the time runs out, and not before", () => {
 		const c = clock();
 		const p = new BlockPrompt(30_000, c.now);

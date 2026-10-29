@@ -128,7 +128,9 @@ export type PiAutomodeOptions = {
   onDenied?: (review: ApprovalReview) => void;
   /** Shared session ledger, owned by pi-permissions rather than this classifier. */
   approvals?: {
+    prepare?(ctx: ExtensionContext, config: EffectiveConfig, toolName: string, input: Record<string, unknown>, loadedContext: string): Promise<{ scope: string; futureScope?: string; remember(future: boolean): boolean } | undefined>;
     context?(toolName: string, cwd: string, input: Record<string, unknown>): readonly VerifiedApproval[];
+    confirmed?(): void;
     scope(toolName: string, input: unknown, cwd: string): string | undefined;
     has(toolName: string, input: unknown, cwd: string): boolean;
     remember(toolName: string, input: unknown, cwd: string): void;
@@ -455,9 +457,10 @@ export function createPiAutomode(options: PiAutomodeOptions = {}) {
       reason: string,
       logCtx: LogCtx,
       scope?: string,
-    ): Promise<"allow-session" | "allow" | "deny" | "timeout" | undefined> {
+      futureScope?: string,
+    ): Promise<"allow-session" | "allow-future" | "allow" | "deny" | "timeout" | undefined> {
       const ask = cfg.askOnBlock;
-      if (!ask?.enabled || !ctx.hasUI || ctx.mode !== "tui" || logCtx.deterministicOnly) return undefined;
+      if (!ask?.enabled || !ctx.hasUI || ctx.mode !== "tui" || logCtx.deterministicOnly || ctx.signal?.aborted) return undefined;
       const requestId = `pi-automode-${logCtx.decisionId}`;
       emitPermissionEvent("permissions:ui_prompt", { requestId, toolName, surface: toolName });
       const answer = await askUserBeforeBlock(ctx, {
@@ -466,12 +469,13 @@ export function createPiAutomode(options: PiAutomodeOptions = {}) {
         reason,
         timeoutSeconds: ask.timeoutSeconds,
         scope,
+        futureScope,
       });
       emitPermissionEvent("permissions:decision", {
         requestId,
         surface: toolName,
-        result: answer === "allow" || answer === "allow-session" ? "allow" : "deny",
-        resolution: answer === "allow" || answer === "allow-session" ? "user_approved" : answer === "deny" ? "user_denied" : "confirmation_unavailable",
+        result: answer === "allow" || answer === "allow-session" || answer === "allow-future" ? "allow" : "deny",
+        resolution: answer === "allow" || answer === "allow-session" || answer === "allow-future" ? "user_approved" : answer === "deny" ? "user_denied" : "confirmation_unavailable",
       });
       return answer;
     }
@@ -971,6 +975,7 @@ export function createPiAutomode(options: PiAutomodeOptions = {}) {
       const scopedApproval = canReuseApproval && options.approvals?.has(event.toolName, input, ctx.cwd);
 
       if (event.toolCallId && userApproved.has(event.toolCallId)) {
+        if (!ctx.signal?.aborted) options.approvals?.confirmed?.();
         return allow(ctx, "user", "Allowed by the user at the prompt", event.toolName, summary, logCtx);
       }
 
@@ -1005,16 +1010,31 @@ export function createPiAutomode(options: PiAutomodeOptions = {}) {
       if (steering(ctx)) {
         return interrupted(ctx, "classifier", event.toolName, summary, logCtx);
       }
-      const scope = canReuseApproval && decision.tier === "soft_deny"
-        ? options.approvals?.scope(event.toolName, input, ctx.cwd)
+      const sessionAtAsk = ctx.sessionManager?.getSessionId?.();
+      const prepared = canReuseApproval && decision.tier === "soft_deny" && cfg.askOnBlock?.enabled && ctx.hasUI && ctx.mode === "tui"
+        ? await options.approvals?.prepare?.(ctx, cfg, event.toolName, input, loadedContext)
         : undefined;
-      const answer = await askBeforeBlock(ctx, cfg, event.toolName, input, decision.reason, logCtx, scope);
+      if (steering(ctx)) return interrupted(ctx, "classifier", event.toolName, summary, logCtx);
+      if (sessionAtAsk !== ctx.sessionManager?.getSessionId?.() || (prepared && ctx.signal?.aborted)) {
+        return block(ctx, { timestamp: Date.now(), toolName: event.toolName, reason: "The session changed or the approval proposal was cancelled. No approval question was opened.", action: summary, kind: "classifier" }, logCtx);
+      }
+      const scope = prepared?.scope ?? (canReuseApproval && decision.tier === "soft_deny"
+        ? options.approvals?.scope(event.toolName, input, ctx.cwd)
+        : undefined);
+      const answer = decision.tier === "hard_deny" ? undefined
+        : await askBeforeBlock(ctx, cfg, event.toolName, input, decision.reason, logCtx, scope, prepared?.futureScope);
       if (steering(ctx)) {
         return interrupted(ctx, "classifier", event.toolName, summary, logCtx);
       }
-      if (answer === "allow" || answer === "allow-session") {
-        if (answer === "allow-session" && scope) options.approvals?.remember(event.toolName, input, ctx.cwd);
+      const currentSession = sessionAtAsk === ctx.sessionManager?.getSessionId?.() && !ctx.signal?.aborted;
+      if (currentSession && (answer === "allow" || answer === "allow-session" || (answer === "allow-future" && prepared?.futureScope))) {
+        if (answer !== "allow" && scope) {
+          if (prepared) {
+            if (!prepared.remember(answer === "allow-future")) return block(ctx, { timestamp: Date.now(), toolName: event.toolName, reason: "The displayed permission scope could not be saved. The action remains blocked; review /permissions.", action: summary, kind: "classifier" }, logCtx);
+          } else options.approvals?.remember(event.toolName, input, ctx.cwd);
+        }
         if (event.toolCallId) userApproved.add(event.toolCallId);
+        options.approvals?.confirmed?.();
         return allow(ctx, "user", "Allowed by the user at the prompt", event.toolName, summary, logCtx);
       }
       state.classifierDenied += 1;

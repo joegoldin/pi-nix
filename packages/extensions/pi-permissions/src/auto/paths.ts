@@ -16,6 +16,7 @@ import {
 } from "node:path";
 import { fileURLToPath } from "node:url";
 import { HOME, PATH_BEARING_TOOLS, PROFILE_FILES } from "./constants.ts";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
 const UNICODE_SPACES = /[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g;
 
@@ -239,6 +240,9 @@ export function isSafetyControlPath(path: string, cwd: string): boolean {
   const piAgentRoot = normalizeProtectedPathForMatch(
     resolve(HOME, ".pi/agent"),
   );
+  const directoryPermissions = resolve(getAgentDir(), "permissions");
+  const savedPermissions = normalizeProtectedPathForMatch(resolvePathForPolicy(directoryPermissions) ?? directoryPermissions);
+  if (normalized === savedPermissions || normalized.startsWith(`${savedPermissions}/`)) return true;
   const globalExtensions = `${piAgentRoot}/extensions`;
   const globalSettings = `${piAgentRoot}/settings`;
   if (

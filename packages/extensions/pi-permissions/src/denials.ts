@@ -1,4 +1,4 @@
-import { directoryScopeLabel, type DirectoryAccess, type DirectoryApproval } from "./directory-access.ts";
+import { writableDirectory, directoryScopeLabel, type DirectoryAccess, type DirectoryApproval } from "./directory-access.ts";
 // What was blocked, and what you have since allowed. index.ts persists the
 // ledger in the session; the prompt and /permissions menu both use it.
 //
@@ -7,6 +7,7 @@ import { directoryScopeLabel, type DirectoryAccess, type DirectoryApproval } fro
 // intent, and can be revoked from the same menu.
 
 import { resolve } from "node:path";
+import { createHash } from "node:crypto";
 import { extractInputPath, isInside, resolvePathForPolicy, resolveToolInputPath } from "./auto/paths.ts";
 import { canonicalJson } from "./ui/call-label.ts";
 import type { ScenarioApproval } from "./auto/types.ts";
@@ -66,6 +67,7 @@ export interface PermissionOwner {
 export interface ApprovalReview {
 	eligible: boolean;
 	response: "denied" | "timeout" | "unasked";
+	directories?: DirectoryAccess[];
 }
 
 export interface Denial {
@@ -89,6 +91,8 @@ export interface Denial {
 }
 
 export interface Grant {
+	/** Saved grants are reloaded from user-owned storage, never trusted from session replay alone. */
+	savedFor?: string;
 	directory?: DirectoryAccess;
 	owner?: PermissionOwner;
 	key: string;
@@ -101,6 +105,7 @@ export interface Grant {
 
 /** The record as it is persisted in the session. */
 export interface PermissionRecord {
+	rejected?: string[];
 	denials: Denial[];
 	grants: Grant[];
 }
@@ -120,12 +125,36 @@ export class PermissionLedger {
 	private denials: Denial[] = [];
 	private grants = new Map<string, Grant>();
 	private nextId = 1;
+	private rejected = new Set<string>();
+
+	private rejectionKey(toolName: string, input: unknown, cwd: string, owner?: PermissionOwner): string {
+		return createHash("sha256").update(ownerKey(approvalScope(toolName, input, cwd)?.key ?? `${cwd}\u0000${grantKey(toolName, input)}`, owner)).digest("hex");
+	}
+
+	wasRejected(toolName: string, input: unknown, cwd: string, owner?: PermissionOwner): boolean {
+		return this.rejected.has(this.rejectionKey(toolName, input, cwd, owner));
+	}
+
+	reject(id: string): void {
+		const denial = this.denials.find(item => item.id === id);
+		if (!denial) return;
+		denial.review = { ...denial.review, eligible: false, response: "denied" };
+		if (denial.cwd) this.rejected.add(this.rejectionKey(denial.toolName, denial.input, denial.cwd, denial.owner));
+	}
+
+	clearRejected(): boolean {
+		const changed = this.rejected.size > 0;
+		this.rejected.clear();
+		return changed;
+	}
 
 	constructor(private readonly now: () => number = Date.now) {}
 
 	record(blocked: Omit<Denial, "id" | "at" | "state">): Denial {
 		const denial: Denial = { ...blocked, id: `d${this.nextId++}`, at: this.now(), state: "open" };
 		this.denials = [denial, ...this.denials].slice(0, DENIAL_LIMIT);
+		if (denial.review?.response === "denied" && denial.cwd)
+			this.rejected.add(this.rejectionKey(denial.toolName, denial.input, denial.cwd, denial.owner));
 		return denial;
 	}
 
@@ -142,6 +171,8 @@ export class PermissionLedger {
 	approve(id: string, cwd?: string): Denial | undefined {
 		const denial = this.denials.find((d) => d.id === id);
 		if (!denial || denial.incomplete || denial.policyDenied || (denial.owner && !denial.owner.sessionId)) return undefined;
+		const rejectionCwd = denial.cwd ?? cwd;
+		if (rejectionCwd) this.rejected.delete(this.rejectionKey(denial.toolName, denial.input, rejectionCwd, denial.owner));
 		const key = grantKey(denial.toolName, denial.input, denial.owner);
 		const directories = cwd ? denial.directories : undefined;
 		if (directories?.length) {
@@ -168,11 +199,11 @@ export class PermissionLedger {
 		return this.grants.has(grantKey(toolName, input, owner));
 	}
 
-	approveDirectory(directory: DirectoryAccess, owner?: PermissionOwner): Grant | undefined {
+	approveDirectory(directory: DirectoryAccess, owner?: PermissionOwner, savedFor?: string): Grant | undefined {
 		if (owner && !owner.sessionId) return undefined;
-		const key = ownerKey(`directory\u0000${directory.access}\u0000${directory.path}`, owner);
+		const key = ownerKey(`${savedFor ? `saved\u0000${savedFor}\u0000` : ""}directory\u0000${directory.access}\u0000${directory.path}`, owner);
 		const grant: Grant = { key, toolName: "directory", input: { ...directory }, directory: { ...directory }, at: this.now(),
-			scope: { key, label: directoryScopeLabel([directory]) }, ...(owner ? { owner: { ...owner } } : {}) };
+			scope: { key, label: directoryScopeLabel([directory]) + (savedFor ? ` Saved for sessions started in ${savedFor}.` : "") }, ...(savedFor ? { savedFor } : {}), ...(owner ? { owner: { ...owner } } : {}) };
 		this.grants.set(key, grant);
 		return grant;
 	}
@@ -186,11 +217,20 @@ export class PermissionLedger {
 				const path = raw === undefined ? undefined : resolveToolInputPath(call.toolName, call.cwd, raw);
 				const canonical = path === undefined ? undefined : resolvePathForPolicy(path);
 				if (!canonical || !isInside(canonical, grant.directory.path)) return [];
-				if ((call.toolName === "write" || call.toolName === "edit") && grant.directory.access !== "write") return [];
+				if (grant.directory.access === "execute") return [];
+				if ((call.toolName === "write" || call.toolName === "edit") && !writableDirectory(grant.directory.access)) return [];
 			}
 			if (grant.owner && (grant.owner.sessionId !== owner?.sessionId || grant.owner.cwd !== owner?.cwd)) return [];
 			return [{ kind: "directory" as const, ...grant.directory, scope: grant.scope.label, at: grant.at }];
 		});
+	}
+
+	refreshSaved(workspace: string, records: readonly { directory: DirectoryAccess; at: number }[]): void {
+		for (const [key, grant] of this.grants) if (grant.savedFor) this.grants.delete(key);
+		for (const { directory, at } of records) {
+			const grant = this.approveDirectory(directory, undefined, workspace);
+			if (grant) grant.at = at;
+		}
 	}
 
 	/** Store exactly the combined command/directory scope displayed at approval. */
@@ -250,10 +290,11 @@ export class PermissionLedger {
 	}
 
 	snapshot(): PermissionRecord {
-		return { denials: this.denials.map((d) => ({ ...d })), grants: this.grantList() };
+		return { denials: this.denials.map((d) => ({ ...d })), grants: this.grantList(), ...(this.rejected.size ? { rejected: [...this.rejected] } : {}) };
 	}
 
 	restore(record: PermissionRecord | undefined): void {
+		this.rejected = new Set(Array.isArray(record?.rejected) ? record.rejected.filter(key => typeof key === "string" && /^[a-f0-9]{64}$/.test(key)) : []);
 		this.denials = Array.isArray(record?.denials) ? record.denials.slice(0, DENIAL_LIMIT).map((d) => ({ ...d })) : [];
 		this.grants = new Map((Array.isArray(record?.grants) ? record.grants : []).map((g) => [g.key, { ...g }]));
 		const highest = Math.max(0, ...this.denials.map((d) => Number(d.id.slice(1)) || 0));

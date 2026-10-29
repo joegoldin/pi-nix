@@ -1,5 +1,11 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { requestedDirectories } from "./directory-access.ts";
+import { coversDirectoryRequest, requestedDirectories } from "./directory-access.ts";
+import { asForwardedToolCall } from "./engine/authority/forwarded-tool-call.ts";
+import { DirectoryGrantStore } from "./directory-store.ts";
+import { directoryCandidates, validateDirectoryProposal } from "./directory-proposal.ts";
+import { proposeDirectoryAccess, serializeClassifierAction } from "./auto/classifier.ts";
+import { resolvePathForPolicy } from "./auto/paths.ts";
+import { join } from "node:path";
 import { createForwardedGate } from "./forwarded-gate.ts";
 // pi-permissions: permissions and auto mode for pi in one extension.
 //
@@ -18,7 +24,7 @@ import { createForwardedGate } from "./forwarded-gate.ts";
 
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { type AutoModeControls, type PiAutomodeOptions, createPiAutomode } from "./auto/extension.ts";
 import { withPermissionChain } from "./auto/permission-chain.ts";
 import { approvalLabel, approvalScope, type ApprovalReview, type Denial, type PermissionRecord, PermissionLedger } from "./denials.ts";
@@ -106,7 +112,7 @@ function wasInterruption(reason: string): boolean {
 	return /interrupted the turn/i.test(reason);
 }
 
-export default function piPermissions(pi: ExtensionAPI, autoOverrides: Pick<PiAutomodeOptions, "loadConfig" | "classifyAction"> = {}): void {
+export default function piPermissions(pi: ExtensionAPI, autoOverrides: Pick<PiAutomodeOptions, "loadConfig" | "classifyAction"> & { directoryStore?: DirectoryGrantStore; proposeDirectories?: typeof proposeDirectoryAccess } = {}): void {
 	const probe = { loaded: false };
 	pi.events.emit(PROBE, probe);
 	if (probe.loaded) return;
@@ -118,15 +124,36 @@ export default function piPermissions(pi: ExtensionAPI, autoOverrides: Pick<PiAu
 	const persist = () => pi.appendEntry(LEDGER_ENTRY, ledger.snapshot());
 	const forwarded = createForwardedGate(ledger, persist);
 	const requestDetails = new AsyncLocalStorage<Record<string, unknown>>();
+	// Receipts belong to native request objects, never to model-supplied fields.
+	const nativeDirectoryApprovals = new WeakMap<object, () => boolean>();
+	function nativeRequest(): Record<string, unknown> | undefined {
+		const details = requestDetails.getStore();
+		const owner = forwarded.owner();
+		if (details?.forwarding && (!owner?.sessionId || !owner.cwd || !asForwardedToolCall(details.toolCall))) return;
+		return details;
+	}
 	const reviewContext = new AsyncLocalStorage<ApprovalReview>();
-	const directories = (cwd: string) => requestedDirectories(requestDetails.getStore(), cwd);
+	const directories = (cwd: string, toolName?: string, input?: unknown) => requestedDirectories(requestDetails.getStore(), cwd,
+		toolName && input && typeof input === "object" && !Array.isArray(input) ? { toolName, input: input as Record<string, unknown> } : undefined);
+	const directoryStore = autoOverrides.directoryStore ?? new DirectoryGrantStore(join(getAgentDir(), "permissions", "directory-grants"));
+	let launchFolder: string | undefined;
+	const workspace = (cwd: string) => launchFolder ??= resolvePathForPolicy(cwd) ?? cwd;
+	function refreshSaved(cwd: string): void {
+		const folder = workspace(cwd);
+		ledger.refreshSaved(folder, []);
+		try { ledger.refreshSaved(folder, directoryStore.load(folder)); }
+		catch { /* Unreadable saved approvals grant nothing; session approvals remain available. */ }
+	}
 	const clearSimilar = () => {
 		if (ledger.clearSimilar()) persist();
 	};
 	// New operator intent can narrow earlier approval. Do not let a cached scope
 	// outrun a later instruction; exact overrides remain individually revocable.
 	pi.on("input", (event) => {
-		if (event.source !== "extension") clearSimilar();
+		if (event.source !== "extension") {
+			if (ledger.clearRejected()) persist();
+			clearSimilar();
+		}
 	});
 	pi.events.on("pi-user-decision:submitted", clearSimilar);
 
@@ -135,6 +162,9 @@ export default function piPermissions(pi: ExtensionAPI, autoOverrides: Pick<PiAu
 	const gate =
 		(handler: ToolCallHandler): ToolCallHandler =>
 		async (event, ctx) => {
+			refreshSaved(ctx.cwd);
+			if (event.toolName && ledger.wasRejected(event.toolName, event.input, ctx.cwd, forwarded.owner()))
+				return { block: true, reason: "The user declined this action. No repeated approval question was opened. Wait for a new instruction or an explicit approval in /permissions; independent work can continue." };
 			if (event.toolName && ledger.isGranted(event.toolName, event.input)) return undefined;
 			const review: ApprovalReview = { eligible: false, response: "unasked" };
 			const result = await reviewContext.run(review, () => handler(event, ctx));
@@ -142,7 +172,7 @@ export default function piPermissions(pi: ExtensionAPI, autoOverrides: Pick<PiAu
 			const reason = result.reason ?? "";
 			if (wasInterruption(reason)) return result;
 			const denial = ledger.open().find(d => !d.owner && d.toolCallId === event.toolCallId && d.toolName === event.toolName)
-				?? ledger.record({ toolCallId: event.toolCallId ?? "", toolName: event.toolName, input: event.input ?? {}, reason, cwd: ctx.cwd, sessionId: ctx.sessionManager.getSessionId(), review: { ...review } });
+				?? ledger.record({ toolCallId: event.toolCallId ?? "", toolName: event.toolName, input: event.input ?? {}, reason, directories: review.directories, cwd: ctx.cwd, sessionId: ctx.sessionManager.getSessionId(), review: { ...review } });
 			persist();
 			// Only where someone can open the menu; a headless session's agent
 			// would be told of a way out it cannot use.
@@ -180,11 +210,62 @@ export default function piPermissions(pi: ExtensionAPI, autoOverrides: Pick<PiAu
 			if (current) Object.assign(current, review);
 		},
 		approvals: {
-			context: (toolName, cwd, input) => [...ledger.scenarioApprovals(toolName, cwd, forwarded.owner()), ...ledger.directoryApprovals(forwarded.owner(), { toolName, input, cwd })],
-			scope: (toolName, input, cwd) => approvalLabel(toolName, input, cwd, directories(cwd)),
+			prepare: async (ctx, config, toolName, input, loadedContext) => {
+				const candidates = directoryCandidates(directories(ctx.cwd, toolName, input), toolName, input, ctx.cwd);
+				if (!candidates.length || candidates.length > 8) return;
+				const owner = forwarded.owner();
+				const folder = workspace(ctx.cwd);
+				const sessionId = ctx.sessionManager.getSessionId();
+				const suggest = autoOverrides.proposeDirectories ?? proposeDirectoryAccess;
+				const proposal = await suggest(ctx, config, serializeClassifierAction(toolName, input), loadedContext, candidates);
+				const selected = validateDirectoryProposal(proposal, candidates) ?? candidates.map(({ path, access }) => ({ path, access }));
+				const review = reviewContext.getStore();
+				if (review) review.directories = selected;
+				const scope = approvalLabel(toolName, input, ctx.cwd, selected);
+				if (!scope) return;
+				return {
+					scope,
+					...(!owner ? { futureScope: `Save only these folder permissions for sessions started in ${folder}. Command-specific approvals do not persist. Revoke later in /permissions.` } : {}),
+					remember: (future: boolean) => {
+						if (ctx.signal?.aborted || ctx.sessionManager.getSessionId() !== sessionId || (future && owner) || selected.some(directory => resolvePathForPolicy(directory.path) !== directory.path)) return false;
+						try {
+							if (future) for (const directory of selected) directoryStore.save(folder, directory);
+							// Expire previous command intent before recording this answer.
+							pi.events.emit("pi-user-decision:submitted", { source: "permission-approval" });
+							if (future) {
+								refreshSaved(ctx.cwd);
+								if (toolName === "bash" || toolName === "bg_run") ledger.approveSimilar(toolName, input, ctx.cwd);
+							} else ledger.rememberScope(toolName, input, ctx.cwd, selected, owner);
+							persist();
+							return true;
+						} catch {
+							ctx.ui.notify("Could not save the permission scope. Review /permissions before retrying; some folder grants may have been saved.", "error");
+							return false;
+						}
+					},
+				};
+			},
+			context: (toolName, cwd, input) => {
+				refreshSaved(cwd);
+				const owner = forwarded.owner();
+				const call = { toolName, input, cwd };
+				const grants = ledger.directoryApprovals(owner, call);
+				const details = nativeRequest();
+				if (details && coversDirectoryRequest(details, grants)) nativeDirectoryApprovals.set(details, () => {
+					// Recheck saved access after this request's model review.
+					refreshSaved(cwd);
+					return coversDirectoryRequest(details, ledger.directoryApprovals(owner, call));
+				});
+				return [...ledger.scenarioApprovals(toolName, cwd, forwarded.owner()), ...grants];
+			},
+			confirmed: () => {
+				const details = nativeRequest();
+				if (details) nativeDirectoryApprovals.set(details, () => true);
+			},
+			scope: (toolName, input, cwd) => approvalLabel(toolName, input, cwd, directories(cwd, toolName, input)),
 			has: (toolName, input, cwd) => ledger.isSimilarlyGranted(toolName, input, cwd, forwarded.owner()),
 			remember: (toolName, input, cwd) => {
-				ledger.rememberScope(toolName, input, cwd, directories(cwd), forwarded.owner());
+				ledger.rememberScope(toolName, input, cwd, directories(cwd, toolName, input), forwarded.owner());
 				persist();
 			},
 		},
@@ -192,7 +273,7 @@ export default function piPermissions(pi: ExtensionAPI, autoOverrides: Pick<PiAu
 		wrapForwarded: forwarded.wrap,
 		wrapRequest: (handler, details) => (event, ctx) => requestDetails.run(details, async () => {
 			const result = await handler(event, ctx);
-			const requested = directories(ctx.cwd);
+			const requested = reviewContext.getStore()?.directories ?? directories(ctx.cwd, event.toolName, event.input);
 			if (!details.forwarding && result?.block && requested.length && !wasInterruption(result.reason ?? "")) {
 				ledger.record({ toolCallId: event.toolCallId, toolName: event.toolName, input: event.input, reason: result.reason ?? "", directories: requested, cwd: ctx.cwd, sessionId: ctx.sessionManager.getSessionId(), review: { ...(reviewContext.getStore() ?? { eligible: false, response: "unasked" }) } });
 				persist();
@@ -200,13 +281,22 @@ export default function piPermissions(pi: ExtensionAPI, autoOverrides: Pick<PiAu
 			return result;
 		}),
 	})(gated);
-	permissionSystem(gated, { onForwardedDecision: forwarded.recordDecision, onSettings: (controller) => (settingsController = controller) });
+	permissionSystem(gated, {
+		onForwardedDecision: forwarded.recordDecision,
+		onSettings: (controller) => (settingsController = controller),
+		consumeNativeDirectoryApproval: (details) => {
+			const approved = nativeDirectoryApprovals.get(details);
+			nativeDirectoryApprovals.delete(details);
+			return approved?.() ?? false;
+		},
+	});
 	registerApprovalRequest(pi, ledger, persist);
 
 	function restoreLedger(ctx: ExtensionContext): void {
 		const entries = ctx.sessionManager.getBranch() as { type?: string; customType?: string; data?: unknown }[];
 		const last = [...entries].reverse().find((e) => e.type === "custom" && e.customType === LEDGER_ENTRY);
 		ledger.restore(last?.data as PermissionRecord | undefined);
+		refreshSaved(ctx.cwd);
 	}
 
 	pi.on("session_tree", (_event, ctx) => restoreLedger(ctx));
@@ -336,6 +426,10 @@ export default function piPermissions(pi: ExtensionAPI, autoOverrides: Pick<PiAu
 				persist();
 				return undefined;
 			case "revoke":
+				if (effect.grant.savedFor && effect.grant.directory) {
+					try { directoryStore.revoke(effect.grant.savedFor, effect.grant.directory); }
+					catch { ctx.ui.notify("Could not revoke the saved permission; no change was made.", "error"); return undefined; }
+				}
 				ledger.revoke(effect.grant.key);
 				persist();
 				return undefined;
@@ -396,6 +490,7 @@ export default function piPermissions(pi: ExtensionAPI, autoOverrides: Pick<PiAu
 	async function openPermissions(ctx: ExtensionContext, tab: MenuTab): Promise<void> {
 		let next: MenuTab | undefined = tab;
 		while (next) {
+			refreshSaved(ctx.cwd);
 			const wanted = await showMenu(ctx, next);
 			next = undefined;
 			if (wanted === "model" && autoControls) {

@@ -29,6 +29,10 @@ export class PermissionsMenuView {
 	) {}
 
 	handleInput(data: string): void {
+		if (matchesKey(data, "ctrl+p")) {
+			this.onEffect({ kind: "close" });
+			return;
+		}
 		if (this.explanation) {
 			if (matchesKey(data, "enter") || data === "a" || data === "A") {
 				this.onEffect({ kind: data === "A" ? "approve-exact" : "approve", denial: this.explanation });
@@ -91,7 +95,7 @@ export class PermissionsMenuView {
 					: this.settingRows(menu.rows(), width);
 		lines.push(...this.window(body, Math.max(4, this.height() - 4)));
 		lines.push("");
-		lines.push(theme.fg("dim", HINTS[menu.tab]));
+		lines.push(theme.fg("dim", `${HINTS[menu.tab]} · ctrl+p close`));
 		return lines;
 	}
 

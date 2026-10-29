@@ -49,7 +49,7 @@ export function registerApprovalRequest(pi: ExtensionAPI, ledger: PermissionLedg
 				return result("stale", "The request was cancelled or the session, action, or denial changed during review. No approval was granted.");
 			if (answer === "deny") {
 				pi.events.emit("pi-user-decision:submitted", { source: "permission-approval", denialId });
-				denial.review = { eligible: false, response: "denied" };
+				ledger.reject(denial.id);
 				persist();
 			}
 			if (answer !== "allow-session") return result("blocked", denialGuidance(denial).trim());

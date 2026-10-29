@@ -22,6 +22,21 @@ function setup() {
 }
 
 describe("the /permissions menu", () => {
+	it("Ctrl+P closes every tab and expanded denial details without taking an action", () => {
+		for (const tab of ["denied", "granted", "auto", "settings"] as const) {
+			const { view, effects, menu } = setup();
+			menu.tab = tab;
+			view.handleInput("\x10");
+			expect(effects).toEqual([{ kind: "close" }]);
+		}
+		const { view, effects, ledger } = setup();
+		view.handleInput("e");
+		view.handleInput("\x10");
+		expect(effects).toEqual([{ kind: "close" }]);
+		expect(ledger.open()).toHaveLength(2);
+		expect(ledger.grantList()).toEqual([]);
+	});
+
 	it("lists what was blocked, newest first, with compact reason excerpts", () => {
 		const { view } = setup();
 		const lines = view.render(80);

@@ -111,7 +111,7 @@ describe("scoped approval lifetime", () => {
 		const ledger = new PermissionLedger();
 		ledger.approveSimilar("bash", { command: "nixfmt a.nix" }, "/tmp");
 		const branch = [{ type: "custom", customType: "pi-permissions", data: ledger.snapshot() }];
-		const ctx = { sessionManager: { getBranch: () => branch } };
+		const ctx = { cwd: "/tmp", sessionManager: { getBranch: () => branch } };
 		piPermissions(s.api());
 		s.handlers.get("session_start")!.at(-1)!({}, ctx);
 		return { s, ctx, branch };
@@ -410,4 +410,142 @@ it("a linked native answer authorizes retry through the real gates but never a l
 	const refused = await s.definitions.get("ask_for_approval").execute("hard-review", { denialId: latest.denials[0]!.id }, new AbortController().signal, undefined, ctx);
 	expect(refused.details.status).toBe("unavailable");
 	expect(questions).toBe(1);
+});
+
+it("automatic folder approvals separate session, future, once and denial through the native gates", async () => {
+	if (process.env.PI_DIRECTORY_INTEGRATION_CHILD !== "1") {
+		const home = mkdtempSync(join(tmpdir(), "pi-directory-integration-"));
+		try {
+			const directory = join(home, "extensions", "pi-permission-system");
+			mkdirSync(directory, { recursive: true });
+			writeFileSync(join(directory, "config.json"), JSON.stringify({ authorizerChain: ["pi-automode"], permission: { path_write: { [join(home, "target/restricted.ts")]: "deny", [join(home, "target/review.ts")]: "ask" } } }));
+			const child = Bun.spawn([process.execPath, "test", import.meta.path, "--test-name-pattern", "automatic folder approvals"], { env: { ...process.env, HOME: home, PI_CODING_AGENT_DIR: home, PI_DIRECTORY_INTEGRATION_CHILD: "1", PI_PERMISSION_DELEGATION_EXCLUDED_SURFACES: "external_directory,path" }, stdout: "pipe", stderr: "pipe" });
+			const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
+			expect({ code, output: code === 0 ? "passed" : stdout + stderr }).toEqual({ code: 0, output: "passed" });
+		} finally { rmSync(home, { recursive: true, force: true }); }
+		return;
+	}
+	const { DirectoryGrantStore } = await import("./directory-store.ts");
+	const launch = join(homedir(), "launch"); const target = join(homedir(), "target");
+	mkdirSync(launch); mkdirSync(join(target, ".git"), { recursive: true });
+	const store = new DirectoryGrantStore(join(homedir(), "saved-grants"));
+	let serial = 0;
+	async function start(cwd: string, initialKey: string, initialRead = false, modelOnly = false) {
+		const s = session(); const id = `directory-${++serial}`;
+		if (initialRead) {
+			const ledger = new PermissionLedger(); ledger.approveDirectory({ path: target, access: "read" });
+			s.entries.push({ type: "custom", customType: "pi-permissions", data: ledger.snapshot() });
+		}
+		let key: string | string[] = initialKey; let questions = 0; let proposals = 0; let hard = false;
+		let beforeDecision: (() => void) | undefined;
+		const rows: string[] = [];
+		const notices: string[] = [];
+		const api = s.api() as any;
+		api.getAllTools = () => [{ name: "write", description: "Write" }, ...s.definitions.values()];
+		api.getActiveTools = () => ["write", ...s.tools];
+		piPermissions(api, {
+			directoryStore: store,
+			loadConfig: () => ({ enabled: true, classifyReadOnlyTools: false, allowInsideWorkingDirectory: false, deniedPaths: [], protectedPaths: [], permissionDeny: [], permissionAsk: [], permissionAllow: [], environment: [], allow: [], softDeny: [], hardDeny: [], log: { enabled: false, classifierIo: false }, askOnBlock: { enabled: true, timeoutSeconds: 1 } }) as never,
+			classifyAction: async (_ctx, _config, _action, _context, approvals = []) => {
+				beforeDecision?.();
+				return hard ? { decision: "block", tier: "hard_deny", reason: "Hard policy test" }
+					: modelOnly || approvals.some(grant => "kind" in grant && grant.path === target && grant.access === "write-execute")
+						? { decision: "allow", tier: "allow", reason: "Verified folder scope" }
+						: { decision: "block", tier: "soft_deny", reason: "Needs writable project access" };
+			},
+			proposeDirectories: async (_ctx, _config, _action, _context, candidates) => {
+				proposals++; expect(candidates[0]?.path).toBe(target);
+				return { directories: [{ candidate: 0, folder: 0, access: "write-execute" }] };
+			},
+		});
+		const ctx = {
+			cwd, hasUI: true, mode: "tui", isIdle: () => true, isProjectTrusted: () => true,
+			ui: { notify(message: string) { notices.push(message); }, setStatus() {}, theme: { fg: (_slot: string, text: string) => text }, custom: async (factory: any) => {
+				questions++; let answer;
+				const component = factory({ requestRender() {}, terminal: { rows: 40 } }, { fg: (_slot: string, text: string) => text, bold: (text: string) => text }, { matches: () => false }, (value: unknown) => { answer = value; });
+				rows.push(component.render(160).join("\n"));
+				for (const data of Array.isArray(key) ? key : [key]) component.handleInput(data);
+				component.dispose?.(); return answer;
+			} },
+			sessionManager: { getEntries: () => s.entries, getSessionId: () => id, getSessionName: () => id, getSessionFile: () => undefined, getSessionDir: () => cwd, getBranch: () => s.entries },
+		};
+		for (const handler of s.handlers.get("session_start") ?? []) await handler({}, ctx);
+		const { getPermissionsService } = await import("./auto/permission-chain.ts");
+		expect({ registered: getPermissionsService(globalThis, id) !== undefined, notices }).toEqual({ registered: true, notices: [] });
+		return {
+			call: (path = "research/new.ts") => s.toolCall({ toolName: "write", toolCallId: `write-${++serial}`, input: { path: join(target, path), content: "test" } }, ctx),
+			key: (value: string | string[]) => { key = value; }, hard: () => { hard = true; },
+			menu: () => s.commands.get("permissions")!.handler("", ctx),
+			beforeDecision: (action: () => void) => { beforeDecision = action; },
+			newInstruction: async () => { for (const handler of s.handlers.get("input") ?? []) await handler({ source: "user", text: "Proceed with the requested write" }, ctx); },
+			questions: () => questions, proposals: () => proposals, rows,
+			stop: async () => { for (const handler of s.handlers.get("session_shutdown") ?? []) await handler({}, ctx); },
+		};
+	}
+	const unapproved = await start(launch, "n", false, true);
+	expect((await unapproved.call())?.block).toBe(true);
+	expect(unapproved.questions()).toBe(1);
+	expect(unapproved.proposals()).toBe(0);
+	await unapproved.stop();
+	const first = await start(launch, "f", true);
+	expect({ result: await first.call(), questions: first.questions(), proposals: first.proposals(), rows: first.rows })
+		.toMatchObject({ result: undefined, questions: 1, proposals: 1 });
+	expect(first.rows[0]).toContain(`sessions started in ${launch}`);
+	expect(first.rows[0]).toContain("Read/write/execute");
+	expect(store.load(launch)).toHaveLength(1);
+	expect((await first.call("restricted.ts"))?.block).toBe(true);
+	expect(first.questions()).toBe(1);
+	first.key("n");
+	expect((await first.call("review.ts"))?.block).toBe(true);
+	expect(first.questions()).toBe(2);
+	expect(first.rows.at(-1)).toContain("path_write");
+	await first.stop();
+	const revoked = await start(launch, "n", false, true);
+	let decisions = 0;
+	revoked.beforeDecision(() => {
+		if (++decisions === 1) store.revoke(launch, { path: target, access: "write-execute" });
+	});
+	expect({ result: await revoked.call(), decisions, questions: revoked.questions(), proposals: revoked.proposals() })
+		.toMatchObject({ result: { block: true }, decisions: 1, questions: 1, proposals: 0 });
+	expect(revoked.questions()).toBe(1);
+	expect(revoked.proposals()).toBe(0);
+	await revoked.stop();
+	store.save(launch, { path: target, access: "write-execute" });
+	const resumed = await start(launch, "n");
+	expect(await resumed.call()).toBeUndefined();
+	expect(resumed.questions()).toBe(0);
+	expect(resumed.proposals()).toBe(0);
+	store.revoke(launch, { path: target, access: "write-execute" });
+	resumed.key("Y");
+	expect(await resumed.call()).toBeUndefined();
+	expect(store.load(launch)).toEqual([]);
+	resumed.key("n");
+	expect((await resumed.call())?.block).toBe(true);
+	expect(resumed.questions()).toBe(2);
+	expect((await resumed.call())?.block).toBe(true);
+	expect(resumed.questions()).toBe(2);
+	await resumed.newInstruction();
+	resumed.key("y");
+	expect(await resumed.call()).toBeUndefined();
+	expect(await resumed.call()).toBeUndefined();
+	expect(resumed.questions()).toBe(3);
+	expect(store.load(launch)).toEqual([]);
+	resumed.hard(); resumed.key("Y");
+	const proposals = resumed.proposals(); const questions = resumed.questions();
+	expect((await resumed.call())?.block).toBe(true);
+	expect(resumed.proposals()).toBe(proposals);
+	expect(resumed.questions()).toBe(questions);
+	await resumed.stop();
+	store.save(launch, { path: target, access: "write-execute" });
+	const elsewhere = await start(target, "n");
+	expect((await elsewhere.call())?.block).toBe(true);
+	expect(elsewhere.questions()).toBe(1);
+	await elsewhere.stop();
+	store.revoke(launch, { path: target, access: "write-execute" });
+	const revoker = await start(launch, "n");
+	store.save(launch, { path: target, access: "write-execute" });
+	revoker.key(["\t", "x", "\x10"]);
+	await revoker.menu();
+	expect(store.load(launch)).toEqual([]);
+	await revoker.stop();
 });

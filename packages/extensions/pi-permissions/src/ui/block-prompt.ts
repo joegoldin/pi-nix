@@ -28,6 +28,8 @@ export interface BlockAsk {
 	timeoutSeconds: number;
 	/** Displayed reusable scope; absent when this call cannot safely be generalized. */
 	scope?: string;
+	/** Only the displayed directory grant persists, scoped to this canonical launch folder. */
+	futureScope?: string;
 }
 
 export class BlockPromptView {
@@ -55,11 +57,13 @@ export class BlockPromptView {
 			const here = i === prompt.cursor;
 			const label = `${choice.label} ${theme.fg("dim", `(${choice.key})`)}`;
 			lines.push(here ? `${theme.fg("accent", "❯ ")}${theme.bold(label)}` : `  ${label}`);
+			if (choice.answer === "allow-future" && ask.futureScope)
+				lines.push(...wrapTextWithAnsi(`    ${ask.futureScope}`, Math.max(1, width)).map(line => theme.fg("dim", line)));
 		});
 		lines.push("");
 		const left = prompt.secondsLeft();
 		lines.push(theme.fg(!prompt.explaining && left < URGENT_SECONDS ? "warning" : "dim", prompt.explaining ? "Timer stopped — waiting for your decision" : `No answer in ${left}s keeps the block`));
-		lines.push(theme.fg("dim", `${ask.scope ? "y allow scope · " : ""}${ask.scopeOnly ? "" : "Y allow once · "}n or Esc deny · e explain/stop timer`));
+		lines.push(theme.fg("dim", `${ask.scope ? "y allow scope · " : ""}${ask.futureScope ? "f allow future · " : ""}${ask.scopeOnly ? "" : "Y allow once · "}n or Esc deny · e explain/stop timer`));
 		return lines;
 	}
 
@@ -118,7 +122,7 @@ export async function askBeforeBlock(ctx: ExtensionContext, ask: BlockAsk): Prom
 	// The terminal bell, as pi-custom's questions ring it: the call is waiting.
 	if (process.stdout.isTTY) process.stdout.write("\x07");
 	return ctx.ui.custom<BlockAnswer>((tui, theme, _keybindings, done) => {
-		const prompt = new BlockPrompt(timeoutMs, Date.now, !!ask.scope, ask.scopeOnly);
+		const prompt = new BlockPrompt(timeoutMs, Date.now, !!ask.scope, ask.scopeOnly, !!ask.futureScope);
 		const view = new Framed(new BlockPromptView(prompt, ask, theme as never, () => process.stdout.rows || 24), ask.title ?? "Auto mode would block this", theme as never);
 		let finished = false;
 		const onAbort = () => {

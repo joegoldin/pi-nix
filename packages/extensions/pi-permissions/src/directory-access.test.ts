@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { requestedDirectories } from "./directory-access.ts";
+import { coversDirectoryRequest, requestedDirectories, type DirectoryAccess } from "./directory-access.ts";
 import { deriveApprovalPatterns } from "./engine/path/approval-pattern.ts";
 import { posixPathFlavor } from "./engine/path/path-flavor.ts";
 
@@ -27,6 +27,17 @@ test("file and directory gate suggestions name the worktree and retain read/writ
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test("a direct write proposes writable project access even before the directory gate", () => {
+  const root = mkdtempSync(join(tmpdir(), "directory-proposal-"));
+  try {
+    const repo = join(root, "repo");
+    mkdirSync(join(repo, ".git"), { recursive: true });
+    const path = join(repo, "research/new-script.ts");
+    expect(requestedDirectories(undefined, root, { toolName: "write", input: { path, content: "test" } }))
+      .toEqual([{ path: repo, access: "write" }]);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 const { PermissionLedger } = await import("./denials.ts");
 
 test("classifier directory facts exclude wrong access directions, siblings and symlink escapes", () => {
@@ -45,5 +56,25 @@ test("classifier directory facts exclude wrong access directions, siblings and s
     ledger.approveDirectory({ path: repo, access: "write" });
     expect(context("edit", join(repo, "new/file"))).toHaveLength(1);
     expect(context("read", join(repo, "escape/file"))).toHaveLength(0);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("native receipts require the requested capability at the canonical gate boundary", () => {
+  const root = mkdtempSync(join(tmpdir(), "directory-receipts-"));
+  try {
+    const repo = join(root, "repo");
+    mkdirSync(repo);
+    symlinkSync(root, join(repo, "escape"));
+    const request = (surface: string, path: string) => ({ accessIntent: { surface, boundaryValue: path, matchValues: ["relative-policy-alias", path] } });
+    for (const access of ["read", "write", "execute", "read-execute", "write-execute"] as const) {
+      const grants: DirectoryAccess[] = [{ path: repo, access }];
+      expect(coversDirectoryRequest(request("external_directory_read", join(repo, "file")), grants)).toBe(access !== "execute");
+      expect(coversDirectoryRequest(request("external_directory_write", join(repo, "file")), grants)).toBe(access === "write" || access === "write-execute");
+      for (const path of [join(repo, "escape/file"), `${repo}-sibling/file`, "relative/file"]) {
+        expect(coversDirectoryRequest(request("external_directory_read", path), grants)).toBe(false);
+      }
+      expect(coversDirectoryRequest(request("path_write", join(repo, "file")), grants)).toBe(false);
+      expect(coversDirectoryRequest({ surface: "external_directory_read", path: join(repo, "file") }, grants)).toBe(false);
+    }
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

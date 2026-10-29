@@ -82,6 +82,7 @@ export type AuthorizerSelectionConstructorDeps = AuthorizerSelectionDeps & {
   getAuthorizerChain: () => string[];
   /** Told about each configured name the registry could not resolve. */
   chainAudit: UnregisteredLinkAuditor;
+  consumeNativeDirectoryApproval?: (details: PromptPermissionDetails) => boolean;
 };
 
 /**
@@ -202,7 +203,7 @@ export class AuthorizerSelection
         continue;
       }
       resolved.push(name);
-      links.push({ name, authorize: encloseInDelegationEnvelope(authorize) });
+      links.push({ name, authorize: encloseInDelegationEnvelope(authorize, this.deps.consumeNativeDirectoryApproval) });
     }
     if (resolved.length > 0) {
       this.deps.logger.review("authorizer_chain_resolved", {

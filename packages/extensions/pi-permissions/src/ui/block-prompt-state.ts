@@ -2,10 +2,11 @@
 // highlighted, how long is left, and the answer once there is one. Pure, so
 // the keys and the countdown are testable without a terminal.
 
-export type BlockAnswer = "allow-session" | "allow" | "deny" | "timeout";
+export type BlockAnswer = "allow-session" | "allow-future" | "allow" | "deny" | "timeout";
 
 export const BLOCK_CHOICES = [
-	{ answer: "allow-session", label: "Allow this scope for this session", key: "y" },
+	{ answer: "allow-session", label: "Allow for this session", key: "y" },
+	{ answer: "allow-future", label: "Allow for this and future sessions", key: "f" },
 	{ answer: "allow", label: "Allow once", key: "Y" },
 	{ answer: "deny", label: "Deny", key: "n" },
 ] as const satisfies readonly { answer: BlockAnswer; label: string; key: string }[];
@@ -25,12 +26,13 @@ export class BlockPrompt {
 		private readonly now: () => number = Date.now,
 		private readonly canRemember = false,
 		private readonly scopeOnly = false,
+		private readonly canRememberFuture = false,
 	) {
 		this.deadline = now() + timeoutMs;
 	}
 
 	get choices() {
-		return BLOCK_CHOICES.filter((choice) => (this.canRemember || choice.answer !== "allow-session") && (!this.scopeOnly || choice.answer !== "allow"));
+		return BLOCK_CHOICES.filter((choice) => (this.canRemember || choice.answer !== "allow-session") && (this.canRememberFuture || choice.answer !== "allow-future") && (!this.scopeOnly || choice.answer !== "allow"));
 	}
 
 	/** Whole seconds left, never below zero. */

@@ -55,10 +55,19 @@ export const DELEGATION_EXCLUDED_SURFACES: ReadonlySet<string> = new Set(
  */
 export function encloseInDelegationEnvelope(
   authorize: Authorizer["authorize"],
+  consumeNativeDirectoryApproval?: (details: PromptPermissionDetails) => boolean,
 ): Authorizer["authorize"] {
   return async (details, query, log) => {
     const verdict = await authorize(details, query, log);
     if (verdict.kind === "allow" && isExcludedSurface(details)) {
+      // A native user receipt is not delegated model authority. It settles
+      // only this directory ask; path restrictions and other verdicts stand.
+      const surface = details.accessIntent?.surface;
+      if ((surface === "external_directory_read" || surface === "external_directory_write") &&
+          consumeNativeDirectoryApproval?.(details)) {
+        log.review("native_directory_approval", { requestId: details.requestId, surface });
+        return verdict;
+      }
       return { kind: "defer" };
     }
     return verdict;

@@ -85,13 +85,41 @@ failures, and never skip deterministic checks, explicit ask rules or
 protected-write checks. Branches restore their own ledger. `Y` records no
 reusable scope.
 
-Native external-directory requests can instead offer read-only or read/write
-access to the displayed directory, preferring its repository or worktree root.
-`y` at the scoped prompt, or Enter/`a` in the denial menu, remembers that access
-for the conversation. Ordinary messages and questionnaire answers do not erase
-it; session restoration retains it and the Allowed tab can revoke it. Read-only
-access never covers a write. File-tool facts are checked against canonical paths,
-so similarly named siblings and symlink escapes do not inherit access.
+For an eligible soft denial, the classifier model makes one additional, bounded
+call to recommend folder access. It chooses only native canonical targets: a
+repository/worktree root or, for file tools, the narrower containing folder.
+Capabilities are read, read/write, execute, or their combinations. A direct write
+always requires a writable proposal, even before the external-directory gate.
+Invalid, unavailable or timed-out suggestions fall back to native scope detection;
+the model never grants access or chooses its lifetime.
+
+When a bounded folder scope is available, the primary popup offers:
+
+- **Allow for this session** (`y`, default).
+- **Allow for this and future sessions** (`f`). Only folder permissions persist,
+  and only for conversations started in the same canonical Pi launch folder.
+  Starting in the target folder, a parent or a sibling does not inherit them.
+- **Allow once** (`Y`), without a reusable grant.
+- **Deny** (`n` or Esc). The same action is not asked again until a new operator
+  instruction or explicit menu approval; extension continuations do not reset it.
+
+The popup displays the folder, capabilities and future-session boundary before
+approval. Future grants are stored under Pi's agent directory in
+`permissions/directory-grants`, not in project-controlled configuration. They are
+reloaded before checks, so revocation also reaches other running conversations.
+The Allowed tab in `/permissions` revokes the selected session or saved grant.
+Persistent grants are not offered for child-owned requests.
+
+Conversation access survives ordinary messages, questionnaire answers and session
+resume. Read-only access never covers a write, and execute-only access does not
+supply file-read or write permission. Canonical file-tool checks exclude similarly
+named siblings and symlink escapes. Saved records with changed canonical targets,
+invalid data or unsafe file ownership/permissions grant nothing.
+
+The native answer also settles that directory check; it does not open a second
+permission dialog for the same access. A request-bound user receipt, or a matching
+grant revalidated after model review, supplies that authority—not the model's
+approval alone. Explicit path asks and denials remain separate.
 
 Directory access is not an executable-call override. The classifier still reviews
 actions, including destructive cleanup, discarded work, secrets, publishing,
@@ -111,8 +139,11 @@ Native todo-maintenance reminders also reach the classifier, but only as bounded
 bookkeeping context reconstructed from validated candidate IDs—not their raw text
 and not operator authorization. Candidates still require a current status and
 dependency check. Deleting a native todo tombstones it; it does not erase a session
-transcript or audit log. Arbitrary `codemode` still goes through classification,
-including any additional nested actions.
+transcript or audit log. Simple awaited `todo` list/get/delete calls and literal
+`for (const id of [1,2])` batches have a bounded bookkeeping shortcut, with optional
+`text(...)` output. Native codemode still routes every nested call through tool
+validation and permission hooks. Dynamic code, `clear`, and wrappers mixing other
+actions remain classified; explicit deny and ask rules still apply.
 
 Requested inspection includes the bounded discovery needed to locate the named
 records; an outside-cwd path or a Python wrapper does not turn a read into a write.
@@ -177,7 +208,8 @@ asking before a classifier block stands.
 ## Commands
 
 `/permissions` is the one place for all of it, a menu in four tabs (Tab and
-Shift+Tab, or ←/→, move between them; Esc closes):
+Shift+Tab, or ←/→, move between them; Esc closes). Ctrl+P opens the menu and
+closes it from any tab or expanded denial details:
 
 - **Denied**: what was blocked, newest first: command, command explanation,
   then denial reason, each on a separate truncated line. A supplied description

@@ -225,3 +225,31 @@ it("shows both approved scopes without claiming a read directory is writable", (
   expect(label).not.toContain("Read/write");
   expect(approvalLabel("bash", { command: "python3 update.py" }, undefined, [{ path: "/tmp/release", access: "read" }])).not.toContain("Command scope");
 });
+
+it("explicit rejection survives resume and extensions but a new instruction or menu approval can supersede it", () => {
+  const ledger = new PermissionLedger();
+  const input = { path: "/tmp/project/a.ts", content: "first" };
+  const denial = ledger.record({ toolCallId: "rejected", toolName: "write", input, cwd: "/tmp/project", reason: "Declined", review: { eligible: false, response: "denied" } });
+  const resumed = new PermissionLedger(); resumed.restore(ledger.snapshot());
+  resumed.clearSimilar();
+  expect(resumed.wasRejected("write", { ...input, content: "changed" }, "/tmp/project")).toBe(true);
+  expect(resumed.wasRejected("write", input, "/tmp/other")).toBe(false);
+  resumed.approve(denial.id, "/tmp/project");
+  expect(resumed.wasRejected("write", input, "/tmp/project")).toBe(false);
+  ledger.clearRejected();
+  expect(ledger.wasRejected("write", input, "/tmp/project")).toBe(false);
+});
+
+it("saved grants retain their approval time and do not replace independent session grants", () => {
+  const ledger = new PermissionLedger(() => 100);
+  const directory = { path: "/tmp/project", access: "write-execute" as const };
+  ledger.approveDirectory(directory);
+  ledger.refreshSaved("/launch", [{ directory, at: 5 }]);
+  expect(ledger.grantList()).toHaveLength(2);
+  expect(ledger.grantList().find(grant => grant.savedFor)?.at).toBe(5);
+  expect(ledger.directoryApprovals(undefined, { toolName: "write", cwd: "/launch", input: { path: "/tmp/project/new.ts" } })).toHaveLength(2);
+  ledger.refreshSaved("/launch", []);
+  expect(ledger.grantList()).toHaveLength(1);
+  ledger.approveDirectory({ path: "/tmp/run-only", access: "execute" });
+  expect(ledger.directoryApprovals(undefined, { toolName: "read", cwd: "/launch", input: { path: "/tmp/run-only/source.ts" } })).toEqual([]);
+});

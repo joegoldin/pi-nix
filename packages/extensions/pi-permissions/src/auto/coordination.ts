@@ -1,7 +1,18 @@
+import { bookkeepingKind } from "./bookkeeping.ts";
+
 /** These shapes exchange data or inspect native run state; they cannot dispatch work. */
 export function coordinationKind(toolName: string, input: Record<string, unknown>): "coordination" | "read-only" | undefined {
   const only = (...keys: string[]) => Object.keys(input).every(key => keys.includes(key));
   switch (toolName) {
+    case "codemode":
+      return only("code") && typeof input.code === "string" ? bookkeepingKind(input.code) : undefined;
+    case "todo":
+      if (input.action === "list" && only("action")) return "read-only";
+      if (only("action", "id") && Number.isSafeInteger(input.id) && Number(input.id) > 0) {
+        if (input.action === "get") return "read-only";
+        if (input.action === "delete") return "coordination";
+      }
+      return undefined;
     case "ask_user_question":
       return only("questions") && Array.isArray(input.questions) ? "coordination" : undefined;
     case "contact_supervisor":
