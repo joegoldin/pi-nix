@@ -3,6 +3,7 @@
 // editor's place and framed. No answer by the deadline keeps the block. Asked
 // only in the interactive terminal UI.
 
+import { beginPermissionStatus } from "./program-status.ts";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { matchesKey, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { callLabel } from "./call-label.ts";
@@ -121,38 +122,41 @@ export async function askBeforeBlock(ctx: ExtensionContext, ask: BlockAsk): Prom
 	const timeoutMs = ask.timeoutSeconds * 1000;
 	// The terminal bell, as pi-custom's questions ring it: the call is waiting.
 	if (process.stdout.isTTY) process.stdout.write("\x07");
-	return ctx.ui.custom<BlockAnswer>((tui, theme, _keybindings, done) => {
-		const prompt = new BlockPrompt(timeoutMs, Date.now, !!ask.scope, ask.scopeOnly, !!ask.futureScope);
-		const view = new Framed(new BlockPromptView(prompt, ask, theme as never, () => process.stdout.rows || 24), ask.title ?? "Auto mode would block this", theme as never);
-		let finished = false;
-		const onAbort = () => {
-			prompt.cancel();
-			settle();
-		};
-		const settle = () => {
-			if (finished || !prompt.result) return;
-			finished = true;
-			clearInterval(timer);
-			ctx.signal?.removeEventListener("abort", onAbort);
-			done(prompt.result);
-		};
-		// Repaints the countdown, and settles when it runs out.
-		const timer = setInterval(() => {
-			prompt.tick();
-			tui.requestRender();
-			settle();
-		}, TICK_MS);
-		// The turn interrupted (Esc to steer, or a plain cancel) ends the ask.
-		ctx.signal?.addEventListener("abort", onAbort, { once: true });
-		return {
-			render: (width: number) => view.render(width),
-			invalidate: () => view.invalidate(),
-			handleInput: (data: string) => {
-				view.handleInput(data);
+	const finishStatus = beginPermissionStatus(ctx.ui);
+	try {
+		return await ctx.ui.custom<BlockAnswer>((tui, theme, _keybindings, done) => {
+			const prompt = new BlockPrompt(timeoutMs, Date.now, !!ask.scope, ask.scopeOnly, !!ask.futureScope);
+			const view = new Framed(new BlockPromptView(prompt, ask, theme as never, () => process.stdout.rows || 24), ask.title ?? "Auto mode would block this", theme as never);
+			let finished = false;
+			const onAbort = () => {
+				prompt.cancel();
+				settle();
+			};
+			const settle = () => {
+				if (finished || !prompt.result) return;
+				finished = true;
+				clearInterval(timer);
+				ctx.signal?.removeEventListener("abort", onAbort);
+				done(prompt.result);
+			};
+			// Repaints the countdown, and settles when it runs out.
+			const timer = setInterval(() => {
+				prompt.tick();
 				tui.requestRender();
 				settle();
-			},
-			dispose: () => clearInterval(timer),
-		};
-	});
+			}, TICK_MS);
+			// The turn interrupted (Esc to steer, or a plain cancel) ends the ask.
+			ctx.signal?.addEventListener("abort", onAbort, { once: true });
+			return {
+				render: (width: number) => view.render(width),
+				invalidate: () => view.invalidate(),
+				handleInput: (data: string) => {
+					view.handleInput(data);
+					tui.requestRender();
+					settle();
+				},
+				dispose: () => clearInterval(timer),
+			};
+		});
+	} finally { finishStatus(); }
 }

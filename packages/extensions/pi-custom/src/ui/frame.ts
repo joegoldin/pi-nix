@@ -15,6 +15,10 @@ interface Inner {
 }
 
 export class Framed {
+	private selectionLayout?: { component: Inner; width: number; lines: string[] };
+
+	getSelectionLayout() { return this.selectionLayout; }
+
 	constructor(
 		private inner: Inner,
 		private title: string,
@@ -31,7 +35,9 @@ export class Framed {
 			const fitted = visibleWidth(line) > innerW ? truncateToWidth(line, innerW, "…") : line;
 			return `${rule("│")} ${fitted}${" ".repeat(Math.max(0, innerW - visibleWidth(fitted)))} ${rule("│")}`;
 		});
-		return [top, ...rows, rule(`╰${"─".repeat(w - 2)}╯`)];
+		const lines = [top, ...rows, rule(`╰${"─".repeat(w - 2)}╯`)];
+		this.selectionLayout = { component: this.inner, width: innerW, lines };
+		return lines;
 	}
 
 	handleInput(data: string): void {

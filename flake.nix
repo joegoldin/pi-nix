@@ -103,6 +103,7 @@
               ./coding-agent/goal-continuation-display.patch
               ./coding-agent/custom-message-expansion.patch
               ./coding-agent/picker-shortcut-conflicts.patch
+              ./coding-agent/program-status.patch
             ];
           };
 

@@ -454,3 +454,22 @@ it("keeps a long side-conversation title within the native overlay width", async
 	expect(rows.slice(1, -1).every((row: string) => row.startsWith("│ ") && row.endsWith(" │"))).toBe(true);
 	expect(rows.some((row: string) => row.includes("────"))).toBe(true);
 });
+
+it("reports closed-panel side work and namespaces child status without leaking prompts", async () => {
+	const { registerBtw } = await import("./btw.ts");
+	const h = commandHarness(); const statuses: any[] = []; let childUI: any;
+	(h.ctx.ui as any).setProgramStatus = (key: string, status: unknown) => statuses.push({ key, status });
+	registerBtw(h.api as never, (async (...args: any[]) => { childUI = args[4]; return h.createRuntime(args[0], args[1], args[2]); }) as never);
+	const opened = h.command().handler("PRIVATE_QUESTION", h.ctx);
+	await flush();
+	expect(statuses.some(row => row.status?.state === "working")).toBe(true);
+	childUI.setProgramStatus?.("goal", { state: "working", title: "Goal" });
+	expect(statuses.every(row => row.key.startsWith("btw/"))).toBe(true);
+	h.component().handleInput("\x03"); await opened;
+	expect(statuses.at(-1)?.status.state).toBe("working");
+	childUI.setProgramStatus?.("goal", undefined);
+	h.requests[0].resolve({ stopReason: "stop", content: [{ type: "text", text: "PRIVATE_ANSWER" }] }); await flush();
+	expect(statuses.at(-1)?.status.state).toBe("done");
+	expect(JSON.stringify(statuses)).not.toContain("PRIVATE_");
+	await h.shutdown();
+});

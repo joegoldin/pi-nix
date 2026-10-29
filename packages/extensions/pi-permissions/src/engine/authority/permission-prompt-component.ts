@@ -24,6 +24,7 @@ import {
 } from "../presentation/prompt-notification";
 import type { PromptPayload } from "../presentation/prompt-payload";
 import { Framed } from "../../ui/frame";
+import { beginPermissionStatus } from "../../ui/program-status";
 import { collapsePastedNewlines } from "./bracketed-paste";
 import type { DecisionSource, UserDecisionSurface } from "./decision-source";
 import {
@@ -54,7 +55,7 @@ import {
 /** The subset of the session UI surface the inline dialog needs. */
 export type PermissionPromptUi = Pick<
   ExtensionUIContext,
-  "select" | "input" | "custom" | "getToolsExpanded" | "setToolsExpanded"
+  "select" | "input" | "custom" | "getToolsExpanded" | "setToolsExpanded" | "setProgramStatus"
 >;
 
 /** The keybindings surface the dialog consults; only `matches` is read (ISP). */
@@ -148,7 +149,7 @@ const OPTION_LABELS: Record<PromptAction, string> = {
   denyWithReason: "No, provide reason",
 };
 
-export function presentInlinePermissionPrompt(
+export async function presentInlinePermissionPrompt(
   view: PermissionPromptView,
   title: string,
   payload: PromptPayload,
@@ -161,37 +162,40 @@ export function presentInlinePermissionPrompt(
     sessionScope: options?.sessionScope,
     keys: view.dialogKeys,
   };
-  return view.ui.custom<UnattributedDecision>(
-    (tui, theme, keybindings, done) => {
-      // The factory runs once, as the dialog mounts, which is the moment the
-      // human is being asked; a re-render does not come back through here.
-      const notification = renderPromptNotification(
-        view.promptNotifications,
-        view.notice,
-      );
-      if (notification) {
-        tui.terminal.write(notification);
-      }
-      // pi-permissions: framed, its title on the border, as this setup's
-      // other dialogs are drawn.
-      return new Framed(
-        new PermissionPromptComponent(
+  const finishStatus = beginPermissionStatus(view.ui);
+  try {
+    return await view.ui.custom<UnattributedDecision>(
+      (tui, theme, keybindings, done) => {
+        // The factory runs once, as the dialog mounts, which is the moment the
+        // human is being asked; a re-render does not come back through here.
+        const notification = renderPromptNotification(
+          view.promptNotifications,
+          view.notice,
+        );
+        if (notification) {
+          tui.terminal.write(notification);
+        }
+        // pi-permissions: framed, its title on the border, as this setup's
+        // other dialogs are drawn.
+        return new Framed(
+          new PermissionPromptComponent(
+            theme,
+            config,
+            payload,
+            view.budget,
+            (data) => handleToolsExpandAction(data, keybindings, view.ui),
+            () => {
+              tui.requestRender();
+            },
+            done,
+          ),
+          title,
           theme,
-          config,
-          payload,
-          view.budget,
-          (data) => handleToolsExpandAction(data, keybindings, view.ui),
-          () => {
-            tui.requestRender();
-          },
-          done,
-        ),
-        title,
-        theme,
-      );
-    },
-    { overlay: false },
-  );
+        );
+      },
+      { overlay: false },
+    );
+  } finally { finishStatus(); }
 }
 
 /**

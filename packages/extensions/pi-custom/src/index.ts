@@ -18,10 +18,12 @@ import extras from "./extras/index.ts";
 import intercom from "./intercom/index.ts";
 import tools from "./tools/index.ts";
 import ui from "./ui/index.ts";
+import { registerSubagentStatus } from "./program-status.ts";
 
 export default function piCustom(pi: Parameters<typeof ui>[0]): void {
 	ui(pi);
 	extras(pi as never);
 	tools(pi);
 	intercom(pi);
+	registerSubagentStatus(pi);
 }

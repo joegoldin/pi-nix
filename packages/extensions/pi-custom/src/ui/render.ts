@@ -22,12 +22,14 @@ import {
 	mixColors,
 	type TerminalColorMode,
 	truncateToWidth,
+	stripTerminalSequences,
 	type TuiMouseEvent,
 	type TuiMouseEventResult,
 	wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
 import { brightened, CardComponent, type CardLayout, ELBOW_PREFIX, opens, paint, type UiTheme } from "./card.ts";
 import type { UiConfig } from "./config.ts";
+import { mapRows, type CopyRow } from "./selection-content.ts";
 import {
 	formatDuration,
 	type GroupState,
@@ -153,6 +155,9 @@ class LiveCard {
 	/** Whether the card, as last drawn, has anything more to show open. */
 	private opens = true;
 	private cached: { key: unknown[]; lines: string[] } | undefined;
+	private selectionRows: (CopyRow | undefined)[] = [];
+	private selectionWidth = 0;
+	getSelectionRows(width: number) { return this.selectionWidth === width ? this.selectionRows : undefined; }
 
 	constructor(
 		private toolName: string,
@@ -201,6 +206,8 @@ class LiveCard {
 			// The pointer target includes pi's output margins, not just our inner row.
 			return hover && line.startsWith(hover) ? paint(padded, width, hover) : padded;
 		});
+		this.selectionWidth = width;
+		this.selectionRows = this.selectionRows.map((row, i) => row && { ...row, start: row.start + pad, line: lines[i]! });
 		this.cached = { key, lines };
 		return lines;
 	}
@@ -224,6 +231,7 @@ class LiveCard {
 			}
 		}
 		this.headerRows = rows.length;
+		this.selectionRows = rows.map(() => undefined);
 		if (plan.thinking?.length) rows.push(...this.thoughts(plan.thinking, backgrounds, w));
 		if (plan.card) rows.push(...this.card(config, plan.inPanel, backgrounds, w));
 		return rows;
@@ -237,14 +245,22 @@ class LiveCard {
 		for (const line of thoughtLines(thinking)) {
 			if (!line) {
 				rows.push("");
+				this.selectionRows.push(undefined);
 				continue;
 			}
-			for (const [i, part] of wrapTextWithAnsi(line, Math.max(1, width - THOUGHT.length)).entries()) {
-				rows.push(this.theme.italic(this.theme.fg("dim", `${i === 0 ? THOUGHT : " ".repeat(THOUGHT.length)}${part}`)));
+			const parts = wrapTextWithAnsi(line, Math.max(1, width - THOUGHT.length));
+			const mapped = mapRows(this, parts, stripTerminalSequences(line).split("\n"), 0, 0);
+			const base = this.selectionRows.length;
+			for (const [i, part] of parts.entries()) {
+				const rendered = this.theme.italic(this.theme.fg("dim", `${i === 0 ? THOUGHT : " ".repeat(THOUGHT.length)}${part}`));
+				rows.push(rendered);
+				const source = mapped?.[i];
+				this.selectionRows.push(source && { ...source, line: rendered, start: THOUGHT.length, id: base + source.id });
 			}
 		}
 		// A blank row keeps the thinking from reading as part of the card's header.
 		rows.push("");
+		this.selectionRows.push(undefined);
 		const panel = backgrounds.panel;
 		return panel ? rows.map((row) => paint(row, width, panel)) : rows;
 	}
@@ -290,7 +306,11 @@ class LiveCard {
 		const theme = layout.hovered ? brightened(this.theme) : this.theme;
 		layout.expandHint = theme.fg("muted", `(click or ${this.deps.expandKey()})`);
 		// The header keeps its colours; only what is under it lights up.
-		return new CardComponent(layout.hovered ? build(theme) : plain, layout, this.theme).render(width);
+		const component = new CardComponent(layout.hovered ? build(theme) : plain, layout, this.theme);
+		const lines = component.render(width);
+		const owner = {};
+		this.selectionRows.push(...(component.getSelectionRows(width) ?? lines.map(() => undefined)).map(row => row && { ...row, owner }));
+		return lines;
 	}
 
 	/**

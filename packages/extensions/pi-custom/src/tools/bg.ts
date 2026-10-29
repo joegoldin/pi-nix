@@ -16,6 +16,7 @@ import { join, relative } from "node:path";
 import { randomBytes } from "node:crypto";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { activityKey, reportActivity, type ActivityStatus } from "../program-status.ts";
 import {
 	formatLogs,
 	formatNotification,
@@ -72,10 +73,25 @@ export function registerBackgroundTasks(pi: ExtensionAPI): { running(): number }
 	let runDir: string | undefined;
 	let shuttingDown = false;
 	let ctxRef: ExtensionContext | undefined;
+	const reported = new Set<string>();
 
 	const list = () => [...tasks.values()];
 
 	function refreshStatus(): void {
+		const visible = list().slice(-100);
+		const keys = new Set(visible.map(task => activityKey("background", task.id)));
+		for (const key of reported) if (!keys.has(key)) { reportActivity(ctxRef, key, undefined); reported.delete(key); }
+		const stateFor = (task: Task): ActivityStatus["state"] => task.status === "running" ? "working" : task.status === "completed" ? "done" : task.status === "failed" ? "error" : "idle";
+		for (const task of visible) {
+			const key = activityKey("background", task.id);
+			reportActivity(ctxRef, key, { state: stateFor(task), title: task.name, message: `Background task ${task.status}` });
+			reported.add(key);
+		}
+		const running = list().filter(task => task.status === "running").length;
+		const latest = list().filter(task => task.status !== "running").sort((a, b) => (b.endTime ?? 0) - (a.endTime ?? 0))[0];
+		reportActivity(ctxRef, "background", running
+			? { state: "working", title: "Background tasks", message: `${running} background task${running === 1 ? "" : "s"} running` }
+			: latest ? { state: stateFor(latest), title: "Background tasks", message: `Background tasks settled; latest ${latest.status}` } : undefined);
 		try {
 			ctxRef?.ui.setStatus(STATUS_KEY, statusLine(list().map(snapshot), seen));
 		} catch {

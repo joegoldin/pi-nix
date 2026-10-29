@@ -13,6 +13,7 @@ import { Type } from "typebox";
 import { formatResult, NEXT_ROW, normalise, type Question, Questionnaire, type Result, TYPE_ROW, validate } from "./ask-state.ts";
 import type { UiTheme } from "../ui/card.ts";
 import { Framed } from "../ui/frame.ts";
+import { activityKey, reportActivity } from "../program-status.ts";
 
 const DESCRIPTION = `Ask the user one or more structured questions during execution. Use when you need to:
 1. Gather user preferences or requirements
@@ -348,6 +349,8 @@ export function registerAsk(pi: ExtensionAPI): void {
 			if (process.stdout.isTTY) process.stdout.write("\x07");
 			if (ctx.mode !== "tui") return reply(await askByDialogs(questions, ctx.ui, signal));
 			const q = new Questionnaire(questions);
+			const statusKey = activityKey("questions", _id);
+			reportActivity(ctx, statusKey, { state: "blocked", kind: "question", title: "Question", message: "Waiting for your answer" });
 			let close: (() => void) | undefined;
 			let cancel = () => {};
 			try {
@@ -371,7 +374,10 @@ export function registerAsk(pi: ExtensionAPI): void {
 						};
 					}).then(resolve, reject);
 				});
-			} finally { signal?.removeEventListener("abort", cancel); }
+			} finally {
+				signal?.removeEventListener("abort", cancel);
+				reportActivity(ctx, statusKey, undefined);
+			}
 
 			return reply(q.result ?? { answers: [...q.answers.values()], cancelled: true });
 		},

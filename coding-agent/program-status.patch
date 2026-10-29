@@ -1,0 +1,423 @@
+--- a/packages/coding-agent/src/core/extensions/types.ts
++++ b/packages/coding-agent/src/core/extensions/types.ts
+@@ -52,6 +52,7 @@
+ 	KeyId,
+ 	OverlayHandle,
+ 	OverlayOptions,
++	ProgramStatus,
+ 	TUI,
+ } from "@earendil-works/pi-tui";
+ import type { Static, TSchema } from "typebox";
+@@ -167,6 +168,13 @@
+ 
+ 	/** Set status text in the footer/status bar. Pass undefined to clear. */
+ 	setStatus(key: string, text: string | undefined): void;
++
++	/** Report independent terminal activity, not footer text. Keys are id paths under pi/.
++	 * Use working for autonomous waits, blocked only for required user action, idle for cancellation.
++	 * Omit progress unless measured. Never put prompts, commands, credentials or output in metadata.
++	 * Undefined clears this record and its descendants. Optional on older/noninteractive hosts.
++	 */
++	setProgramStatus?(key: string, status: Omit<ProgramStatus, "id" | "app"> | undefined): void;
+ 
+ 	/** Set the working/loading message shown during streaming. Call with no argument to restore default. */
+ 	setWorkingMessage(message?: string): void;
+--- a/packages/coding-agent/src/modes/interactive/interactive-mode.ts
++++ b/packages/coding-agent/src/modes/interactive/interactive-mode.ts
+@@ -2712,6 +2712,7 @@
+ 			onTerminalInput: (handler) => this.addExtensionTerminalInputListener(handler),
+ 			onEditorInput: (handler) => this.addExtensionEditorInputListener(handler),
+ 			setStatus: (key, text) => this.setExtensionStatus(key, text),
++			setProgramStatus: (key, status) => this.programStatus.setActivity(key, status),
+ 			setWorkingMessage: (message) => {
+ 				this.workingMessage = message;
+ 				if (this.activeStatusIndicator?.kind === "working") {
+@@ -2778,6 +2779,7 @@
+ 		if (index === -1) return;
+ 		this.extensionDialogs.splice(index, 1);
+ 		if (index === this.extensionDialogs.length) this.showTopExtensionDialog();
++		else this.programStatus.setBlocked("extension-dialog", this.extensionDialogs.filter(dialog => dialog.blocked).at(-1)?.blocked);
+ 	}
+ 
+ 	private showTopExtensionDialog(): void {
+@@ -2786,7 +2788,7 @@
+ 		this.editorContainer.clear();
+ 		this.editorContainer.addChild(component);
+ 		this.ui.setFocus(component, { preserveOverlayFocus: true });
+-		this.programStatus.setBlocked("extension-dialog", top?.blocked);
++		this.programStatus.setBlocked("extension-dialog", this.extensionDialogs.filter(dialog => dialog.blocked).at(-1)?.blocked);
+ 		this.ui.requestRender();
+ 	}
+ 
+@@ -6412,6 +6414,7 @@
+ 		method: "api_key" | "oauth",
+ 	): Promise<void> {
+ 		this.programStatus.setBlocked("login", { kind: "auth", message: `Log in to ${providerName}` });
++		this.programStatus.setActivity("authentication", { state: "blocked", kind: "auth", title: "Authentication", message: "Authentication needs your action" });
+ 		try {
+ 			await this.session.modelRuntime.login(
+ 				providerId,
+@@ -6423,6 +6426,11 @@
+ 				},
+ 				{ getDeviceId: () => this.settingsManager.getOrCreateDeviceId() },
+ 			);
++			this.programStatus.setActivity("authentication", { state: "done", title: "Authentication", message: "Authentication completed" });
++		} catch (error) {
++			const cancelled = dialog.signal.aborted || (error instanceof Error && error.message === "Login cancelled");
++			this.programStatus.setActivity("authentication", { state: cancelled ? "idle" : "error", title: "Authentication", message: cancelled ? "Authentication cancelled" : "Authentication failed" });
++			throw error;
+ 		} finally {
+ 			this.programStatus.setBlocked("login", undefined);
+ 		}
+--- a/packages/coding-agent/src/modes/interactive/program-status-reporter.ts
++++ b/packages/coding-agent/src/modes/interactive/program-status-reporter.ts
+@@ -1,4 +1,4 @@
+-import type { ProgramStatus, Terminal } from "@earendil-works/pi-tui";
++import { findProgramStatusEviction, type ProgramStatus, type Terminal } from "@earendil-works/pi-tui";
+ import { APP_NAME } from "../../config.ts";
+ import type { AgentSessionEvent } from "../../core/agent-session.ts";
+ 
+@@ -19,6 +19,8 @@
+ 	private readonly getSessionName: () => string | undefined;
+ 	private runActive = false;
+ 	private compacting = false;
++	private retrying = false;
++	private readonly tools = new Map<string, string>();
+ 	/** Outcome of the current run, reported once it settles. */
+ 	private runResult: ProgramStatus = { state: "done" };
+ 	/** Status while no run is active. */
+@@ -26,6 +28,7 @@
+ 	/** Open dialogs by source, in the order they opened. The most recent one is reported. */
+ 	private readonly blocked = new Map<string, BlockedStatus>();
+ 	private lastReport: string | undefined;
++	private readonly activities = new Map<string, Omit<ProgramStatus, "id" | "app">>();
+ 
+ 	constructor(getTerminal: () => Terminal, getSessionName: () => string | undefined) {
+ 		this.getTerminal = getTerminal;
+@@ -36,7 +39,21 @@
+ 		switch (event.type) {
+ 			case "agent_start":
+ 				this.runActive = true;
++				this.retrying = false;
++				this.tools.clear();
+ 				this.runResult = { state: "done" };
++				break;
++			case "tool_execution_start":
++				this.tools.set(event.toolCallId, event.toolName);
++				break;
++			case "tool_execution_end":
++				this.tools.delete(event.toolCallId);
++				break;
++			case "auto_retry_start":
++				this.retrying = true;
++				break;
++			case "auto_retry_end":
++				this.retrying = false;
+ 				break;
+ 			case "message_end":
+ 				// The latest response decides the outcome, so a retried error is replaced by its successful retry.
+@@ -65,6 +82,8 @@
+ 				break;
+ 			case "agent_settled":
+ 				this.runActive = false;
++				this.retrying = false;
++				this.tools.clear();
+ 				this.restingStatus = event.aborted ? { state: "idle" } : this.runResult;
+ 				break;
+ 			case "session_info_changed":
+@@ -83,10 +102,34 @@
+ 		this.report();
+ 	}
+ 
++	/** Extension-owned work survives agent turn boundaries; clearing one source cannot erase another. */
++	setActivity(source: string, status: Omit<ProgramStatus, "id" | "app"> | undefined): void {
++		const id = `pi/${source}`;
++		if (id.length > 128 || id.split("/").length > 8 || !id.split("/").every(part => /^[A-Za-z0-9_.+-]{1,32}$/.test(part))) return;
++		if (status?.state === "clear") status = undefined;
++		const previous = this.activities.get(source);
++		if (status && JSON.stringify(previous) === JSON.stringify(status)) return;
++		for (const key of this.activities.keys()) {
++			if (key === source || (!status && key.startsWith(`${source}/`))) this.activities.delete(key);
++		}
++		if (status) {
++			if (this.activities.size >= 256) this.setActivity(findProgramStatusEviction(this.activities)!, undefined);
++			this.activities.set(source, { ...status });
++		}
++		this.getTerminal().setProgramStatus(status ? { ...status, id, app: APP_NAME } : { state: "clear", id });
++		if (!this.runActive && !this.compacting && (status?.state === "done" || status?.state === "error" || (status?.state === "idle" && (previous?.state === "working" || previous?.state === "blocked")))) this.restingStatus = { state: status.state, message: status.message };
++		this.report();
++	}
++
+ 	/** Forget the previous session's run, for example after switching sessions. */
+ 	reset(): void {
++		for (const source of this.activities.keys()) this.getTerminal().setProgramStatus({ state: "clear", id: `pi/${source}` });
++		this.activities.clear();
++		this.blocked.clear();
+ 		this.runActive = false;
+ 		this.compacting = false;
++		this.retrying = false;
++		this.tools.clear();
+ 		this.runResult = { state: "done" };
+ 		this.restingStatus = { state: "idle" };
+ 		this.report();
+@@ -103,7 +146,16 @@
+ 	private currentStatus(): ProgramStatus {
+ 		const blocked = [...this.blocked.values()].at(-1);
+ 		if (blocked) return { state: "blocked", ...blocked };
++		const activities = [...this.activities.values()];
++		const waiting = activities.filter(status => status.state === "blocked").at(-1);
++		if (waiting) return { state: "blocked", kind: waiting.kind, message: waiting.message, progress: waiting.progress };
+ 		if (this.compacting) return { state: "working", message: "Compacting context" };
++		if (this.retrying) return { state: "working", message: "Waiting to retry request" };
++		if (this.tools.size) return { state: "working", message: this.tools.size === 1 ? `Running ${this.tools.values().next().value}` : `Running ${this.tools.size} tools` };
++		if (!this.runActive) {
++			const working = activities.filter(status => status.state === "working").at(-1);
++			if (working) return { state: "working", message: working.message ?? working.title ?? "Background work running" };
++		}
+ 		const status = this.runActive ? { state: "working" as const } : this.restingStatus;
+ 		if (status.state === "working" || status.state === "done") return { ...status, message: this.getSessionName() };
+ 		return status;
+--- a/packages/tui/src/index.ts
++++ b/packages/tui/src/index.ts
+@@ -112,7 +112,7 @@
+ export { getNativeClipboard, type NativeClipboard } from "./native-platform.ts";
+ export { oklabToOkhslLightness } from "./oklab.ts";
+ // Program status reporting (OSC 7501)
+-export { formatProgramStatus, type ProgramStatus } from "./program-status.ts";
++export { findProgramStatusEviction, formatProgramStatus, type ProgramStatus } from "./program-status.ts";
+ // Input buffering for batch splitting
+ export { StdinBuffer, type StdinBufferEventMap, type StdinBufferOptions } from "./stdin-buffer.ts";
+ // Terminal interface and implementations
+--- a/packages/tui/src/program-status.ts
++++ b/packages/tui/src/program-status.ts
+@@ -1,6 +1,6 @@
+ /**
+  * Program Status Protocol (OSC 7501): a program tells the terminal whether it is idle, working,
+- * blocked on the user, done, or failed. Only the root record is supported.
++ * blocked on the user, done, or failed, with independent hierarchical worker records.
+  *
+  * Spec: https://www.superlogical.com/rex/docs/build/program-status
+  */
+@@ -8,6 +8,12 @@
+ export interface ProgramStatus {
+ 	/** `clear` removes the status instead of reporting one. */
+ 	state: "idle" | "working" | "blocked" | "done" | "error" | "clear";
++	/** Hierarchical record id; absent addresses the root. Invalid ids discard the report. */
++	id?: string;
++	/** Short worker label (192 decoded UTF-8 bytes). */
++	title?: string;
++	/** Measured percentage, 0–100, only while working or blocked. Omit when indeterminate. */
++	progress?: number;
+ 	/** Stable program name, `[A-Za-z0-9_.+-]{1,32}`. Other values are omitted. */
+ 	app?: string;
+ 	/** What a blocked program waits for. Omitted for other states. */
+@@ -22,6 +28,24 @@
+ /** The reply to {@link PROGRAM_STATUS_QUERY}. Later spec revisions may add pairs after the `?`. */
+ export function isProgramStatusReply(sequence: string): boolean {
+ 	return /^\x1b\]7501;\?[^\x07\x1b]*(?:\x07|\x1b\\)$/.test(sequence);
++}
++
++export interface ProgramStatusCapabilities { states: string[]; kinds: string[] }
++const STATES = ["idle", "working", "done", "blocked", "error"];
++const KINDS = ["permission", "question", "auth"];
++
++export function parseProgramStatusReply(sequence: string): ProgramStatusCapabilities | undefined {
++	if (!isProgramStatusReply(sequence) || Buffer.byteLength(sequence) > 4096) return undefined;
++	const pairs = new Map<string, string>();
++	for (const pair of sequence.slice(8).replace(/(?:\x07|\x1b\\)$/, "").split(":")) {
++		const match = /^\s*([a-z]{1,16})\s*=\s*([A-Za-z0-9_.,+/=-]*)\s*$/.exec(pair);
++		if (match) pairs.set(match[1]!, match[2]!);
++	}
++	return { states: pairs.has("states") ? pairs.get("states")!.split(",") : [...STATES], kinds: pairs.has("kinds") ? pairs.get("kinds")!.split(",") : [...KINDS] };
++}
++
++export function validProgramStatusId(id: string): boolean {
++	return id.length <= 128 && id.split("/").length <= 8 && id.split("/").every(segment => APP_PATTERN.test(segment));
+ }
+ 
+ const APP_PATTERN = /^[A-Za-z0-9_.+-]{1,32}$/;
+@@ -44,10 +68,26 @@
+ 
+ /** Encode a status report. Terminals discard reports whose text contains control characters, so they are replaced. */
+ export function formatProgramStatus(status: ProgramStatus): string {
++	if (![...STATES, "clear"].includes(status.state) || (status.id !== undefined && (typeof status.id !== "string" || !validProgramStatusId(status.id)))) return "";
+ 	const pairs = [`state=${status.state}`];
++	if (status.id !== undefined) pairs.push(`id=${status.id}`);
++	if (status.state === "clear") return `\x1b]7501;${pairs.join(":")}\x1b\\`;
++	if ((status.state === "working" || status.state === "blocked") && Number.isInteger(status.progress) && status.progress! >= 0 && status.progress! <= 100) pairs.push(`progress=${status.progress}`);
++	const title = truncateUtf8((status.title ?? "").replace(CONTROL_CHARACTERS, " ").trim(), 192);
++	if (title) pairs.push(`title=${Buffer.from(title, "utf8").toString("base64")}`);
+ 	if (status.app !== undefined && APP_PATTERN.test(status.app)) pairs.push(`app=${status.app}`);
+-	if (status.state === "blocked" && status.kind) pairs.push(`kind=${status.kind}`);
++	if (status.state === "blocked" && status.kind && KINDS.includes(status.kind)) pairs.push(`kind=${status.kind}`);
+ 	const message = truncateUtf8((status.message ?? "").replace(CONTROL_CHARACTERS, " ").trim(), MAX_MESSAGE_BYTES);
+ 	if (message) pairs.push(`msg=${Buffer.from(message, "utf8").toString("base64")}`);
+ 	return `\x1b]7501;${pairs.join(":")}\x1b\\`;
+ }
++
++/** Prefer retired subtrees, then autonomous work, retaining user blockers last. */
++export function findProgramStatusEviction(statuses: ReadonlyMap<string, ProgramStatus>): string | undefined {
++	const entries = [...statuses].filter(([id]) => id !== "");
++	const protectedSubtree = (id: string, states: string[]) => entries.some(([child, status]) =>
++		(child === id || child.startsWith(`${id}/`)) && states.includes(status.state));
++	return entries.find(([id]) => !protectedSubtree(id, ["working", "blocked"]))?.[0]
++		?? entries.find(([id]) => !protectedSubtree(id, ["blocked"]))?.[0]
++		?? entries[0]?.[0];
++}
+--- a/packages/tui/src/terminal.ts
++++ b/packages/tui/src/terminal.ts
+@@ -4,8 +4,11 @@
+ import { isNativeModifierPressed } from "./native-modifiers.ts";
+ import { getNativePlatformHelper } from "./native-platform.ts";
+ import {
++	findProgramStatusEviction,
+ 	formatProgramStatus,
+ 	isProgramStatusReply,
++	parseProgramStatusReply,
++	type ProgramStatusCapabilities,
+ 	PROGRAM_STATUS_QUERY,
+ 	type ProgramStatus,
+ } from "./program-status.ts";
+@@ -168,7 +171,9 @@
+ 	private stdinDataHandler?: (data: string) => void;
+ 	private progressInterval?: ReturnType<typeof setInterval>;
+ 	/** Latest program status, kept across stop() so start() can report it again. */
+-	private programStatus?: ProgramStatus;
++	private readonly programStatuses = new Map<string, ProgramStatus>();
++	private programStatusCapabilities?: ProgramStatusCapabilities;
++	private programStatusResetTail = "";
+ 	/** Whether the terminal confirmed OSC 7501 support since the last start(), or `PI_PROGRAM_STATUS=1`. */
+ 	private programStatusSupported = false;
+ 	/** The support query was sent and its DA1 sentinel has not arrived yet. */
+@@ -245,7 +250,8 @@
+ 			if (isProgramStatusReply(sequence)) {
+ 				if (this.programStatusQueryPending) {
+ 					this.programStatusQueryPending = false;
+-					this.programStatusSupported = true;
++					this.programStatusCapabilities = parseProgramStatusReply(sequence);
++					this.programStatusSupported = this.programStatusCapabilities !== undefined;
+ 					this.writeProgramStatus();
+ 				}
+ 				return;
+@@ -299,6 +305,8 @@
+ 		this.clearKeyboardProtocolNegotiationBuffer();
+ 		const programStatusOverride = process.env.PI_PROGRAM_STATUS;
+ 		this.programStatusSupported = programStatusOverride === "1";
++		this.programStatusCapabilities = undefined;
++		this.programStatusResetTail = "";
+ 		this.programStatusQueryPending = programStatusOverride !== "1" && programStatusOverride !== "0";
+ 		const programStatusQuery = this.programStatusQueryPending ? PROGRAM_STATUS_QUERY : "";
+ 		process.stdout.write(`${KITTY_KEYBOARD_PROTOCOL_QUERY}${programStatusQuery}${DEVICE_ATTRIBUTES_QUERY}`);
+@@ -474,9 +482,10 @@
+ 		if (this.clearProgressInterval()) {
+ 			process.stdout.write(TERMINAL_PROGRESS_CLEAR_SEQUENCE);
+ 		}
+-		// Remove the status while stopped, for example after exit or while suspended. start() reports it again.
+-		if (this.programStatusSupported && this.programStatus) {
+-			process.stdout.write(formatProgramStatus({ state: "clear" }));
++		// Finished/error records survive exit. Retire active records while suspended;
++		// retain their original values in memory so start() can restore them.
++		for (const status of this.programStatuses.values()) {
++			if (status.state === "working" || status.state === "blocked") this.emitProgramStatus({ state: "idle", id: status.id, app: status.app, title: status.title });
+ 		}
+ 		this.programStatusSupported = false;
+ 		this.programStatusQueryPending = false;
+@@ -541,6 +550,17 @@
+ 
+ 	write(data: string): void {
+ 		process.stdout.write(data);
++		// Main-screen transcript zones use OSC 133 A, which also retires status
++		// records. Restore our records after our own markers (or a full reset),
++		// not on a timer. Fullscreen strips these zones before writing them.
++		const text = this.programStatusResetTail + data;
++		const prompt = /\x1b\]133;A(?:;[^\x07\x1b]*)?(?:\x07|\x1b\\)/.test(text);
++		const reset = text.includes("\x1bc");
++		const tail = text.slice(text.lastIndexOf("\x1b]"));
++		const prefix = "\x1b]133;A";
++		this.programStatusResetTail = tail.length <= 256 && !/[\x07]|\x1b\\/.test(tail) && (prefix.startsWith(tail) || tail.startsWith(prefix))
++			? tail : text.endsWith("\x1b") ? "\x1b" : "";
++		if (prompt || reset) this.writeProgramStatus(!reset);
+ 		if (this.writeLogPath) {
+ 			try {
+ 				fs.appendFileSync(this.writeLogPath, data, { encoding: "utf8" });
+@@ -595,14 +615,43 @@
+ 	}
+ 
+ 	setProgramStatus(status: ProgramStatus): void {
+-		this.programStatus = status.state === "clear" ? undefined : status;
+-		if (this.programStatusSupported) process.stdout.write(formatProgramStatus(status));
+-	}
+-
+-	private writeProgramStatus(): void {
+-		if (this.programStatusSupported && this.programStatus) {
+-			process.stdout.write(formatProgramStatus(this.programStatus));
+-		}
++		if (!formatProgramStatus(status)) return;
++		const key = status.id ?? "";
++		if (status.state === "clear") {
++			for (const id of this.programStatuses.keys()) {
++				if (!key || id === key || id.startsWith(`${key}/`)) this.programStatuses.delete(id);
++			}
++		} else {
++			if (formatProgramStatus(this.programStatuses.get(key) ?? { state: "clear" }) === formatProgramStatus(status)) return;
++			this.programStatuses.delete(key);
++			// Respect the protocol's maximum history. Keep the root and clear
++			// descendants consistently on eviction; terminals may retain fewer.
++			while (this.programStatuses.size >= 256) {
++				const oldest = findProgramStatusEviction(this.programStatuses)!;
++				this.setProgramStatus({ state: "clear", id: oldest });
++			}
++			this.programStatuses.set(key, { ...status });
++		}
++		this.emitProgramStatus(status);
++	}
++
++	private writeProgramStatus(activeOnly = false): void {
++		for (const status of this.programStatuses.values()) {
++			if (!activeOnly || (status.state !== "done" && status.state !== "error")) this.emitProgramStatus(status);
++		}
++	}
++
++	private emitProgramStatus(status: ProgramStatus): void {
++		if (!this.programStatusSupported) return;
++		const capabilities = this.programStatusCapabilities;
++		if (capabilities && status.state !== "clear") {
++			if (!capabilities.states.includes(status.state)) {
++				// Do not claim a worker is running when it has stopped or needs input.
++				status = capabilities.states.includes("idle") ? { ...status, state: "idle", kind: undefined, progress: undefined } : { state: "clear", id: status.id };
++			}
++			if (status.kind && !capabilities.kinds.includes(status.kind)) status = { ...status, kind: undefined };
++		}
++		process.stdout.write(formatProgramStatus(status));
+ 	}
+ 
+ 	setProgress(active: boolean): void {
+--- a/packages/tui/test/terminal.test.ts
++++ b/packages/tui/test/terminal.test.ts
+@@ -236,7 +236,7 @@
+ 	// #10607
+ 	describe("program status (OSC 7501)", () => {
+ 		const working = "\x1b]7501;state=working:app=pi\x1b\\";
+-		const clear = "\x1b]7501;state=clear\x1b\\";
++		const idle = "\x1b]7501;state=idle:app=pi\x1b\\";
+ 
+ 		function withOverride(value: string | undefined, fn: () => void): void {
+ 			const previous = process.env.PI_PROGRAM_STATUS;
+@@ -332,14 +332,15 @@
+ 			});
+ 		});
+ 
+-		it("clears the status on stop and reports it again after restart", () => {
++		it("retires active status on stop without clearing results and restores it after restart", () => {
+ 			withOverride(undefined, () => {
+ 				const harness = setupNegotiation();
+ 				try {
+ 					harness.terminal.setProgramStatus({ state: "working", app: "pi" });
+ 					harness.send("\x1b]7501;?\x1b\\");
+ 					harness.terminal.stop();
+-					assert.ok(harness.writes.includes(clear));
++					assert.ok(harness.writes.includes(idle));
++					assert.ok(!harness.writes.includes("\x1b]7501;state=clear\x1b\\"));
+ 
+ 					// Stopped: nothing is written until the restarted terminal confirms support again.
+ 					const writesBeforeRestart = harness.writes.length;

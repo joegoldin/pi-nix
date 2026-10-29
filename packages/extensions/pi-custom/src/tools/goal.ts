@@ -17,6 +17,7 @@ import { type ExtensionAPI, type ExtensionContext, getMarkdownTheme } from "@ear
 import { Markdown } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import type { UiConfig } from "../ui/config.ts";
+import { reportActivity, type ActivityStatus } from "../program-status.ts";
 import {
 	activeContract,
 	BUDGET_WRAP_UP,
@@ -93,6 +94,7 @@ function isRetryable(message: string): boolean {
 
 export function registerGoal(pi: ExtensionAPI, config: () => UiConfig): void {
 	let goal: Goal | undefined;
+	let completed = false;
 	let ctxRef: ExtensionContext | undefined;
 	let lastContract: string | undefined;
 	let runAutomatic = false;
@@ -107,6 +109,17 @@ export function registerGoal(pi: ExtensionAPI, config: () => UiConfig): void {
 	const noProgressLimit = () => (config().goalNoProgressTurns > 0 ? config().goalNoProgressTurns : null);
 
 	function updateStatus(): void {
+		let activity: ActivityStatus | undefined;
+		if (goal) completed = false;
+		if (goal?.status === "active") {
+			activity = goal.waiting?.waitingFor === "user"
+				? { state: "blocked", kind: "question", message: "Goal waiting for your action" }
+				: { state: "working", message: goal.waiting ? `Goal waiting for ${goal.waiting.waitingFor === "background" ? "background work" : "an external event"}` : "Working on goal" };
+		} else if (completed || goal?.status === "complete") activity = { state: "done", message: "Goal completed" };
+		else if (goal?.status === "blocked") activity = { state: "error", message: "Goal stopped at an unresolved blocker" };
+		else if (goal?.status === "paused" && !goal.safetyPauseCause) activity = { state: "idle", message: "Goal paused" };
+		else if (goal) activity = { state: "blocked", kind: "question", message: "Goal needs your review before resuming" };
+		reportActivity(ctxRef, "goal", activity && { ...activity, title: "Goal" });
 		try {
 			ctxRef?.ui.setStatus(STATUS_KEY, statusText(goal, turnLimit()));
 		} catch {}
@@ -190,6 +203,7 @@ export function registerGoal(pi: ExtensionAPI, config: () => UiConfig): void {
 	}
 
 	function clear(): void {
+		completed = false;
 		if (waitTimer) clearTimeout(waitTimer);
 		waitTimer = undefined;
 		continuationWanted = false;
@@ -330,6 +344,8 @@ export function registerGoal(pi: ExtensionAPI, config: () => UiConfig): void {
 			wrapUpActive = false;
 			if (waitTimer) clearTimeout(waitTimer);
 			goal = undefined;
+			completed = true;
+			reportActivity(ctxRef, "goal", { state: "done", title: "Goal", message: "Goal completed" });
 			pi.appendEntry(STATE_TYPE, { goal: null });
 			deactivateContract();
 			try {
@@ -606,6 +622,7 @@ export function registerGoal(pi: ExtensionAPI, config: () => UiConfig): void {
 	pi.on("session_start", (_event, ctx) => {
 		ctxRef = ctx;
 		goal = undefined;
+		completed = false;
 		lastContract = undefined;
 		continuationWanted = false;
 		wrapUpActive = false;
@@ -635,6 +652,7 @@ export function registerGoal(pi: ExtensionAPI, config: () => UiConfig): void {
 	});
 
 	pi.on("input", (event) => {
+		if (completed && event.source !== "extension") { completed = false; updateStatus(); }
 		if (!goal || goal.status !== "active") return { action: "continue" as const };
 		const text = event.text.trim();
 		if (event.source !== "extension" && !text.startsWith("/goal")) {
@@ -767,6 +785,7 @@ export function registerGoal(pi: ExtensionAPI, config: () => UiConfig): void {
 		if (waitTimer) clearTimeout(waitTimer);
 		if (completionTimer) clearTimeout(completionTimer);
 		waitTimer = undefined;
+		if (goal?.status === "active") reportActivity(ctxRef, "goal", { state: "idle", title: "Goal", message: "Goal suspended with session" });
 		ctxRef = undefined;
 	});
 }

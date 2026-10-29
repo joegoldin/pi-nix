@@ -62,11 +62,17 @@ completer.
   the final pass update one undoable insertion, without collapsed paste markers.
   Typing or moving the caret stops dictation; late results cannot overwrite edits.
   Enter stops without submitting. Fullscreen copying excludes the meter cell.
-- **Prompt box and shimmer.** Fullscreen selection copies prompt text without
-  the rounded outline, `❯`, or layout padding; typed indentation and symbols
-  remain. Terminal-native selection (including Shift-drag bypass) cannot omit
-  visible glyphs: main-screen mode therefore uses a borderless prompt. A shimmer
-  in a per-session accent colour replaces the spinner while the agent works.
+- **Clean copying.** Pi-owned fullscreen selections rejoin soft wraps in the
+  prompt, assistant prose, and tool cards while preserving real newlines and
+  indentation. Prompt frames, card gutters, and the dictation meter stay out of
+  the clipboard; literal border characters in the content remain. Partial,
+  scrolled, and height-clipped selections use the rendered source coordinates.
+  Unknown custom renderers and width-dependent Markdown layouts fall back to
+  displayed text rather than guessing where logical lines end.
+- **Prompt box and shimmer.** Terminal-native selection (including Shift-drag
+  bypass) cannot omit visible glyphs: main-screen mode therefore uses a
+  borderless prompt. A shimmer in a per-session accent colour replaces the
+  spinner while the agent works.
 - **`/ui`.** Every setting in one list, saved as you change it.
 - **`/context`.** Where the context window is going: system prompt, tools,
   skills, messages, estimated and scaled to pi's own total.
@@ -93,7 +99,9 @@ completer.
 | `diff.ts` | Unified and split diffs from pi's display diff |
 | `icons.ts` | Nerd Font glyphs for paths |
 | `markdown.ts` | Callouts and link transforms |
-| `editor.ts` | Prompt box and shimmer |
+| `editor.ts` | Prompt box, shimmer, and native draft source mapping |
+| `prompt-selection.ts` | Pi selection and clipboard integration |
+| `selection-content.ts` | Conversation source mapping and conservative renderer fallback |
 | `frame.ts` | Bordered box for overlays |
 | `config.ts` | `pi-custom.json`: defaults, coercion, load and save |
 | `settings.ts` | `/ui` |

@@ -9,6 +9,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Text, type TuiMouseEvent, type TuiMouseEventResult, truncateToWidth } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
+import { reportActivity } from "../program-status.ts";
 import {
 	groupProgress, pauseActive, reduce, replay,
 	type Todo, type TodoParams, type TodoState, type TodoWidgetRow,
@@ -181,6 +182,14 @@ export function registerTodo(pi: ExtensionAPI, clock: TodoClock = CLOCK): void {
 
 	function show(ctx: ExtensionContext | undefined): void {
 		if (!ctx || ctx.mode !== "tui") return;
+		const tasks = state.tasks.filter(task => task.kind !== "group" && task.status !== "deleted");
+		const completed = tasks.filter(task => task.status === "completed").length;
+		const active = tasks.some(task => task.status === "in_progress");
+		reportActivity(ctx, "todos", tasks.length ? {
+			state: active ? "working" : completed === tasks.length ? "done" : "idle",
+			title: "Tasks", message: `${completed}/${tasks.length} tasks completed`,
+			...(active ? { progress: Math.floor(completed * 100 / tasks.length) } : {}),
+		} : undefined);
 		const expanded = wrapped || ctx.ui.getToolsExpanded();
 		const anything = state.tasks.some((t) => t.status !== "deleted" && (expanded || !hidden.has(t.id)));
 		if (!anything) {

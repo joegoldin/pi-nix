@@ -2,6 +2,7 @@
 // an exchange only drafts a main-conversation message; it never submits one.
 import { createHash, randomUUID } from "node:crypto";
 import { Framed } from "../ui/frame.ts";
+import { activityKey, reportActivity, type ActivityStatus } from "../program-status.ts";
 import {
 	existsSync,
 	mkdirSync,
@@ -48,6 +49,8 @@ interface SavedThread {
 	parentId?: string;
 }
 interface LiveThread extends Thread {
+	status?: ActivityStatus;
+	childStatuses?: Map<string, ActivityStatus>;
 	saved: SavedThread;
 	manager: SessionManager;
 	runtime?: AgentSession;
@@ -223,6 +226,11 @@ export function registerBtw(
 		threads.set(thread.id, thread);
 		return thread;
 	}
+	function reportThread(ctx: ExtensionContext, thread: LiveThread, status: ActivityStatus): void {
+		thread.status = { ...status, title: "Side conversation" };
+		reportActivity(ctx, activityKey("btw", thread.id), thread.status);
+	}
+
 	async function runtime(
 		ctx: ExtensionContext,
 		thread: LiveThread,
@@ -233,6 +241,12 @@ export function registerBtw(
 		const ui = {
 			...ctx.ui,
 			setStatus() {},
+			setProgramStatus(key: string, status: ActivityStatus | undefined) {
+				const statuses = thread.childStatuses ??= new Map();
+				if (status) statuses.set(key, status);
+				else for (const saved of statuses.keys()) if (saved === key || saved.startsWith(`${key}/`)) statuses.delete(saved);
+				reportActivity(ctx, `${activityKey("btw", thread.id)}/${key}`, status);
+			},
 			setWidget() {},
 			setFooter() {},
 			setHeader() {},
@@ -281,6 +295,7 @@ export function registerBtw(
 			thread.saved.name === "Side conversation"
 				? question.slice(0, 70)
 				: thread.saved.name;
+		reportThread(ctx, thread, { state: "working", message: "Side conversation running" });
 		let session: AgentSession | undefined;
 		const abort = () => {
 			void session?.abort();
@@ -296,6 +311,7 @@ export function registerBtw(
 				thread.turns.push({ question });
 			thread.turns.at(-1)!.error = (error as Error).message;
 		} finally {
+			reportThread(ctx, thread, { state: signal.aborted ? "idle" : thread.turns.at(-1)?.error ? "error" : "done", message: signal.aborted ? "Side conversation cancelled" : thread.turns.at(-1)?.error ? "Side conversation failed" : "Side conversation finished" });
 			signal.removeEventListener("abort", abort);
 			try {
 				save(thread);
@@ -472,6 +488,10 @@ export function registerBtw(
 	}
 	pi.on("session_start", (_event, ctx) => {
 		if (ctx.mode !== "tui") return;
+		for (const thread of threads.values()) {
+			if (thread.status) reportThread(ctx, thread, thread.status);
+			for (const [key, status] of thread.childStatuses ?? []) reportActivity(ctx, `${activityKey("btw", thread.id)}/${key}`, status);
+		}
 		try {
 			restore(ctx);
 			installFleet(ctx);

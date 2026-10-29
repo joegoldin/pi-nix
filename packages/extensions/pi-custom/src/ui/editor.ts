@@ -43,6 +43,7 @@ export function createPromptEditor(Base: EditorBase, promptColour: () => Colour,
 		private topBorder = "";
 		private bottomBorder = "";
 		private selectionRows = new Map<number, SelectionRow>();
+		private selectionSource: { id: number; text: string }[] = [];
 		private boxed = false;
 
 		constructor(...args: any[]) {
@@ -84,6 +85,15 @@ export function createPromptEditor(Base: EditorBase, promptColour: () => Colour,
 			return `${this.borderColor(left)}${sliceByColumn(line, 1, width - 2, true)}${this.borderColor(right)}`;
 		}
 
+		override layoutText(width: number) {
+			// Capture while dictation's temporary meter cell is present, so source
+			// columns match the actual native layout rather than the restored draft.
+			const native = this as unknown as { buildVisualLineMap(width: number): { logicalLine: number; startCol: number; length: number }[] };
+			this.selectionSource = native.buildVisualLineMap(width).map(chunk => ({ id: chunk.logicalLine,
+				text: this.state.lines[chunk.logicalLine]!.slice(chunk.startCol, chunk.startCol + chunk.length) }));
+			return super.layoutText(width);
+		}
+
 		override render(width: number): string[] {
 			this.topBorder = "";
 			this.bottomBorder = "";
@@ -113,7 +123,15 @@ export function createPromptEditor(Base: EditorBase, promptColour: () => Colour,
 			this.selectionRows.set(top, { line: lines[top]!, start: 0, end: 0, skip: true });
 			this.selectionRows.set(bottom, { line: lines[bottom]!, start: 0, end: 0, skip: true });
 			const inset = Math.min(pad, Math.max(0, Math.floor((width - 1) / 2)));
-			for (let i = first; i < bottom; i++) this.selectionRows.set(i, { line: lines[i]!, start: inset, end: width - inset, excludeColumn: this.dictationMeterColumn(i) });
+			// Use the native editor's wrap map, including paste-marker segmentation
+			// and scroll offset, rather than guessing line breaks from screen width.
+			const native = this as unknown as { scrollOffset: number };
+			const visual = this.selectionSource.slice(native.scrollOffset);
+			for (let i = first; i < bottom; i++) {
+				const chunk = visual[i - first];
+				this.selectionRows.set(i, { line: lines[i]!, start: inset, end: width - inset, excludeColumn: this.dictationMeterColumn(i),
+					...(chunk ? { source: chunk } : {}) });
+			}
 			return lines;
 		}
 	}

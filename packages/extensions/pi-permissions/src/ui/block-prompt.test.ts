@@ -162,3 +162,29 @@ it("linked reviews offer only rechecked scope approval, never an execution bypas
 	prompt.press("y");
 	expect(prompt.result).toBe("allow-session");
 });
+
+describe("native permission program status", () => {
+	it("marks approval waits as permission blockers and clears even when the dialog fails", async () => {
+		const { askBeforeBlock } = await import("./block-prompt.ts");
+		const statuses: any[] = [];
+		const ctx = { ui: { setProgramStatus: (key: string, status: unknown) => statuses.push({ key, status }), custom: async () => {
+			expect(statuses.at(-1)?.status).toMatchObject({ state: "blocked", kind: "permission" });
+			throw new Error("UI failed");
+		} } };
+		await expect(askBeforeBlock(ctx as never, { toolName: "bash", input: { command: "PRIVATE_COMMAND" }, reason: "PRIVATE_REASON", timeoutSeconds: 30 })).rejects.toThrow("UI failed");
+		expect(statuses.at(-1)?.status).toBeUndefined();
+		expect(JSON.stringify(statuses)).not.toContain("PRIVATE_");
+		expect(statuses.length).toBe(2);
+	});
+});
+
+it("engine policy prompts also publish permission status and clear it on failure", async () => {
+	const { presentInlinePermissionPrompt } = await import("../engine/authority/permission-prompt-component.ts");
+	const reports: any[] = [];
+	const ui = { setProgramStatus: (_key: string, status: unknown) => reports.push(status), custom: async () => {
+		expect(reports.at(-1)).toMatchObject({ state: "blocked", kind: "permission" });
+		throw new Error("dialog failed");
+	} };
+	await expect(presentInlinePermissionPrompt({ ui } as never, "Private approval", {} as never)).rejects.toThrow("dialog failed");
+	expect(reports.at(-1)).toBeUndefined(); expect(reports).toHaveLength(2);
+});

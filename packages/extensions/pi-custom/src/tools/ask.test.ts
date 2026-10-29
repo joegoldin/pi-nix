@@ -86,3 +86,17 @@ test("RPC questions forward cancellation to their native dialog", async () => {
 	expect(await settled(pending)).not.toBe("timed out");
 	expect(h.entries).toEqual([]);
 });
+
+test("native questionnaire status blocks for user input and clears on cancellation or UI failure", async () => {
+	for (const fail of [false, true]) {
+		const h = cancellable(); const statuses: any[] = [];
+		const pending = h.run({ setProgramStatus: (key: string, status: unknown) => statuses.push({ key, status }), custom: async () => {
+			expect(statuses.at(-1)?.status).toMatchObject({ state: "blocked", kind: "question" });
+			if (fail) throw new Error("UI failed");
+			h.controller.abort();
+		} });
+		if (fail) await expect(pending).rejects.toThrow("UI failed"); else await pending;
+		expect(statuses.at(-1)?.status).toBeUndefined();
+		expect(statuses.length).toBe(2);
+	}
+});

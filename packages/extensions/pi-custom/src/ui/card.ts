@@ -12,8 +12,11 @@
 // for reading, so its rows wrap, and it sits on a panel background so it reads
 // as one block apart from the prose around it.
 
-import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { sliceByColumn, stripTerminalSequences, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import type { ToolMode } from "./config.ts";
+import { mapRows, type CopyRow } from "./selection-content.ts";
+
+type CopyCapture = { owner: object; rows: (CopyRow | undefined)[] };
 
 /** The slice of pi's Theme the cards use, declared structurally so tests can pass a recorder. */
 export interface UiTheme {
@@ -104,9 +107,9 @@ export function paint(line: string, width: number, background: string): string {
 }
 
 /** Lay a card out at a given width: clipped when collapsed, wrapped when expanded. */
-export function layoutCard(model: CardModel, layout: CardLayout, theme: UiTheme, width: number): string[] {
+export function layoutCard(model: CardModel, layout: CardLayout, theme: UiTheme, width: number, copy?: CopyCapture): string[] {
 	const w = Math.max(1, width);
-	const rows = layoutRows(model, layout, theme, w);
+	const rows = layoutRows(model, layout, theme, w, copy);
 	const background = layout.background;
 	return background ? rows.map((row) => paint(row, w, background)) : rows;
 }
@@ -128,23 +131,50 @@ export function opens(model: CardModel, layout: CardLayout, theme: UiTheme, widt
 	return folded.length !== open.length || folded.some((row, i) => row !== open[i]);
 }
 
-function layoutRows(model: CardModel, layout: CardLayout, theme: UiTheme, w: number): string[] {
+function layoutRows(model: CardModel, layout: CardLayout, theme: UiTheme, w: number, copy?: CopyCapture): string[] {
 	if (layout.mode === "compact" && !layout.expanded) {
 		// Without a summary, the body's most telling line stands in: the last
 		// for a tail card such as command output, the first otherwise.
 		const rows = Array.isArray(model.body) ? model.body : [];
 		const said = model.summary ?? (model.tail ? rows.at(-1) : rows[0]);
 		const summary = said ? ` ${theme.fg("dim", "·")} ${said}` : "";
-		return [fit(header(model, theme) + summary, w)];
+		const line = fit(header(model, theme) + summary, w);
+		const text = stripTerminalSequences(line);
+		const start = text.startsWith(`${BULLET} `) ? 2 : 0;
+		copy?.rows.push({ line, start, text: text.slice(start), owner: copy.owner, id: 0, before: "" });
+		return [line];
 	}
 
 	// One logical line as rows: clipped to one row, or wrapped with the rest
 	// under the same gutter.
 	// Rows wrap rather than clip, open or folded, as Claude Code's do: a cut
 	// line hides the part of a command or path that tells it apart.
-	const place = (first: string, rest: string, line: string): string[] => {
+	const place = (first: string, rest: string, line: string, skipPrefix = 0): string[] => {
 		const gutter = Math.max(visibleWidth(first), visibleWidth(rest));
-		return wrapTextWithAnsi(line, Math.max(1, w - gutter)).map((part, i) => fit((i === 0 ? first : rest) + part, w));
+		const parts = wrapTextWithAnsi(line, Math.max(1, w - gutter));
+		const placed = parts.map((part, i) => fit((i === 0 ? first : rest) + part, w));
+		if (copy) {
+			const mapped = mapRows(copy.owner, parts, stripTerminalSequences(line).split(/\r\n|\r|\n/), 0, 0);
+			const base = copy.rows.length;
+			placed.forEach((rendered, i) => {
+				const prefix = visibleWidth(i === 0 ? first : rest);
+				const start = prefix < w ? prefix : 0;
+				const displayed = stripTerminalSequences(sliceByColumn(rendered, start, w - start, true));
+				const source = mapped?.[i];
+				const row: CopyRow = source && displayed.trimEnd() === stripTerminalSequences(parts[i]!).trimEnd()
+					? { ...source, line: rendered, start, id: base + source.id }
+					: { line: rendered, start, text: displayed, owner: copy.owner, id: base + i, before: "" };
+				// The header bullet is ours, including when a tiny viewport wraps it.
+				const before = Math.min(skipPrefix, visibleWidth(row.before));
+				row.before = sliceByColumn(row.before, before, visibleWidth(row.before) - before, true);
+				skipPrefix -= before;
+				const removed = Math.min(skipPrefix, visibleWidth(row.text));
+				row.text = sliceByColumn(row.text, removed, visibleWidth(row.text) - removed, true);
+				row.start += removed; skipPrefix -= removed;
+				copy.rows.push(row);
+			});
+		}
+		return placed;
 	};
 
 	// Open, the header says all of it: a long or multi-line command is the
@@ -153,6 +183,7 @@ function layoutRows(model: CardModel, layout: CardLayout, theme: UiTheme, w: num
 		"",
 		HEAD_INDENT,
 		header(layout.expanded && model.fullTarget !== undefined ? { ...model, target: model.fullTarget } : model, theme),
+		2,
 	);
 	// Under the pointer, everything below the header brightens; the header keeps its colours.
 	const lit = layout.hovered ? brightened(theme) : theme;
@@ -205,6 +236,9 @@ export function embolden(line: string): string {
 
 /** The pi Component wrapper. It re-lays out on every render because width is only known then. */
 export class CardComponent {
+	private selection?: { width: number; rows: (CopyRow | undefined)[] };
+	getSelectionRows(width: number) { return this.selection?.width === width ? this.selection.rows : undefined; }
+
 	constructor(
 		private model: CardModel,
 		private layout: CardLayout,
@@ -212,7 +246,10 @@ export class CardComponent {
 	) {}
 
 	render(width: number): string[] {
-		return layoutCard(this.model, this.layout, this.theme, width);
+		const copy: CopyCapture = { owner: this, rows: [] };
+		const lines = layoutCard(this.model, this.layout, this.theme, width, copy);
+		this.selection = { width, rows: copy.rows.map((row, i) => row && { ...row, line: lines[i]! }) };
+		return lines;
 	}
 
 	invalidate(): void {}

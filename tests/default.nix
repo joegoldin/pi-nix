@@ -17,6 +17,7 @@ in
   mcp-adapter = import ./mcp-adapter-test.nix args;
   queued-messages = import ./queued-messages-test.nix args;
   editor-input = import ./editor-input-test.nix args;
+  program-status = import ./program-status-test.nix args;
   sidebar = import ./sidebar-test.nix args;
   extension-dialogs = import ./extension-dialogs-test.nix args;
   subagent-host-peers = import ./subagent-host-peers-test.nix args;
