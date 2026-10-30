@@ -723,9 +723,10 @@ export function registerGoal(pi: ExtensionAPI, config: () => UiConfig): void {
 		goal.iteration++;
 		recordUsage(ctx);
 		const last = [...(event.messages as MessageLike[])].reverse().find((m) => m.role === "assistant");
-		// The queue may already be restored to the editor by the time abort ends.
-		// Let that guidance start the next run, not an automatic continuation.
-		if (last?.stopReason !== "error" && (globalThis as Record<symbol, unknown>)[Symbol.for("pi-custom.steering")] === true) {
+		// Let replacement guidance start the next run, not an automatic continuation.
+		// Some providers report cancellation as an error; trust the actual abort
+		// signal, but never hide a genuine provider failure behind the steering marker.
+		if ((last?.stopReason !== "error" || ctx.signal?.aborted) && (globalThis as Record<symbol, unknown>)[Symbol.for("pi-custom.steering")] === true) {
 			continuationWanted = false;
 			persist();
 			return;

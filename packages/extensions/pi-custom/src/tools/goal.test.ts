@@ -11,7 +11,7 @@ function harness() {
 	return handlers;
 }
 
-function interruptedGoal(queued: boolean, sendNow = false, stopReason = "aborted") {
+function interruptedGoal(queued: boolean, sendNow = false, stopReason = "aborted", abortedSignal = false, resumeAfterSend = false) {
 	const handlers = new Map<string, Function[]>();
 	let input: Function;
 	let pending = queued;
@@ -29,6 +29,7 @@ function interruptedGoal(queued: boolean, sendNow = false, stopReason = "aborted
 	registerGoal(pi as never, () => ({ goalTurnLimit: 0, goalNoProgressTurns: 0 }) as never);
 	const goal = { id: "g1", text: "Finish the work", status: "active", iteration: 0, tokensUsed: 0, baselineTokens: 0, timeUsedSeconds: 0 };
 	const ctx = {
+		signal: abortedSignal ? AbortSignal.abort() : undefined,
 		hasUI: true, isIdle: () => idle, hasPendingMessages: () => pending,
 		ui: {
 			setStatus() {}, notify() {},
@@ -49,6 +50,15 @@ function interruptedGoal(queued: boolean, sendNow = false, stopReason = "aborted
 	const status = saved.goal.status;
 	idle = true;
 	emit("agent_settled");
+	if (resumeAfterSend) {
+		pending = false;
+		idle = false;
+		ctx.signal = undefined;
+		emit("before_agent_start", { prompt: "queued guidance" });
+		emit("agent_end", { messages: [{ role: "assistant", stopReason: "stop" }] });
+		idle = true;
+		emit("agent_settled");
+	}
 	emit("session_shutdown");
 	return { status, sent, editor };
 }
@@ -59,6 +69,21 @@ test("Escape with queued guidance keeps the goal active while restoring the edit
 
 test("native send-now marker keeps the goal active without restoring the draft", () => {
 	expect(interruptedGoal(true, true)).toEqual({ status: "active", sent: [], editor: "draft" });
+});
+
+test("interrupt-and-send preserves the goal when a cancelled provider reports an error", () => {
+	expect(interruptedGoal(true, true, "error", true)).toEqual({ status: "active", sent: [], editor: "draft" });
+});
+
+test("interrupt-and-send does not hide a genuine provider error", () => {
+	expect(interruptedGoal(true, true, "error").status).toBe("blocked");
+});
+
+test("interrupt-and-send resumes automatic goal continuation after the queued response", () => {
+	const result = interruptedGoal(true, true, "error", true, true);
+	expect(result.status).toBe("active");
+	expect(result.sent).toHaveLength(1);
+	expect(result.sent[0]).toContain("g1");
 });
 
 test("Escape without queued guidance still pauses the goal", () => {

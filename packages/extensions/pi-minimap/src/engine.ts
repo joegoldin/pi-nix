@@ -1,5 +1,7 @@
 import {
 	applySummary,
+	historyCompaction,
+	RECENT_LIMIT,
 	excerpt,
 	parseSummary,
 	type Batch,
@@ -40,11 +42,11 @@ export const SYSTEM_PROMPT = `Write a small factual sidebar, not a second transc
 Use plain, everyday language: short concrete sentences. Say "Fixed duplicate entries", not "Implemented robust deduplication capabilities". No corporate jargon, stock AI phrases, praise or vague progress reports.
 Keep meaningful requests, decisions, changes, checks and blockers. Omit routine file reads, inspections, task-list bookkeeping, tool-call announcements and generic "outcome unknown/unverified" entries. If no useful outcome is available, leave beat empty. A specific unresolved requirement can remain a blocker.
 Return only JSON:
-{"beat":"","tone":"neutral","kind":"note","focus":[{"topic":"","subtopics":[]}],"replaceRecent":null,"dropRecent":[],"chapter":"","earlier":[]}
+{"beat":"","tone":"neutral","kind":"note","focus":[{"topic":"","subtopics":[]}],"replaceRecent":null,"dropRecent":[],"folded":"","compact":""}
 beat: concise, complete sentences. The history display wraps and scrolls; do not cut words or sentences to fit a character count. Prior-summary excerpts may contain …, which marks sampled input, not unfinished work. tone: neutral|success|warning|error. kind: ask|decision|change|check|blocker|note. A running check is neutral, not success.
 focus: one or two broad active topics, each with one level of short subtopics; at most four topics/subtopics total. Keep parent goals stable while current steps change. Remove finished work from focus, preserving important results in history.
 Use replaceRecent (zero-based index) to revise an existing event as it progresses or finishes instead of appending a paraphrase. dropRecent lists redundant or meaningless recent indices to remove; use original indices and never drop the entry being revised. On recap, reconcile old entries with the latest work, not a play-by-play of every missed step.
-Use events only for recent changes and focus. fold contains indices into recent: only if appending, summarize those entries into a concise chapter, without repeating their text in your input. compact contains older summaries: combine only those into earlier, two or three concise, complete bullets, about lasting decisions/results/blockers, not file inspections. Never rescan new raw events for older history. rewriteEarlier, when present, asks you to rewrite just that old opening as succinct bullets in earlier. recapBackground is context only. No markdown fences, terminal controls or secrets.`;
+Use events only for recent changes and focus. fold contains indices into recent: only if appending, summarize those entries into folded, a concise complete sentence or two, without repeating their text in your input. compact contains one older group: combine only its entries into compact, preserving lasting decisions, results, blockers and uncertainty. Never rewrite the rest of history or rescan new raw events for older history. Older groups are progressively compressed in place, not collapsed into an opening paragraph. recapBackground is context only. No markdown fences, terminal controls or secrets.`;
 
 export class MinimapEngine {
 	visible = false;
@@ -127,12 +129,9 @@ export class MinimapEngine {
 		const controller = new AbortController();
 		this.controller = controller;
 		const recap = this.catchingUp || batch.omitted > 0;
-		const fold = this.state.recent.length >= 6;
-		const compact = fold && this.state.chapters.length >= 2;
-		const rewriteEarlier = this.catchingUp && !!this.state.earlier && !compact;
-		// Keep observer input bounded independently of the complete scrollable display.
-		const earlier = this.state.earlier?.bullets?.map(text => excerpt(text, 100, true))
-			?? (this.state.earlier ? excerpt(this.state.earlier.text, 500, true) : undefined);
+		const fold = this.state.recent.length >= RECENT_LIMIT;
+		const compact = fold ? historyCompaction(this.state.history) : undefined;
+		// Retained history may be much larger; only the selected group enters this request.
 		const prompt = JSON.stringify({
 			focus: this.state.focus ?? this.state.now,
 			recent: this.state.recent.map((item, index) => ({
@@ -141,15 +140,11 @@ export class MinimapEngine {
 			})),
 			fold: fold ? [0, 1, 2] : undefined,
 			compact: compact
-				? {
-						earlier,
-						chapters: this.state.chapters.map((item) => excerpt(item.text, 180, true)),
-					}
+				? { entries: compact.indices.map(index => excerpt(this.state.history[index]!.text, 180, true)) }
 				: undefined,
-			rewriteEarlier: rewriteEarlier ? earlier : undefined,
 			recapBackground:
-				this.catchingUp && !compact && this.state.chapters.length
-					? this.state.chapters.map((item) => excerpt(item.text, 180, true))
+				this.catchingUp && !compact && this.state.history.length
+					? this.state.history.slice(-2).map(item => excerpt(item.text, 180, true))
 					: undefined,
 			recap,
 			omittedEvents: batch.omitted,
@@ -205,9 +200,8 @@ export class MinimapEngine {
 			applySummary(
 				this.state,
 				batch,
-				parseSummary(result.text, fold, compact),
+				parseSummary(result.text, fold, !!compact),
 				recap,
-				rewriteEarlier,
 			);
 			this.catchingUp = false;
 			this.persist();

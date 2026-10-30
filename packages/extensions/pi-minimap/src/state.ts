@@ -14,6 +14,7 @@ const timestamp = (value: unknown): number | undefined =>
 		? value
 		: undefined;
 export interface Beat {
+	level?: number;
 	bullets?: string[];
 	at?: number;
 	kind?: EventKind;
@@ -40,12 +41,11 @@ export interface FocusTopic {
 }
 export interface Snapshot {
 	focus?: FocusTopic[];
-	version: 1;
+	version: 2;
 	enabled: boolean;
 	model: ModelChoice;
 	lastId: string;
-	earlier?: Beat;
-	chapters: Beat[];
+	history: Beat[];
 	recent: Beat[];
 	now: string;
 	usage: Usage;
@@ -57,6 +57,21 @@ export interface Batch {
 	omitted: number;
 	events: Array<{ id: string; text: string }>;
 }
+export const RECENT_LIMIT = 6;
+export const HISTORY_LEVELS = 4;
+export const HISTORY_PER_LEVEL = 6;
+export const HISTORY_LIMIT = HISTORY_LEVELS * HISTORY_PER_LEVEL;
+const FOLD_SIZE = 3;
+
+/** One older group per update keeps compression inside the existing request budget. */
+export function historyCompaction(history: Beat[]): { indices: number[]; level: number } | undefined {
+	for (let level = 1; level <= HISTORY_LEVELS; level++) {
+		const indices = history.flatMap((item, index) => (item.level ?? 1) === level ? [index] : []);
+		if (indices.length >= HISTORY_PER_LEVEL)
+			return { indices: indices.slice(0, FOLD_SIZE), level: Math.min(level + 1, HISTORY_LEVELS) };
+	}
+}
+
 export const CALL_TYPE = "pi-minimap:call";
 export const STATE_TYPE = "pi-minimap:state";
 export const emptyUsage = (): Usage => ({
@@ -70,11 +85,11 @@ export const emptyUsage = (): Usage => ({
 	unknownTokens: 0,
 });
 export const emptySnapshot = (): Snapshot => ({
-	version: 1,
+	version: 2,
 	enabled: true,
 	model: "qwen",
 	lastId: "",
-	chapters: [],
+	history: [],
 	recent: [],
 	now: "",
 	usage: emptyUsage(),
@@ -407,7 +422,7 @@ export function restoreUsage(entries: unknown[], sessionId: string): Usage {
 			entry.type !== "custom" ||
 			![STATE_TYPE, CALL_TYPE].includes(String(entry.customType)) ||
 			!record(entry.data) ||
-			entry.data.version !== 1 ||
+			(entry.data.version !== 1 && !(entry.customType === STATE_TYPE && entry.data.version === 2)) ||
 			(entry.customType === STATE_TYPE
 				? entry.data.usageSessionId !== sessionId
 				: entry.data.phase !== "accounting" ||
@@ -437,7 +452,7 @@ export function restore(branch: unknown[]): Snapshot {
 			continue;
 		const value = entry.data;
 		if (
-			value.version !== 1 ||
+			(value.version !== 1 && value.version !== 2) ||
 			typeof value.enabled !== "boolean" ||
 			!["qwen", "luna"].includes(String(value.model)) ||
 			typeof value.lastId !== "string" ||
@@ -449,13 +464,6 @@ export function restore(branch: unknown[]): Snapshot {
 			continue;
 		const usage = decodeUsage(value.usage);
 		if (!usage) continue;
-		if (value.earlier !== undefined && !beat(value.earlier, ids, MAX_SUMMARY_TEXT * 3 + 2)) continue;
-		if (
-			!Array.isArray(value.chapters) ||
-			value.chapters.length > 2 ||
-			!value.chapters.every((item) => beat(item, ids, MAX_SUMMARY_TEXT))
-		)
-			continue;
 		if (
 			!Array.isArray(value.recent) ||
 			value.recent.length > 6 ||
@@ -469,19 +477,33 @@ export function restore(branch: unknown[]): Snapshot {
 			to: item.to,
 			recap: item.recap,
 			omitted: item.omitted,
-			bullets: item.bullets ? earlierBullets(item.bullets) : undefined,
+			level: Number.isInteger(item.level) && item.level! >= 1 && item.level! <= HISTORY_LEVELS ? item.level : undefined,
 			at: timestamp(item.at),
 			kind: eventKinds.includes(item.kind as EventKind) ? item.kind : undefined,
 		});
+		let history: Beat[];
+		if (value.version === 1) {
+			if (value.earlier !== undefined && !beat(value.earlier, ids, MAX_SUMMARY_TEXT * 3 + 2)) continue;
+			if (!Array.isArray(value.chapters) || value.chapters.length > 2 || !value.chapters.every(item => beat(item, ids, MAX_SUMMARY_TEXT))) continue;
+			const earlier = value.earlier as Beat | undefined;
+			history = [
+				...(earlier ? [{ ...copy(earlier), text: earlier.bullets?.map(text => clean(text, MAX_SUMMARY_TEXT)).join(" ") || copy(earlier).text, level: HISTORY_LEVELS }] : []),
+				...value.chapters.map(item => ({ ...copy(item as Beat), level: 1 })),
+			];
+		} else {
+			if (!Array.isArray(value.history) || value.history.length > HISTORY_LIMIT || !value.history.every(item =>
+				beat(item, ids, MAX_SUMMARY_TEXT * 3 + 2) && Number.isInteger(item.level) && item.level! >= 1 && item.level! <= HISTORY_LEVELS)) continue;
+			history = value.history.map(item => copy(item as Beat));
+			if (history.some((item, index) => index > 0 && item.level! > history[index - 1]!.level!)) continue;
+		}
 		return {
-			version: 1,
+			version: 2,
 			enabled: value.enabled,
 			model: value.model as ModelChoice,
 			lastId: value.lastId,
 			now: clean(value.now, 180),
 			focus: parseFocus(value.focus),
-			earlier: value.earlier ? copy(value.earlier as Beat) : undefined,
-			chapters: value.chapters.map((item) => copy(item as Beat)),
+			history,
 			recent: value.recent.map((item) => copy(item as Beat)),
 			usage,
 		};
@@ -530,20 +552,7 @@ const indices = (value: unknown): value is number[] =>
 // A safety bound on provider data, not a display-width or short-summary cut.
 const MAX_SUMMARY_TEXT = 4096;
 
-export function earlierBullets(value: unknown): string[] {
-	const parts =
-		typeof value === "string"
-			? value.split(/\n+|(?<=[.!?])\s+(?=[A-Z])/u)
-			: Array.isArray(value)
-				? value
-				: [];
-	return parts
-		.filter((text): text is string => typeof text === "string" && !!text.trim())
-		.slice(0, 3)
-		.map((text) => clean(text.replace(/^\s*[-•*]\s*/, ""), MAX_SUMMARY_TEXT));
-}
 export interface Summary {
-	earlierBullets?: string[];
 	focus?: FocusTopic[];
 	dropRecent?: number[];
 	kind?: EventKind;
@@ -551,8 +560,8 @@ export interface Summary {
 	beat: string;
 	tone: Tone;
 	now: string;
-	chapter: string;
-	earlier: string;
+	folded: string;
+	compact: string;
 }
 export function parseSummary(
 	text: string,
@@ -570,9 +579,8 @@ export function parseSummary(
 		!record(value) ||
 		typeof value.beat !== "string" ||
 		value.beat.length > MAX_SUMMARY_TEXT ||
-		(typeof value.chapter === "string" && value.chapter.length > MAX_SUMMARY_TEXT) ||
-		(typeof value.earlier === "string" && value.earlier.length > MAX_SUMMARY_TEXT) ||
-		(Array.isArray(value.earlier) && value.earlier.some(text => typeof text === "string" && text.length > MAX_SUMMARY_TEXT)) ||
+		(typeof value.folded === "string" && value.folded.length > MAX_SUMMARY_TEXT) ||
+		(typeof value.compact === "string" && value.compact.length > MAX_SUMMARY_TEXT) ||
 		((typeof value.now !== "string" || !value.now.trim()) && !focus) ||
 		!tones.includes(value.tone as Tone) ||
 		(value.dropRecent != null && !indices(value.dropRecent)) ||
@@ -585,12 +593,12 @@ export function parseSummary(
 			value.replaceRecent == null &&
 			!(Array.isArray(value.dropRecent) && value.dropRecent.length) &&
 			value.beat.trim() &&
-			(typeof value.chapter !== "string" || !value.chapter.trim())) ||
+			(typeof value.folded !== "string" || !clean(value.folded, MAX_SUMMARY_TEXT))) ||
 		(compact &&
 			value.replaceRecent == null &&
 			!(Array.isArray(value.dropRecent) && value.dropRecent.length) &&
 			value.beat.trim() &&
-			!earlierBullets(value.earlier).length)
+			(typeof value.compact !== "string" || !clean(value.compact, MAX_SUMMARY_TEXT)))
 	)
 		throw new Error("Invalid minimap summary");
 	return {
@@ -607,9 +615,8 @@ export function parseSummary(
 				? clean(value.now, 180)
 				: focus!.map((topic) => topic.topic).join("; "),
 		focus,
-		chapter: typeof value.chapter === "string" ? clean(value.chapter, MAX_SUMMARY_TEXT) : "",
-		earlier: earlierBullets(value.earlier).join(" "),
-		earlierBullets: earlierBullets(value.earlier),
+		folded: typeof value.folded === "string" ? clean(value.folded, MAX_SUMMARY_TEXT) : "",
+		compact: typeof value.compact === "string" ? clean(value.compact, MAX_SUMMARY_TEXT) : "",
 	};
 }
 
@@ -618,7 +625,6 @@ export function applySummary(
 	batch: Batch,
 	summary: Summary,
 	recap: boolean,
-	rewriteEarlier = false,
 ): void {
 	const drops = new Set(summary.dropRecent ?? []);
 	if (
@@ -658,34 +664,22 @@ export function applySummary(
 	});
 	state.now = summary.now;
 	state.focus = summary.focus;
-	if (rewriteEarlier && state.earlier && summary.earlierBullets?.length)
-		state.earlier = {
-			...state.earlier,
-			text: summary.earlier,
-			bullets: summary.earlierBullets,
-		};
 	state.lastId = batch.to;
 	if (!summary.beat || previous) return;
-	if (state.recent.length >= 6) {
-		if (state.chapters.length >= 2) {
-			state.earlier = {
-				text: summary.earlier,
-				bullets: summary.earlierBullets,
-				at: state.chapters.at(-1)!.at,
-				tone: "neutral",
-				from: state.earlier?.from ?? state.chapters[0]!.from,
-				to: state.chapters.at(-1)!.to,
-			};
-			state.chapters = [];
-		}
-		const folded = state.recent.splice(0, 3);
-		state.chapters.push({
-			text: summary.chapter,
-			at: folded.at(-1)!.at,
-			tone: "neutral",
-			from: folded[0]!.from,
-			to: folded.at(-1)!.to,
+	if (state.recent.length >= RECENT_LIMIT) {
+		const merge = (items: Beat[], text: string, level: number): Beat => ({
+			text, level, tone: "neutral", from: items[0]!.from, to: items.at(-1)!.to,
+			at: items.at(-1)!.at,
+			recap: items.some(item => item.recap) || undefined,
+			omitted: items.reduce((sum, item) => sum + (item.omitted ?? 0), 0) || undefined,
 		});
+		const compact = historyCompaction(state.history);
+		if (compact) {
+			const selected = new Set(compact.indices);
+			const combined = merge(compact.indices.map(index => state.history[index]!), summary.compact, compact.level);
+			state.history = state.history.flatMap((item, index) => index === compact.indices[0] ? [combined] : selected.has(index) ? [] : [item]);
+		}
+		state.history.push(merge(state.recent.splice(0, FOLD_SIZE), summary.folded, 1));
 	}
 	state.recent.push({
 		text: summary.beat,

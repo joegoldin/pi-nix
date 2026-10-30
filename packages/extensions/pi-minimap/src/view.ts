@@ -11,7 +11,6 @@ import {
 } from "@earendil-works/pi-tui";
 import type { MinimapEngine } from "./engine.ts";
 import {
-	earlierBullets,
 	type Beat,
 	type EventKind,
 	type Snapshot,
@@ -118,9 +117,8 @@ class Log implements Component {
 		const contentWidth = Math.max(1, width - 1);
 		const state = this.engine.state;
 		const rows: Row[] = [];
-		const section = (label: string, beats: Beat[], older = false) => {
+		const append = (beats: Beat[], older = false) => {
 			if (!beats.length) return;
-			rows.push({ text: this.theme.fg("muted", label) });
 			for (const beat of beats) {
 				const kind = kinds[beat.kind ?? "note"];
 				const slot =
@@ -165,21 +163,8 @@ class Log implements Component {
 				rows.push({ text: "" });
 			}
 		};
-		section(
-			"EARLIER",
-			state.earlier
-				? earlierBullets(state.earlier.bullets ?? state.earlier.text).map(
-						(text, index) => ({
-							...state.earlier!,
-							text,
-							at: index === 0 ? state.earlier!.at : undefined,
-						}),
-					)
-				: [],
-			true,
-		);
-		section("MILESTONES", state.chapters, true);
-		section("RECENT", state.recent);
+		append(state.history, true);
+		append(state.recent);
 		if (!rows.length)
 			rows.push({ text: this.theme.fg("muted", "No summary yet.") });
 		this.rows = rows;

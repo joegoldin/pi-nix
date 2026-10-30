@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, spyOn } from "bun:test";
 import { BlockPrompt } from "./block-prompt-state.ts";
 import { BlockPromptView } from "./block-prompt.ts";
 import { callLabel, canonicalJson, shortReason } from "./call-label.ts";
@@ -70,6 +70,34 @@ describe("the ask before a block", () => {
 		expect(p.result).toBe("timeout");
 	});
 
+	for (const [name, key, cursor] of [["down", "\x1b[B", 1], ["up", "\x1b[A", 1], ["tab", "\t", 0], ["unbound key", "x", 0], ["paste", "\x1b[200~Y\x1b[201~", 0]] as const) {
+		it(`removes and stops the countdown on ${name}, without answering`, () => {
+			const c = clock();
+			const p = new BlockPrompt(30_000, c.now);
+			const view = new BlockPromptView(p, { toolName: "bash", input: {}, reason: "Review this", timeoutSeconds: 30 }, plain);
+			expect(view.render(80).join("\n")).toContain("No answer in 30s");
+			view.handleInput(key);
+			expect(view.render(80).join("\n")).not.toContain("No answer in");
+			expect(view.render(80).join("\n")).not.toContain("Timer stopped");
+			expect(p.cursor).toBe(cursor);
+			c.advance(60_000);
+			p.tick();
+			expect(p.result).toBeUndefined();
+			view.handleInput("\r");
+			expect(p.result).toBe(cursor === 1 ? "deny" : "allow");
+		});
+	}
+
+	it("does not mistake terminal focus reports for keyboard interaction", () => {
+		const c = clock();
+		const p = new BlockPrompt(30_000, c.now);
+		const view = new BlockPromptView(p, { toolName: "bash", input: {}, reason: "Review this", timeoutSeconds: 30 }, plain);
+		view.handleInput("\x1b[I");
+		c.advance(30_000);
+		p.tick();
+		expect(p.result).toBe("timeout");
+	});
+
 	it("pauses the deadline when the user requests an explanation", () => {
 		const c = clock();
 		const p = new BlockPrompt(30_000, c.now);
@@ -96,7 +124,7 @@ describe("the ask before a block", () => {
 		p.tick();
 		view.handleInput("e");
 		expect(p.result).toBeUndefined();
-		expect(view.render(80).join("\n")).toContain("Timer stopped");
+		expect(view.render(80).join("\n")).not.toContain("No answer in");
 		view.handleInput("Y");
 		expect(p.result).toBe("allow");
 	});
@@ -110,7 +138,7 @@ describe("the ask before a block", () => {
 		expect(view.render(60)).not.toEqual(first);
 		view.handleInput("\x1b");
 		expect(p.result).toBeUndefined();
-		expect(view.render(60).join("\n")).toContain("Timer stopped");
+		expect(view.render(60).join("\n")).not.toContain("No answer in");
 	});
 
 	it("names the call, gives the reason, and counts down", () => {
@@ -188,3 +216,51 @@ it("engine policy prompts also publish permission status and clear it on failure
 	await expect(presentInlinePermissionPrompt({ ui } as never, "Private approval", {} as never)).rejects.toThrow("dialog failed");
 	expect(reports.at(-1)).toBeUndefined(); expect(reports).toHaveLength(2);
 });
+
+for (const finish of ["enter", "abort", "timeout"] as const) {
+	it(`settles the live timed prompt correctly after ${finish}`, async () => {
+		const { askBeforeBlock } = await import("./block-prompt.ts");
+		const controller = new AbortController();
+		const reports: any[] = [];
+		let component: any;
+		let tick = () => {};
+		const timer = {};
+		const now = spyOn(Date, "now").mockReturnValue(0);
+		const interval = spyOn(globalThis, "setInterval").mockImplementation((callback: any) => { tick = callback; return timer as never; });
+		const clear = spyOn(globalThis, "clearInterval").mockImplementation(() => {});
+		const ctx = { signal: controller.signal, ui: {
+			setProgramStatus: (_key: string, status: unknown) => reports.push(status),
+			custom: (factory: Function) => new Promise(resolve => {
+				component = factory({ requestRender() {} }, plain, {}, resolve);
+			}),
+		} };
+		let settled = false;
+		const answer = askBeforeBlock(ctx as never, { toolName: "bash", input: {}, reason: "Review this", timeoutSeconds: 30 });
+		void answer.then(() => { settled = true; });
+		try {
+			if (finish !== "timeout") {
+				component.handleInput("\x1b[B");
+				expect(clear).toHaveBeenCalledWith(timer);
+				expect(component.render(80).join("\n")).not.toContain("No answer in");
+			}
+			now.mockReturnValue(60_000);
+			tick(); // Even a tick already dispatched before clearInterval cannot time out an active review.
+			if (finish !== "timeout") {
+				await Promise.resolve();
+				expect(settled).toBe(false);
+				expect(reports.at(-1)?.state).toBe("blocked");
+				if (finish === "enter") component.handleInput("\r");
+				else controller.abort();
+			}
+			expect(await answer).toBe(finish === "timeout" ? "timeout" : "deny");
+			expect(reports.at(-1)).toBeUndefined();
+		} finally {
+			controller.abort();
+			component?.dispose();
+			await answer.catch(() => {});
+			clear.mockRestore();
+			interval.mockRestore();
+			now.mockRestore();
+		}
+	});
+}

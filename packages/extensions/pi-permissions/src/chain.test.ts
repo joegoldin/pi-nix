@@ -690,15 +690,16 @@ test("a classifier block asks first, and the answer decides", async () => {
     const pending = h.service.links.get("pi-automode")({ ...details, toolCallId }, {}, log);
     // The dialog mounts once the classifier has answered.
     while (term.mounted.length === 0) await new Promise((r) => setTimeout(r, 5));
+    const initialPrompt = term.mounted[0].render(80).join("\n");
     if (answer) term.press(answer);
-    return { h, term, verdict: await pending };
+    return { h, term, initialPrompt, verdict: await pending };
   };
 
   const allowed = await run("Y", "ask-allow");
   expect(allowed.verdict).toEqual({ kind: "allow" });
-  const shown = allowed.term.mounted[0].render(80).join("\n");
-  expect(shown).toContain("Writes a secret.");
-  expect(shown).toContain("No answer in 1s keeps the block");
+  expect(allowed.initialPrompt).toContain("Writes a secret.");
+  expect(allowed.initialPrompt).toContain("No answer in 1s keeps the block");
+  expect(allowed.term.mounted[0].render(80).join("\n")).not.toContain("No answer in");
   expect(allowed.h.emitted.map((e) => e.channel)).toEqual(["permissions:ui_prompt", "permissions:decision"]);
   expect(allowed.h.emitted[0].requestId).toBe(allowed.h.emitted[1].requestId);
   // A second request for the same call does not ask again.
@@ -964,3 +965,25 @@ test("bookkeeping shortcuts retain explicit wrapper and nested-tool denials", as
     expect(h.classifierCalls()).toBe(0);
   }
 });
+  test("Bash parse failures stay blocked without claiming an unrelated secret-path match", async () => {
+    const h = await realHost(() => ({ permissionDeny: [parseToolPattern("bash(*/run/agenix/*)")] }));
+    const result = await h.emit("tool_call", {
+      ...event, input: { command: "echo 'unterminated" },
+    });
+    expect(result?.block).toBe(true);
+    expect(result.reason).toContain("Bash analysis failed");
+    expect(result.reason).not.toContain("Blocked by permissions.deny:");
+    expect(result.reason).not.toContain("/run/agenix/");
+    expect(h.classifierCalls()).toBe(0);
+    expect(h.state().blockedActions).toBe(1);
+  });
+
+  test("a concrete secret-path match still names the deny rule", async () => {
+    const h = await realHost(() => ({ permissionDeny: [parseToolPattern("bash(*/run/agenix/*)")] }));
+    const result = await h.emit("tool_call", {
+      ...event, input: { command: "cat /run/agenix/test-credential" },
+    });
+    expect(result?.block).toBe(true);
+    expect(result.reason).toContain("Blocked by permissions.deny: bash(*/run/agenix/*)");
+    expect(h.classifierCalls()).toBe(0);
+  });

@@ -20,7 +20,7 @@ the current session branch.
 - Click the model button to switch between Cerebras Qwen and OpenAI Luna with low
   reasoning. Existing summaries and usage totals survive the switch.
 - Click a summary to scroll the main conversation to its source without moving
-  editor focus. The destination is highlighted once for about 1.4 seconds. Milestones and recaps link to the beginning of their source span.
+  editor focus. The destination is highlighted once for about 1.4 seconds. Compressed groups and recaps link to the beginning of their source span.
   A compacted-away source produces a notice rather than jumping elsewhere.
 - Wheel over the panel to scroll its history independently. “Now,” runtime status,
   and minimap-only token/cost totals stay pinned at the bottom. New summaries do
@@ -52,15 +52,24 @@ Target paths and task labels are retained; common credential forms are redacted
 before clipping. This text goes to the selected provider when the panel is open.
 Redaction is not a guarantee that arbitrary private text can safely be shared.
 
-The sidebar view is bounded to six recent entries, two milestones and up to three
-EARLIER bullets. Their complete text wraps in the scrollable history instead of
-being cut at 100 or 180 characters. Provider fields above the 4096-character safety
-limit are rejected; observer input still uses bounded excerpts, independently of
-the displayed text. Previously saved, already-cut summaries cannot recover their
-missing text merely by reloading. Empty model beats do not produce tool-call spam. Entries can be
-revised rather than appended; exact repeats are merged. Source IDs link back to the
-original transcript. Branch-local snapshots use Pi's append-only custom-entry
-persistence; they are not model-context messages.
+The sidebar is one chronological, scrollable history, without Earlier or
+Milestones sections. It retains up to six recent entries and 24 compressed older
+entries. Groups of three become progressively coarser with age, across four
+levels. At the oldest level, groups merge in place rather than dropping the start
+of the conversation. Source ranges survive every merge, so older summaries still
+jump to their original transcript. Scrolling back does not request new inference.
+
+Compression uses at most one older group alongside the recent fold in the existing
+observer request; the interval and 600-token output budget are unchanged. Only that
+group's bounded excerpts enter the request, not the whole retained history.
+Complete displayed text wraps and scrolls rather than being cut at 100 or 180
+characters. Provider fields above the 4096-character safety limit are rejected.
+Old snapshots migrate their complete opening and milestone text into this log;
+already-truncated text cannot be recovered by reloading.
+
+Empty model beats do not produce tool-call spam. Recent entries can be revised
+rather than appended; exact repeats are merged. Branch-local snapshots use Pi's
+append-only custom-entry persistence; they are not model-context messages.
 
 The bottom usage display counts only minimap calls, across model and branch switches
 within the same session. A fork inherits history, not its parent's spend ledger. Input

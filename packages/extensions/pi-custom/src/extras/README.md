@@ -13,7 +13,9 @@ There is no footer here; the status line belongs to another extension.
 | ctrl+g l | Open the stash list (restore, copy, delete, clear) |
 | ctrl+g c / x | Copy or cut the prompt to the system clipboard |
 | alt+i | Insert a literal tab |
-| Ctrl+Enter (with messages queued) | Interrupt and send the queued messages once the run settles; your draft stays in the editor. Auto mode treats it as an interruption, not a refusal. Escape remains abort-only and cancels a pending send-now request. With queued guidance, either shortcut keeps `/goal` active; Escape restores the queue to the editor without sending it |
+| Ctrl+Enter (with messages queued) | Finish the current operation, then send queued messages without interrupting the run or goal. The draft stays in the editor |
+| Ctrl+Shift+Enter (with messages queued) | Abort the current operation, then send queued messages and continue the goal. The draft stays in the editor |
+| Escape | Cancel a pending send request. With queued guidance, restore it to the editor and keep the goal active; otherwise interrupt normally |
 | ctrl+? | Show these keys |
 
 While a ctrl+g chord is half-typed, a hint above the editor names the second
@@ -53,9 +55,13 @@ keys.
 | `title.ts` | The working tab title |
 | `steer.ts` | Preserve the goal when Escape restores queued guidance; native Pi owns queue display and send-now |
 
-Ctrl+Enter interrupts and sends already queued messages through Pi's native
-queue controls, preserving attachments and the unsubmitted editor draft.
-The native hint beside Alt+Up advertises it; there is no second extension
-queue widget. Alt+Enter retains its normal follow-up behavior. Send-now is
-unavailable during compaction. Escape cancels a pending send-now request and
-keeps its normal restore-to-editor behavior.
+Ctrl+Enter promotes already queued input to the next safe turn boundary, after
+running tools finish. Ctrl+Shift+Enter aborts first, waits for the run to settle,
+and starts the queued input. Neither shortcut submits the editor draft or drops
+image attachments. The interrupted run cannot consume unsent messages, including
+input selected just before turn preparation. Cancellation does not pause the goal;
+genuine provider failures still do.
+
+The native hint beside Alt+Up advertises both shortcuts; there is no second
+extension queue widget. Alt+Enter retains its normal follow-up behavior. Escape
+cancels a pending send request and keeps its normal restore-to-editor behavior.

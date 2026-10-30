@@ -5,7 +5,7 @@
 
 import { beginPermissionStatus } from "./program-status.ts";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { matchesKey, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { matchesKey, parseKey, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { callLabel } from "./call-label.ts";
 import { type BlockAnswer, BlockPrompt } from "./block-prompt-state.ts";
 import { Framed, type FrameTheme } from "./frame.ts";
@@ -62,9 +62,11 @@ export class BlockPromptView {
 				lines.push(...wrapTextWithAnsi(`    ${ask.futureScope}`, Math.max(1, width)).map(line => theme.fg("dim", line)));
 		});
 		lines.push("");
-		const left = prompt.secondsLeft();
-		lines.push(theme.fg(!prompt.explaining && left < URGENT_SECONDS ? "warning" : "dim", prompt.explaining ? "Timer stopped — waiting for your decision" : `No answer in ${left}s keeps the block`));
-		lines.push(theme.fg("dim", `${ask.scope ? "y allow scope · " : ""}${ask.futureScope ? "f allow future · " : ""}${ask.scopeOnly ? "" : "Y allow once · "}n or Esc deny · e explain/stop timer`));
+		if (!prompt.timerStopped) {
+			const left = prompt.secondsLeft();
+			lines.push(theme.fg(left < URGENT_SECONDS ? "warning" : "dim", `No answer in ${left}s keeps the block`));
+		}
+		lines.push(theme.fg("dim", `${ask.scope ? "y allow scope · " : ""}${ask.futureScope ? "f allow future · " : ""}${ask.scopeOnly ? "" : "Y allow once · "}n or Esc deny · e explain`));
 		return lines;
 	}
 
@@ -85,7 +87,7 @@ export class BlockPromptView {
 		this.top = Math.min(this.top, this.maxTop);
 		return [
 			theme.bold(`Explain: ${ask.toolName}`),
-			theme.fg("dim", "Timer stopped — no command runs until you approve"),
+			theme.fg("dim", "No command runs until you approve"),
 			...rows.slice(this.top, this.top + available),
 			theme.fg("dim", `↑/↓ scroll · e or Esc back · ${this.top + 1}–${Math.min(rows.length, this.top + available)}/${rows.length}`),
 		];
@@ -93,6 +95,8 @@ export class BlockPromptView {
 
 	handleInput(data: string): void {
 		const { prompt } = this;
+		// Focus reports and protocol responses are not a person using the prompt.
+		if ((data.length > 0 && !data.startsWith("\x1b")) || parseKey(data) !== undefined || data.startsWith("\x1b[200~")) prompt.stopTimer();
 		if (this.expanded) {
 			if (matchesKey(data, "escape") || data === "e") this.expanded = false;
 			else if (matchesKey(data, "up") || data === "k") this.top = Math.max(0, this.top - 1);
@@ -152,6 +156,7 @@ export async function askBeforeBlock(ctx: ExtensionContext, ask: BlockAsk): Prom
 				invalidate: () => view.invalidate(),
 				handleInput: (data: string) => {
 					view.handleInput(data);
+					if (prompt.timerStopped) clearInterval(timer);
 					tui.requestRender();
 					settle();
 				},

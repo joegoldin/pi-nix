@@ -1,42 +1,191 @@
+diff --git a/packages/agent/src/agent.ts b/packages/agent/src/agent.ts
+index c0a482d3..5f5e1ff2 100644
 --- a/packages/agent/src/agent.ts
 +++ b/packages/agent/src/agent.ts
-@@ -166,6 +166,15 @@
- 		const drained = this.peek();
- 		this.messages = this.messages.slice(drained.length);
- 		return drained;
+@@ -148,6 +148,7 @@ export interface AgentOptions {
+ 
+ class PendingMessageQueue {
+ 	private messages: AgentMessage[] = [];
++	private batchSize = 0;
+ 	public mode: QueueMode;
+ 
+ 	constructor(mode: QueueMode) {
+@@ -162,7 +163,13 @@ class PendingMessageQueue {
+ 		return this.messages.length > 0;
+ 	}
+ 
++	prependBatch(messages: AgentMessage[]): void {
++		this.messages.unshift(...messages);
++		this.batchSize += messages.length;
 +	}
 +
+ 	peek(): AgentMessage[] {
++		if (this.batchSize > 0) return this.messages.slice(0, this.batchSize);
+ 		if (this.mode === "all") return this.messages.slice();
+ 		const first = this.messages[0];
+ 		return first ? [first] : [];
+@@ -171,11 +178,25 @@ class PendingMessageQueue {
+ 	drain(): AgentMessage[] {
+ 		const drained = this.peek();
+ 		this.messages = this.messages.slice(drained.length);
++		this.batchSize = Math.max(0, this.batchSize - drained.length);
+ 		return drained;
+ 	}
+ 
 +	all(): AgentMessage[] {
 +		return this.messages.slice();
 +	}
 +
 +	remove(message: AgentMessage): void {
 +		const index = this.messages.indexOf(message);
-+		if (index !== -1) this.messages.splice(index, 1);
- 	}
- 
- 	clear(): void {
-@@ -324,6 +333,17 @@
- 	/** Returns true when either queue still contains pending messages. */
- 	hasQueuedMessages(): boolean {
- 		return this.steeringQueue.hasItems() || this.followUpQueue.hasItems();
++		if (index !== -1) {
++			this.messages.splice(index, 1);
++			if (index < this.batchSize) this.batchSize--;
++		}
 +	}
 +
+ 	clear(): void {
+ 		this.messages = [];
++		this.batchSize = 0;
+ 	}
+ }
+ 
+@@ -196,6 +217,7 @@ export class Agent {
+ 	private readonly listeners = new Set<(event: AgentEvent, signal: AbortSignal) => Promise<void> | void>();
+ 	private readonly steeringQueue: PendingMessageQueue;
+ 	private readonly followUpQueue: PendingMessageQueue;
++	private readonly pendingQueueDeliveries = new Map<AgentMessage, PendingMessageQueue | undefined>();
+ 
+ 	public convertToLlm: (messages: AgentMessage[]) => Message[] | Promise<Message[]>;
+ 	public transformContext?: (messages: AgentMessage[], signal?: AbortSignal) => Promise<AgentMessage[]>;
+@@ -316,12 +338,12 @@ export class Agent {
+ 
+ 	/** Remove all queued steering messages. */
+ 	clearSteeringQueue(): void {
+-		this.steeringQueue.clear();
++		this.clearPendingQueue(this.steeringQueue);
+ 	}
+ 
+ 	/** Remove all queued follow-up messages. */
+ 	clearFollowUpQueue(): void {
+-		this.followUpQueue.clear();
++		this.clearPendingQueue(this.followUpQueue);
+ 	}
+ 
+ 	/** Remove all queued steering and follow-up messages. */
+@@ -335,6 +357,25 @@ export class Agent {
+ 		return this.steeringQueue.hasItems() || this.followUpQueue.hasItems();
+ 	}
+ 
 +	/** Snapshot all pending content, including image attachments, in delivery order. */
 +	getQueuedMessages(): AgentMessage[] {
 +		return [...this.steeringQueue.all(), ...this.followUpQueue.all()];
++	}
++
++	/** Deliver captured user input together at the next turn boundary, without cancelling work. */
++	prioritizeQueuedUserMessages(): void {
++		const messages = this.getQueuedMessages().filter((message) => message.role === "user");
++		for (const message of messages) this.removeQueuedMessage(message);
++		// A one-shot batch preserves the configured queue mode for later arrivals.
++		this.steeringQueue.prependBatch(messages);
 +	}
 +
 +	/** Remove an exact queued message once a replacement run has prepared it. */
 +	removeQueuedMessage(message: AgentMessage): void {
 +		this.steeringQueue.remove(message);
 +		this.followUpQueue.remove(message);
++	}
++
+ 	/** Preview the messages selected for the next turn without consuming them. */
+ 	peekQueuedMessages(): AgentMessage[] {
+ 		const steering = this.steeringQueue.peek();
+@@ -401,13 +442,13 @@ export class Agent {
+ 		}
+ 
+ 		if (lastMessage.role === "assistant") {
+-			const queuedSteering = this.steeringQueue.drain();
++			const queuedSteering = this.drainPendingQueue(this.steeringQueue);
+ 			if (queuedSteering.length > 0) {
+ 				await this.runPromptMessages(queuedSteering, { skipInitialSteeringPoll: true });
+ 				return;
+ 			}
+ 
+-			const queuedFollowUps = this.followUpQueue.drain();
++			const queuedFollowUps = this.drainPendingQueue(this.followUpQueue);
+ 			if (queuedFollowUps.length > 0) {
+ 				await this.runPromptMessages(queuedFollowUps);
+ 				return;
+@@ -473,6 +514,22 @@ export class Agent {
+ 		};
  	}
  
- 	/** Preview the messages selected for the next turn without consuming them. */
++	private clearPendingQueue(queue: PendingMessageQueue): void {
++		queue.clear();
++		for (const [message, owner] of this.pendingQueueDeliveries) {
++			// Retain the cancellation marker, but revoke restoration to this queue.
++			if (owner === queue) this.pendingQueueDeliveries.set(message, undefined);
++		}
++	}
++
++	private drainPendingQueue(queue: PendingMessageQueue): AgentMessage[] {
++		const messages = queue.drain();
++		// Selection precedes asynchronous turn preparation. Retain ownership until
++		// message_start so an abort there cannot silently consume unsent input.
++		for (const message of messages) this.pendingQueueDeliveries.set(message, queue);
++		return messages;
++	}
++
+ 	private createLoopConfig(options: { skipInitialSteeringPoll?: boolean } = {}): AgentLoopConfig {
+ 		let skipInitialSteeringPoll = options.skipInitialSteeringPoll === true;
+ 		return {
+@@ -504,13 +561,15 @@ export class Agent {
+ 			transformContext: this.transformContext,
+ 			getApiKey: this.getApiKey,
+ 			getSteeringMessages: async () => {
++				// A settling tool can leave one more poll after abort. Keep input for the replacement run.
++				if (this.signal?.aborted) return [];
+ 				if (skipInitialSteeringPoll) {
+ 					skipInitialSteeringPoll = false;
+ 					return [];
+ 				}
+-				return this.steeringQueue.drain();
++				return this.drainPendingQueue(this.steeringQueue);
+ 			},
+-			getFollowUpMessages: async () => this.followUpQueue.drain(),
++			getFollowUpMessages: async () => this.signal?.aborted ? [] : this.drainPendingQueue(this.followUpQueue),
+ 		};
+ 	}
+ 
+@@ -558,6 +617,13 @@ export class Agent {
+ 	}
+ 
+ 	private finishRun(): void {
++		for (const queue of [this.steeringQueue, this.followUpQueue]) {
++			const undelivered = [...this.pendingQueueDeliveries]
++				.filter(([, owner]) => owner === queue)
++				.map(([message]) => message);
++			queue.prependBatch(undelivered);
++		}
++		this.pendingQueueDeliveries.clear();
+ 		this._state.isStreaming = false;
+ 		this._state.streamingMessage = undefined;
+ 		this._state.pendingToolCalls = new Set<string>();
+@@ -575,6 +641,10 @@ export class Agent {
+ 	private async processEvents(event: AgentEvent): Promise<void> {
+ 		switch (event.type) {
+ 			case "message_start":
++				if (this.signal?.aborted && this.pendingQueueDeliveries.has(event.message)) {
++					throw new Error("Input delivery aborted");
++				}
++				this.pendingQueueDeliveries.delete(event.message);
+ 				this._state.streamingMessage = event.message;
+ 				break;
+ 
+diff --git a/packages/coding-agent/src/core/agent-session.ts b/packages/coding-agent/src/core/agent-session.ts
+index 3a9174cf..c7a21dd4 100644
 --- a/packages/coding-agent/src/core/agent-session.ts
 +++ b/packages/coding-agent/src/core/agent-session.ts
-@@ -392,6 +392,7 @@
+@@ -393,6 +393,7 @@ export class AgentSession {
  
  	/** Tracks pending steering messages for UI display. Removed when delivered. */
  	private _steeringMessages: string[] = [];
@@ -44,7 +193,7 @@
  	/** Tracks pending follow-up messages for UI display. Removed when delivered. */
  	private _followUpMessages: string[] = [];
  	/** Messages queued to be included with the next user prompt as context ("asides"). */
-@@ -1122,7 +1123,7 @@
+@@ -1122,7 +1123,7 @@ export class AgentSession {
  		if (event.type === "message_start" && event.message.role === "user") {
  			this._overflowRecoveryAttempted = false;
  			const messageText = contentText(event.message.content, "");
@@ -53,7 +202,7 @@
  				// Check steering queue first
  				const steeringIndex = this._steeringMessages.indexOf(messageText);
  				if (steeringIndex !== -1) {
-@@ -1829,12 +1830,16 @@
+@@ -1870,12 +1871,16 @@ export class AgentSession {
  	 * starting another, and an abort requested meanwhile aborts the run as soon as it exists.
  	 * @param onStarted Called once the run's messages are prepared, before the first request.
  	 */
@@ -71,7 +220,7 @@
  		} catch (error) {
  			this._isAgentRunActive = false;
  			this._flushPendingBashMessages();
-@@ -1846,7 +1851,7 @@
+@@ -1887,7 +1892,7 @@ export class AgentSession {
  		// have while idle. No run exists yet, so they cannot split a tool call from its result.
  		this._flushPendingBashMessages();
  		this._flushPendingCustomMessages();
@@ -80,15 +229,19 @@
  
  		// Compaction before the prompt may have scheduled a retry; the new prompt replaces it.
  		this._failedResponse = undefined;
-@@ -2432,6 +2437,31 @@
- 		this.agent.clearAllQueues();
- 		this._emitQueueUpdate();
+@@ -2473,6 +2478,37 @@ export class AgentSession {
  		return { steering, followUp };
-+	}
-+
-+	/** Start from already-processed queued input, without round-tripping through the editor. */
+ 	}
+ 
++	/** Deliver processed queued input at the next safe boundary, or start it when idle. */
 +	async sendQueuedMessagesNow(): Promise<void> {
-+		if (!this.isIdle) return;
++		if (!this.isIdle) {
++			this.agent.prioritizeQueuedUserMessages();
++			this._steeringMessages.push(...this._followUpMessages);
++			this._followUpMessages = [];
++			this._emitQueueUpdate();
++			return;
++		}
 +		const queued = this.agent.getQueuedMessages().filter((message) => message.role === "user");
 +		const first = queued[0];
 +		if (!first || first.role !== "user") return;
@@ -109,33 +262,44 @@
 +			for (const message of messages) if (message.role === "user") this._submittedQueueMessages.add(message);
 +			this._emitQueueUpdate();
 +		}, queued.slice(1));
- 	}
- 
++	}
++
  	/** Number of pending messages (includes both steering and follow-up) */
+ 	get pendingMessageCount(): number {
+ 		return this._steeringMessages.length + this._followUpMessages.length;
+diff --git a/packages/coding-agent/src/core/keybindings.ts b/packages/coding-agent/src/core/keybindings.ts
+index 75e540b3..92e3fbcc 100644
 --- a/packages/coding-agent/src/core/keybindings.ts
 +++ b/packages/coding-agent/src/core/keybindings.ts
-@@ -67,6 +67,10 @@
- 	"app.message.followUp": {
+@@ -68,6 +68,14 @@ const APP_KEYBINDINGS = {
  		defaultKeys: windowsKeybindings ? "ctrl+q" : "alt+enter",
  		description: "Queue follow-up message",
-+	},
+ 	},
 +	"app.message.sendNow": {
 +		defaultKeys: "ctrl+enter",
-+		description: "Interrupt and send queued messages now (without submitting the draft)",
- 	},
++		description: "Send queued messages after the current operation",
++	},
++	"app.message.interruptAndSend": {
++		defaultKeys: "ctrl+shift+enter",
++		description: "Interrupt and send queued messages",
++	},
  	"app.message.dequeue": {
  		defaultKeys: windowsKeybindings ? "alt+q" : "alt+up",
+ 		description: "Restore queued messages",
+diff --git a/packages/coding-agent/src/modes/interactive/interactive-mode.ts b/packages/coding-agent/src/modes/interactive/interactive-mode.ts
+index e4e2ffb1..fc847b4f 100644
 --- a/packages/coding-agent/src/modes/interactive/interactive-mode.ts
 +++ b/packages/coding-agent/src/modes/interactive/interactive-mode.ts
-@@ -1042,6 +1042,7 @@
+@@ -1044,6 +1044,8 @@ export class InteractiveMode {
  					rawKeyHint("!", "to run bash"),
  					rawKeyHint("!!", "to run bash (no context)"),
  					hint("app.message.followUp", "to queue follow-up"),
-+					hint("app.message.sendNow", "to send queued messages now"),
++					hint("app.message.sendNow", "to send queued messages after the current operation"),
++					hint("app.message.interruptAndSend", "to interrupt and send queued messages"),
  					hint("app.message.dequeue", "to edit all queued messages"),
  					hint("app.clipboard.pasteImage", "to paste files on macOS, images, or text"),
  					rawKeyHint("drop files", "to attach"),
-@@ -3068,6 +3069,8 @@
+@@ -3025,6 +3027,8 @@ export class InteractiveMode {
  		// Set up handlers on defaultEditor - they use this.editor for text access
  		// so they work correctly regardless of which editor is active
  		this.defaultEditor.onEscape = () => {
@@ -144,34 +308,40 @@
  			if (this.session.isStreaming) {
  				this.restoreQueuedMessagesToEditor({ abort: true });
  			} else if (this.session.isBashRunning) {
-@@ -3114,6 +3117,7 @@
+@@ -3071,6 +3075,8 @@ export class InteractiveMode {
  			() => void this.handleCopyCommand({ flashConfirmation: true, preferSelection: true }),
  		);
  		this.defaultEditor.onAction("app.message.followUp", () => this.handleFollowUp());
 +		this.defaultEditor.onAction("app.message.sendNow", () => this.handleSendQueuedNow());
++		this.defaultEditor.onAction("app.message.interruptAndSend", () => this.handleSendQueuedNow(true));
  		this.defaultEditor.onAction("app.message.dequeue", () => this.handleDequeue());
  		this.defaultEditor.onAction("app.session.new", () => this.handleClearCommand());
  		this.defaultEditor.onAction("app.session.tree", () => this.showTreeSelector());
-@@ -4486,6 +4490,35 @@
+@@ -4443,6 +4449,40 @@ export class InteractiveMode {
  		}
  	}
  
 +	private sendNowPending = false;
 +	private sendNowGeneration = 0;
 +
-+	private async handleSendQueuedNow(): Promise<void> {
-+		if (this.sendNowPending || this.session.isCompacting || !this.session.pendingMessageCount) return;
++	private async handleSendQueuedNow(interrupt = false): Promise<void> {
++		if (this.sendNowPending || !this.session.pendingMessageCount) return;
 +		this.sendNowPending = true;
 +		const generation = ++this.sendNowGeneration;
 +		const steering = globalThis as Record<symbol, unknown>;
 +		const key = Symbol.for("pi-custom.steering");
 +		try {
-+			// /goal and permissions must distinguish steering from cancellation.
-+			steering[key] = true;
-+			try {
-+				await this.session.abort();
-+			} finally {
-+				steering[key] = false;
++			if (interrupt) {
++				// /goal must distinguish replacement guidance from stopping the task.
++				steering[key] = true;
++				try {
++					await this.session.abort();
++				} finally {
++					steering[key] = false;
++				}
++			} else if (this.session.isCompacting && !this.session.isStreaming) {
++				// Manual compaction has no agent loop to consume the promoted queue.
++				await this.session.waitForIdle();
 +			}
 +			if (!this.sendNowPending || generation !== this.sendNowGeneration) return;
 +			this.sendNowPending = false;
@@ -188,7 +358,7 @@
  	private async handleFollowUp(): Promise<void> {
  		const text = (this.editor.getExpandedText?.() ?? this.editor.getText()).trim();
  		if (!text) return;
-@@ -4740,15 +4773,16 @@
+@@ -4697,15 +4737,16 @@ export class InteractiveMode {
  		if (steeringMessages.length > 0 || followUpMessages.length > 0) {
  			this.pendingMessagesContainer.addChild(new Spacer(1));
  			for (const message of steeringMessages) {
@@ -203,16 +373,17 @@
  			}
  			const dequeueHint = this.getAppKeyDisplay("app.message.dequeue");
 -			const hintText = theme.fg("dim", `↳ ${dequeueHint} to edit all queued messages`);
-+			const sendHint = this.session.isCompacting ? "" : ` · ${this.getAppKeyDisplay("app.message.sendNow")} to send now`;
++			const sendHint = ` · ${this.getAppKeyDisplay("app.message.sendNow")} after current operation · ${this.getAppKeyDisplay("app.message.interruptAndSend")} interrupt + send`;
 +			const hintText = theme.fg("dim", `↳ ${dequeueHint} to edit all queued messages${sendHint}`);
  			this.pendingMessagesContainer.addChild(new TruncatedText(hintText, 1, 0));
  		}
  	}
-@@ -6906,6 +6940,7 @@
+@@ -6867,6 +6908,8 @@ export class InteractiveMode {
  | \`${copyMessage}\` | Copy selection or last assistant message |
  | \`${followUp}\` | Queue follow-up message |
  | \`${dequeue}\` | Restore queued messages |
-+| \`${this.getAppKeyDisplay("app.message.sendNow")}\` | Interrupt and send queued messages (preserve draft) |
++| \`${this.getAppKeyDisplay("app.message.sendNow")}\` | Send queued messages after current operation (preserve draft) |
++| \`${this.getAppKeyDisplay("app.message.interruptAndSend")}\` | Interrupt and send queued messages (preserve draft) |
  | \`${pasteImage}\` | Paste files on macOS, images, or text from clipboard |
  | \`/\` | Slash commands |
  | \`!\` | Run bash command |

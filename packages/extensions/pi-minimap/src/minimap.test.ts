@@ -2,6 +2,8 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { MinimapEngine, SYSTEM_PROMPT, type Completion } from "./engine.ts";
 import {
 	applySummary,
+	historyCompaction,
+	HISTORY_LIMIT,
 	emptySnapshot,
 	parseSummary,
 	readBatch,
@@ -17,8 +19,8 @@ const summary = (beat = "Checked the sidebar layout") =>
 		beat,
 		now: "Implementing the minimap",
 		tone: "success",
-		chapter: "Added and checked native layout hooks",
-		earlier: "Started with a source-linked sidebar and bounded history.",
+		folded: "Added and checked native layout hooks",
+		compact: "Started with a source-linked sidebar and bounded history.",
 	});
 const completion = (): Completion => ({
 	text: summary(),
@@ -200,7 +202,7 @@ describe("bounded observer", () => {
 });
 
 describe("bounded history and input", () => {
-	test("progressively folds recent beats into milestones and an opening paragraph", () => {
+	test("retains a larger continuous history instead of collapsing into an opening paragraph", () => {
 		const state = emptySnapshot();
 		for (let i = 0; i < 100; i++) {
 			const batch = { from: `e${i}`, to: `e${i}`, omitted: 0, events: [] };
@@ -210,16 +212,18 @@ describe("bounded history and input", () => {
 				parseSummary(
 					summary(`Completed distinct step ${i}`),
 					state.recent.length >= 6,
-					state.chapters.length >= 2,
+					!!historyCompaction(state.history),
 				),
 				false,
 			);
 			expect(state.recent.length).toBeLessThanOrEqual(6);
-			expect(state.chapters.length).toBeLessThanOrEqual(2);
 		}
-		expect(state.earlier?.from).toBe("e0");
+		expect(state).not.toHaveProperty("earlier");
+		expect(state.history.length).toBeGreaterThan(8);
+		expect(state.history[0]?.from).toBe("e0");
 		expect(state.recent.at(-1)?.to).toBe("e99");
-		expect(JSON.stringify(state).length).toBeLessThan(4000);
+		expect(state.history.length).toBeLessThanOrEqual(HISTORY_LIMIT);
+		expect(JSON.stringify(state).length).toBeLessThan(12000);
 	});
 	test("bounded missed-event input keeps the beginning and latest events and reports the gap", () => {
 		const branch = Array.from({ length: 1000 }, (_, i) => ({
@@ -524,7 +528,7 @@ test("revisions preserve source spans without forcing unrelated folding", () => 
 		true,
 	);
 	expect(state.recent).toHaveLength(6);
-	expect(state.chapters).toHaveLength(0);
+	expect(state.history).toHaveLength(0);
 	expect(state.recent[0]).toMatchObject({ from: "s0", to: "next", omitted: 3 });
 	expect(() =>
 		parseSummary(
@@ -676,14 +680,9 @@ test("routine input is smaller and does not resend archived history; folding use
 	const h = harness();
 	h.engine.setVisible(true);
 	await h.engine.refresh();
-	h.engine.state.earlier = {
-		text: "ARCHIVE_SENTINEL",
-		tone: "neutral",
-		from: "a",
-		to: "a",
-	};
-	h.engine.state.chapters = [
-		{ text: "CHAPTER_SENTINEL", tone: "neutral", from: "a", to: "a" },
+	h.engine.state.history = [
+		{ text: "ARCHIVE_SENTINEL", tone: "neutral", from: "a", to: "a", level: 4 },
+		{ text: "CHAPTER_SENTINEL", tone: "neutral", from: "a", to: "a", level: 1 },
 	];
 	h.batch(live);
 	await h.engine.refresh(false);
@@ -709,12 +708,9 @@ test("routine input is smaller and does not resend archived history; folding use
 		from: `x${i}`,
 		to: `x${i}`,
 	}));
-	h.engine.state.chapters.push({
-		text: "second chapter",
-		tone: "neutral",
-		from: "a",
-		to: "a",
-	});
+	h.engine.state.history.push(...Array.from({ length: 5 }, () => ({
+		text: "older entry", tone: "neutral" as const, from: "a", to: "a", level: 1,
+	})));
 	h.batch({
 		from: "final",
 		to: "final",
@@ -727,39 +723,17 @@ test("routine input is smaller and does not resend archived history; folding use
 	await h.engine.refresh(false);
 	const folded = JSON.parse(h.calls.at(-1)!.prompt);
 	expect(folded.fold).toEqual([0, 1, 2]);
-	expect(folded.compact.chapters).toHaveLength(2);
+	expect(folded.compact.entries).toHaveLength(3);
 	expect(h.calls.at(-1)!.prompt.match(/UNIQUE_STEP_0/g)).toHaveLength(1);
 });
 
-test("earlier history uses bounded bullets and can be rewritten on recap without folding recent entries", () => {
+test("recap leaves retained history alone when no group needs compression", () => {
 	const state = emptySnapshot();
-	state.earlier = {
-		text: "Old paragraph",
-		tone: "neutral",
-		from: "old",
-		to: "old",
-	};
-	const reply = parseSummary(
-		JSON.stringify({
-			beat: "",
-			tone: "neutral",
-			now: "Finish",
-			earlier: ["Kept the editor full width.", "Limited summary requests."],
-		}),
-		false,
-		false,
-	);
-	applySummary(
-		state,
-		{ from: "a", to: "a", omitted: 0, events: [] },
-		reply,
-		true,
-		true,
-	);
-	expect(state.earlier.bullets).toEqual([
-		"Kept the editor full width.",
-		"Limited summary requests.",
-	]);
+	state.history = [{ text: "Old context", tone: "neutral", from: "old", to: "old", level: 4 }];
+	const before = structuredClone(state.history);
+	const reply = parseSummary(JSON.stringify({ beat: "", tone: "neutral", now: "Finish", compact: "Unrequested rewrite" }), false, false);
+	applySummary(state, { from: "a", to: "a", omitted: 0, events: [] }, reply, true);
+	expect(state.history).toEqual(before);
 	expect(state.recent).toHaveLength(0);
 	const usage = { ...emptySnapshot().usage, requests: 1, cost: 0.1012 };
 	expect(usageRows(usage)[1]).toContain("$0.1012");
@@ -822,19 +796,17 @@ test("structured focus does not need a duplicate prose purpose field", () => {
 
 test("scrollable summary text survives parsing and session restoration without short cuts", () => {
 	const text = "Complete history with useful context. ".repeat(12) + "END_MARKER";
-	const parsed = parseSummary(JSON.stringify({ beat: text, chapter: text, earlier: [text], tone: "neutral", now: "Working" }), true, true);
+	const parsed = parseSummary(JSON.stringify({ beat: text, folded: text, compact: text, tone: "neutral", now: "Working" }), true, true);
 	expect(parsed.beat).toBe(text);
-	expect(parsed.chapter).toBe(text);
-	expect(parsed.earlierBullets).toEqual([text]);
+	expect(parsed.folded).toBe(text);
+	expect(parsed.compact).toBe(text);
 	const state = emptySnapshot();
 	const beat = { text, from: "a", to: "a", tone: "neutral" as const };
 	state.recent = [beat];
-	state.chapters = [beat];
-	state.earlier = { ...beat, bullets: [text] };
+	state.history = [{ ...beat, level: 1 }];
 	const restored = restore([{ id: "a" }, { type: "custom", customType: STATE_TYPE, data: state }]);
 	expect(restored.recent[0]?.text).toBe(text);
-	expect(restored.chapters[0]?.text).toBe(text);
-	expect(restored.earlier?.bullets).toEqual([text]);
+	expect(restored.history[0]?.text).toBe(text);
 });
 
 test("full display text does not enlarge the next observer's history input", async () => {
@@ -843,14 +815,13 @@ test("full display text does not enlarge the next observer's history input", asy
 	await h.engine.refresh();
 	const text = "A complete retained summary. ".repeat(100);
 	h.engine.state.recent = Array.from({ length: 6 }, (_, i) => ({ text, tone: "neutral" as const, from: `x${i}`, to: `x${i}` }));
-	h.engine.state.chapters = Array.from({ length: 2 }, (_, i) => ({ text, tone: "neutral" as const, from: `c${i}`, to: `c${i}` }));
-	h.engine.state.earlier = { text, bullets: [text, text, text], tone: "neutral", from: "a", to: "a" };
+	h.engine.state.history = Array.from({ length: 6 }, (_, i) => ({ text, tone: "neutral" as const, from: `c${i}`, to: `c${i}`, level: 1 }));
 	h.batch({ from: "next", to: "next", omitted: 0, events: Array.from({ length: 5 }, (_, i) => ({ id: `next${i}`, text: "A useful result" })) });
 	await h.engine.refresh(false);
 	const prompt = JSON.parse(h.calls.at(-1)!.prompt);
 	expect(prompt.recent.every((item: { text: string }) => item.text.length <= 180)).toBe(true);
-	expect(prompt.compact.chapters.every((item: string) => item.length <= 180)).toBe(true);
-	expect(prompt.compact.earlier.every((item: string) => item.length <= 100)).toBe(true);
+	expect(prompt.compact.entries).toHaveLength(3);
+	expect(prompt.compact.entries.every((item: string) => item.length <= 180)).toBe(true);
 	expect(SYSTEM_PROMPT).toContain("complete sentences");
 	expect(SYSTEM_PROMPT).not.toContain("at most 180 characters");
 });

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { MinimapEngine } from "./engine.ts";
-import { emptySnapshot } from "./state.ts";
+import { emptySnapshot, restore, STATE_TYPE, applySummary, parseSummary } from "./state.ts";
 import { MinimapView, type Palette } from "./view.ts";
 import type { TuiMouseEvent } from "@earendil-works/pi-tui";
 const { renderLayoutFrame, getScrollViewBox } = await import(
@@ -90,7 +90,7 @@ test("new activity preserves the reader's anchor, including when older beats fol
 	renderLayoutFrame(view, 38, 24, () => {});
 	const at = view.log.rows.findIndex((row) => row.beat?.from === "e1");
 	view.scroll.scrollTo(at, { disableFollow: true });
-	engine.state.chapters = [
+	engine.state.history = [
 		{
 			text: "Checked the first three milestones",
 			tone: "neutral",
@@ -249,26 +249,25 @@ test("NOW fits two parent topics and one child level into four physical lines", 
 	expect(rows.every((row) => visibleWidth(row) <= 24)).toBe(true);
 });
 
-test("legacy earlier paragraphs render as three complete source-linked bullets", () => {
+test("legacy context stays complete in one source-linked history without section breaks", () => {
 	const { engine, view } = fixture();
-	engine.state.earlier = {
-		from: "old",
-		to: "old",
-		tone: "neutral",
-		text:
-			"Kept the editor full width. Limited model requests to useful batches. " +
-			"Preserved original source links ".repeat(30),
-	};
-	view.log.render(37);
-	const bullets = [
-		...new Set(
-			view.log.rows
-				.filter((row) => row.beat?.from === "old")
-				.map((row) => row.beat!.text),
-		),
-	];
-	expect(bullets).toHaveLength(3);
-	expect(bullets[2]).toBe("Preserved original source links ".repeat(30).trim());
+	const text = "Kept the editor full width. Limited requests. " + "Preserved original source links ".repeat(30);
+	Object.assign(engine.state, restore([{ id: "old" }, { id: "middle" }, { id: "new" }, {
+		type: "custom", customType: STATE_TYPE, data: {
+			...emptySnapshot(), version: 1, lastId: "new",
+			earlier: { from: "old", to: "old", tone: "neutral", text },
+			chapters: [{ from: "middle", to: "middle", tone: "neutral", text: "Middle work" }],
+			recent: [{ from: "new", to: "new", tone: "success", text: "Latest work" }],
+		},
+	}]));
+	const lines = view.log.render(37);
+	expect(lines).not.toContain("EARLIER");
+	expect(lines).not.toContain("MILESTONES");
+	expect(lines).not.toContain("RECENT");
+	const beats = [...new Set(view.log.rows.flatMap(row => row.beat ? [row.beat] : []))];
+	expect(beats.map(beat => beat.from)).toEqual(["old", "middle", "new"]);
+	expect(beats[0]?.text).toBe(text.trim());
+	engine.dispose();
 });
 
 test("catch-up notices explain sampling and leave a blank line before the summary", () => {
@@ -277,7 +276,7 @@ test("catch-up notices explain sampling and leave a blank line before the summar
 	for (const width of [28, 38, 90]) {
 		const lines = view.log.render(width);
 		const summary = lines.findIndex(line => line.includes("Work continued."));
-		expect(lines.slice(1, summary).filter(Boolean).join(" ")).toBe("↻ Catch-up summary · 11 intermediate events not reviewed");
+		expect(lines.slice(0, summary).filter(Boolean).join(" ")).toBe("↻ Catch-up summary · 11 intermediate events not reviewed");
 		expect(lines[summary - 1]).toBe("");
 	}
 	engine.state.recent[0]!.omitted = undefined;
@@ -290,8 +289,10 @@ test("catch-up notices explain sampling and leave a blank line before the summar
 test("long log entries wrap fully and their endings remain reachable by scrolling", () => {
 	const { engine, view } = fixture();
 	engine.state.recent = [{ text: "Full context rather than clipping. ".repeat(30) + "RECENT_END", tone: "neutral", from: "e0", to: "e0" }];
-	engine.state.chapters = [{ text: "Milestone context. ".repeat(30) + "MILESTONE_END", tone: "neutral", from: "e1", to: "e1" }];
-	engine.state.earlier = { text: "Earlier context. ".repeat(30) + "EARLIER_END", bullets: ["Earlier context. ".repeat(30) + "EARLIER_END"], tone: "neutral", from: "e2", to: "e2" };
+	engine.state.history = [
+		{ text: "Earlier context. ".repeat(30) + "EARLIER_END", tone: "neutral", from: "e2", to: "e2", level: 4 },
+		{ text: "Middle context. ".repeat(30) + "MILESTONE_END", tone: "neutral", from: "e1", to: "e1", level: 1 },
+	];
 	renderLayoutFrame(view, 38, 24, () => {});
 	for (const marker of ["EARLIER_END", "MILESTONE_END", "RECENT_END"]) {
 		const row = view.log.rows.findIndex(row => row.text.includes(marker));
@@ -299,5 +300,41 @@ test("long log entries wrap fully and their endings remain reachable by scrollin
 		view.scroll.scrollTo(Math.max(0, row - 2), { disableFollow: true });
 		expect(renderLayoutFrame(view, 38, 24, () => {}).lines.join("\n")).toContain(marker);
 	}
+	engine.dispose();
+});
+
+test("a full retained history scrolls through all age levels and keeps source clicks", () => {
+	const { engine, view, jumps } = fixture();
+	let source = 0;
+	engine.state.history = Array.from({ length: 24 }, (_, index) => {
+		const level = 4 - Math.floor(index / 6);
+		const from = `e${source}`;
+		source += 3 ** level;
+		return { text: `Compressed entry ${index}. ` + "Complete older context. ".repeat(4), from, to: `e${source - 1}`, level, tone: "neutral" as const };
+	});
+	engine.state.recent = Array.from({ length: 6 }, (_, index) => ({ text: `Latest ${index}`, from: `e${source + index}`, to: `e${source + index}`, tone: "neutral" as const }));
+	renderLayoutFrame(view, 38, 24, () => {});
+	for (const index of [0, 6, 12, 18, 23]) {
+		const beat = engine.state.history[index]!;
+		const row = view.log.rows.findIndex(row => row.beat === beat);
+		view.scroll.scrollTo(row, { disableFollow: true });
+		expect(renderLayoutFrame(view, 38, 24, () => {}).lines.join("\n")).toContain(`Compressed entry ${index}.`);
+		view.log.handleMouse(event({ y: row }));
+		expect(jumps.at(-1)).toBe(beat.from);
+	}
+	expect(view.scroll.isFollowingEnd).toBe(false);
+	engine.dispose();
+});
+
+test("compressing an older group preserves a reader anchored inside that group's source range", () => {
+	const { engine, view } = fixture();
+	engine.state.history = Array.from({ length: 6 }, (_, index) => ({ text: `Older group ${index}`, from: `e${index * 3}`, to: `e${index * 3 + 2}`, level: 1, tone: "neutral" as const }));
+	engine.state.recent = Array.from({ length: 6 }, (_, index) => ({ text: `Latest ${index}`, from: `e${18 + index}`, to: `e${18 + index}`, tone: "neutral" as const }));
+	renderLayoutFrame(view, 38, 24, () => {});
+	view.scroll.scrollTo(view.log.rows.findIndex(row => row.beat?.from === "e3"), { disableFollow: true });
+	applySummary(engine.state, { from: "e24", to: "e24", events: [], omitted: 0 }, parseSummary(JSON.stringify({ beat: "New event", now: "Working", tone: "neutral", folded: "Recent group", compact: "Compressed older group" }), true, true), false);
+	view.refresh();
+	expect(view.scroll.isFollowingEnd).toBe(false);
+	expect(renderLayoutFrame(view, 38, 24, () => {}).lines.join("\n")).toContain("Compressed older group");
 	engine.dispose();
 });

@@ -68,13 +68,10 @@ test("disk resume retains full call text and every old displayed snapshot after 
 		...old,
 		now: "Next focus",
 		recent: [],
-		earlier: {
-			text: "Folded history",
-			tone: "neutral",
-			bullets: ["Folded history"],
-			from: source,
-			to: source,
-		},
+		history: [{
+			text: "Folded history", tone: "neutral", level: 1,
+			from: source, to: source,
+		}],
 		usageSessionId: manager.getSessionId(),
 	});
 	const reopened = SessionManager.open(manager.getSessionFile()!);
@@ -87,9 +84,7 @@ test("disk resume retains full call text and every old displayed snapshot after 
 	expect(JSON.stringify(reopened.getEntry(firstState!))).toContain(
 		"Original displayed message",
 	);
-	expect(restore(reopened.getBranch()).earlier?.bullets).toEqual([
-		"Folded history",
-	]);
+	expect(restore(reopened.getBranch()).history.map(item => item.text)).toEqual(["Folded history"]);
 	expect(restore(reopened.getBranch()).focus).toEqual(old.focus);
 });
 test("late results stay with the originating session when the same manager forks", () => {

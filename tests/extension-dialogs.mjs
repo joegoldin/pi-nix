@@ -46,21 +46,28 @@ if (process.argv[3]) {
   await flush();
   const actions = [];
   Object.defineProperty(mode, "session", { value: {
-    pendingMessageCount: 1, isCompacting: false,
+    pendingMessageCount: 1, isCompacting: false, isStreaming: true,
     async abort() { controller.abort(); await asking; actions.push("aborted"); },
-    async sendQueuedMessagesNow() { actions.push("sent"); },
+    async sendQueuedMessagesNow() { actions.push(controller.signal.aborted ? "sent" : "prioritized"); },
   } });
   mode.sendNowGeneration = 0;
   mode.updatePendingMessagesDisplay = () => {};
   mode.showError = (message) => { throw new Error(message); };
-  const sending = mode.handleSendQueuedNow();
+  const activeQuestion = container.children[0];
+  await mode.handleSendQueuedNow();
+  assert.equal(controller.signal.aborted, false, "Ctrl+Enter must not cancel a waiting questionnaire");
+  assert.equal(container.children[0], activeQuestion);
+  assert.deepEqual(actions, ["prioritized"]);
+  assert.deepEqual(decisions, [], "Safe queue delivery must not answer the question");
+  actions.length = 0;
+  const sending = mode.handleSendQueuedNow(true);
   const completed = await Promise.race([sending.then(() => true), new Promise((resolve) => setTimeout(() => resolve(false), 1000))]);
-  assert(completed, "Ctrl+Enter remained blocked waiting for an abandoned questionnaire");
+  assert(completed, "Ctrl+Shift+Enter remained blocked waiting for an abandoned questionnaire");
   assert.deepEqual(actions, ["aborted", "sent"]);
   assert.equal((await asking).details.cancelled, true);
   assert.deepEqual(decisions, [], "Interrupted questions must not become approval records");
   assert.equal(container.children[0], editor);
-  console.log("Native send-now cancels the real questionnaire before sending queued input, without granting approval");
+  console.log("Safe send preserves the questionnaire; interrupt-and-send cancels it before sending queued input, without granting approval");
 }
 
 // A background editor-slot dialog must not steal input from a visible inspector.

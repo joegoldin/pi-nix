@@ -32,9 +32,10 @@ Each tool call passes through, in order:
    countdown and a notification. `y` approves the displayed reusable scope;
    `Y` approves just this attempt. Reusable approval is offered only for a
    soft denial with a supported scope. `n` or Esc refuses; no answer in time
-   keeps the block. `e` stops the timer and shows the full reason, exact
-   command and tool input without executing anything. ↑/↓ scroll; `e` or Esc
-   returns, with the timer still stopped. A headless session
+   keeps the block. Any key interaction, including arrow navigation, removes
+   and permanently stops the countdown without choosing an answer. `e` shows
+   the full reason, exact command and tool input without executing anything.
+   ↑/↓ scroll; `e` or Esc returns, with no countdown. A headless session
    (print, JSON, RPC, a subagent) never asks; the block stands at once.
 4. **You**, at the permission prompt, for whatever the chain defers.
 

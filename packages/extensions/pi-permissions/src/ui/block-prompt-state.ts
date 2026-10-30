@@ -17,7 +17,7 @@ export class BlockPrompt {
 	private readonly deadline: number;
 	private pausedAt: number | undefined;
 
-	get explaining(): boolean {
+	get timerStopped(): boolean {
 		return this.pausedAt !== undefined;
 	}
 
@@ -40,8 +40,14 @@ export class BlockPrompt {
 		return Math.max(0, Math.ceil((this.deadline - (this.pausedAt ?? this.now())) / 1000));
 	}
 
+	/** Interaction cancels the deadline permanently; it never chooses an answer. */
+	stopTimer(): void {
+		if (!this.result) this.pausedAt ??= this.now();
+	}
+
 	move(delta: number): void {
 		if (this.result) return;
+		this.stopTimer();
 		const n = this.choices.length;
 		this.cursor = (((this.cursor + delta) % n) + n) % n;
 	}
@@ -52,10 +58,8 @@ export class BlockPrompt {
 
 	/** A hotkey answers at once. */
 	press(key: string): void {
-		if (key === "e" && !this.result) {
-			this.pausedAt ??= this.now();
-			return;
-		}
+		this.stopTimer();
+		if (key === "e") return;
 		const choice = this.choices.find((c) => c.key === key);
 		if (choice) this.result ??= choice.answer;
 	}
@@ -67,6 +71,6 @@ export class BlockPrompt {
 
 	/** Called on each tick; out of time, the block stands. */
 	tick(): void {
-		if (!this.result && !this.explaining && this.now() >= this.deadline) this.result = "timeout";
+		if (!this.result && !this.timerStopped && this.now() >= this.deadline) this.result = "timeout";
 	}
 }

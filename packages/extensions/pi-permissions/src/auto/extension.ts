@@ -725,9 +725,12 @@ export function createPiAutomode(options: PiAutomodeOptions = {}) {
           return block(ctx, {
             timestamp: Date.now(),
             toolName: event.toolName,
-            reason: `Blocked by permissions.deny: ${pattern.raw}${
-              matchedCommand ? `; matched command: ${matchedCommand}` : ""
-            }`,
+            // A failed analysis conservatively matches deny rules, not their literal text.
+            reason: bashAnalysis && bashAnalysis.errors.length > 0
+              ? "Bash analysis failed; scoped deny rules could not be evaluated safely. The action remains blocked; no literal rule match was established."
+              : `Blocked by permissions.deny: ${pattern.raw}${
+                matchedCommand ? `; matched command: ${matchedCommand}` : ""
+              }`,
             action: summary,
             kind: "permissions.deny",
           }, logCtx);
