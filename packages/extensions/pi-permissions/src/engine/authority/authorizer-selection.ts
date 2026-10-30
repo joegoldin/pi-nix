@@ -1,3 +1,4 @@
+import { PendingAuthority } from "./pending-authority";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { PermissionQuery } from "../service";
 import {
@@ -83,6 +84,8 @@ export type AuthorizerSelectionConstructorDeps = AuthorizerSelectionDeps & {
   /** Told about each configured name the registry could not resolve. */
   chainAudit: UnregisteredLinkAuditor;
   consumeNativeDirectoryApproval?: (details: PromptPermissionDetails) => boolean;
+  isYoloEnabled?: () => boolean;
+  subscribeConfig?: (listener: () => void) => () => void;
 };
 
 /**
@@ -103,7 +106,13 @@ export class AuthorizerSelection
   private authority: SelectedAuthority | null = null;
   private relayTarget: PermissionForwardingTarget | null = null;
 
-  constructor(private readonly deps: AuthorizerSelectionConstructorDeps) {}
+  private readonly pending: PendingAuthority;
+  private context: ExtensionContext | null = null;
+  private sessionId: string | undefined;
+
+  constructor(private readonly deps: AuthorizerSelectionConstructorDeps) {
+    this.pending = new PendingAuthority(deps.isYoloEnabled ?? (() => false), deps.subscribeConfig ?? (() => () => {}));
+  }
 
   /**
    * Select the live authority for `ctx` and store it. The non-terminal
@@ -112,6 +121,10 @@ export class AuthorizerSelection
    * activation, so link resolution is deferred to the session's first ask.
    */
   activate(ctx: ExtensionContext): void {
+    const sessionId = ctx.sessionManager.getSessionId();
+    if (this.sessionId !== sessionId) this.pending.cancel();
+    this.sessionId = sessionId;
+    this.context = ctx;
     const authority = selectAuthorizer(ctx, this.deps);
     this.recordRelayTransition(authority.relayTarget ?? null);
     this.authority = authority;
@@ -232,6 +245,9 @@ export class AuthorizerSelection
   /** Clear the stored selection. */
   deactivate(): void {
     this.recordRelayTransition(null);
+    this.pending.cancel();
+    this.context = null;
+    this.sessionId = undefined;
     this.authority = null;
   }
 
@@ -262,6 +278,12 @@ export class AuthorizerSelection
       this.deps.getPermissionQuery(),
       this.deps.logger,
     );
-    return this.deps.prompter.prompt(chain, details);
+    return this.deps.prompter.prompt({
+      authorize: request => this.pending.run(
+        request.signal ?? this.context?.signal,
+        authority.adjudicatesLocally && !request.forwarding,
+        signal => chain.authorize({ ...request, signal }),
+      ),
+    }, details);
   }
 }

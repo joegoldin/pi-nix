@@ -1,4 +1,6 @@
+import { AUTHORITY_CANCELLED } from "../engine/authority/pending-authority.ts";
 import { coordinationKind } from "./coordination.ts";
+import { canonicalJson } from "../ui/call-label.ts";
 import type { ApprovalReview } from "../denials.ts";
 import { realpathSync, statSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -14,7 +16,7 @@ import {
   defaultClassifyAction,
   serializeClassifierAction,
 } from "./classifier.ts";
-import { analyzeBash, type BashAnalysis } from "./bash.ts";
+import { analyzeBash, MAX_BASH_SOURCE_LENGTH, type BashAnalysis } from "./bash.ts";
 import {
   AUTO_MODE_GUIDANCE,
   DEFAULT_ALLOW,
@@ -124,6 +126,8 @@ function projectIsTrusted(
 }
 
 export type PiAutomodeOptions = {
+  /** Integrated host cancels pending analysis review when mode/session changes. */
+  reviewAnalysis?: (ctx: ExtensionContext, ask: (signal?: AbortSignal) => Promise<boolean>) => Promise<"user" | "yolo" | undefined>;
   /** Trusted block provenance for a later native approval request; never model-supplied. */
   onDenied?: (review: ApprovalReview) => void;
   /** Shared session ledger, owned by pi-permissions rather than this classifier. */
@@ -432,12 +436,27 @@ export function createPiAutomode(options: PiAutomodeOptions = {}) {
     // what happened rather than that the action was refused.
     function steering(ctx: ExtensionContext): boolean {
       return Boolean(ctx.signal?.aborted) &&
-        (globalThis as Record<symbol, unknown>)[Symbol.for("pi-custom.steering")] === true;
+        (ctx.signal?.reason === AUTHORITY_CANCELLED ||
+          (globalThis as Record<symbol, unknown>)[Symbol.for("pi-custom.steering")] === true);
     }
 
     // Calls the user allowed at a block's prompt, by tool call id. One call can
     // raise several permission requests; the first answer covers the rest.
     const userApproved = new Set<string>();
+    // A receipt covers only this native call's exact input in this session.
+    // The deterministic pre-pass and authorizer link may inspect it separately.
+    const analysisReviews = new Map<string, string>();
+    let analysisGeneration = 0;
+    const clearAnalysisReviews = () => { analysisGeneration++; analysisReviews.clear(); };
+    pi.on("session_start", clearAnalysisReviews);
+    pi.on("session_shutdown", clearAnalysisReviews);
+    pi.on("input", clearAnalysisReviews);
+    pi.on("tool_result", event => {
+      // A completed call cannot lend its receipt to a replay of that call id.
+      for (const key of analysisReviews.keys()) {
+        if (JSON.parse(key)[2] === event.toolCallId) analysisReviews.delete(key);
+      }
+    });
 
     // Ask before a classifier block stands (askOnBlock, pi-nix patch). Only a
     // classifier block asks: a permissions.deny or denied path is a line the
@@ -475,7 +494,7 @@ export function createPiAutomode(options: PiAutomodeOptions = {}) {
         requestId,
         surface: toolName,
         result: answer === "allow" || answer === "allow-session" || answer === "allow-future" ? "allow" : "deny",
-        resolution: answer === "allow" || answer === "allow-session" || answer === "allow-future" ? "user_approved" : answer === "deny" ? "user_denied" : "confirmation_unavailable",
+        resolution: steering(ctx) ? "interrupted" : answer === "allow" || answer === "allow-session" || answer === "allow-future" ? "user_approved" : answer === "deny" ? "user_denied" : "confirmation_unavailable",
       });
       return answer;
     }
@@ -516,7 +535,9 @@ export function createPiAutomode(options: PiAutomodeOptions = {}) {
       return {
         block: true,
         reason:
-          "[pi-automode] The user interrupted the turn to give guidance before auto mode decided, so the tool did not run. This was not a denial: the action was neither approved nor refused. Follow what the user says next.",
+          ctx.signal?.reason === AUTHORITY_CANCELLED
+            ? "[pi-automode] The user interrupted the turn's pending permission review by changing mode or session. This was not a denial; the owning permission gate decides whether the action can run."
+            : "[pi-automode] The user interrupted the turn to give guidance before auto mode decided, so the tool did not run. This was not a denial: the action was neither approved nor refused. Follow what the user says next.",
         [INTERRUPTED]: true,
       };
     }
@@ -707,6 +728,10 @@ export function createPiAutomode(options: PiAutomodeOptions = {}) {
       }
       if (!isOwnedInspection && !deterministicOnly) state.checkedActions += 1;
 
+      const analysisFailed = !!bashAnalysis?.errors.length;
+      // Keep matching concrete source/commands even when analysis is incomplete.
+      // An unproven match is handled by exact-action review below, not a hard deny.
+      const concreteAnalysis = analysisFailed ? { ...bashAnalysis!, errors: [] } : bashAnalysis;
       for (const pattern of cfg.permissionDeny) {
         if (
           matchesToolPattern(
@@ -715,7 +740,7 @@ export function createPiAutomode(options: PiAutomodeOptions = {}) {
             input,
             ctx.cwd,
             "match",
-            bashAnalysis,
+            concreteAnalysis,
           )
         ) {
           const matchedCommand = matchedCommandSummary(
@@ -725,10 +750,7 @@ export function createPiAutomode(options: PiAutomodeOptions = {}) {
           return block(ctx, {
             timestamp: Date.now(),
             toolName: event.toolName,
-            // A failed analysis conservatively matches deny rules, not their literal text.
-            reason: bashAnalysis && bashAnalysis.errors.length > 0
-              ? "Bash analysis failed; scoped deny rules could not be evaluated safely. The action remains blocked; no literal rule match was established."
-              : `Blocked by permissions.deny: ${pattern.raw}${
+            reason: `Blocked by permissions.deny: ${pattern.raw}${
                 matchedCommand ? `; matched command: ${matchedCommand}` : ""
               }`,
             action: summary,
@@ -738,7 +760,9 @@ export function createPiAutomode(options: PiAutomodeOptions = {}) {
       }
 
       let askRequiresClassifier = false;
-      for (const pattern of deterministicOnly ? [] : cfg.permissionAsk) {
+      // Failed analysis cannot establish a scoped ask match either. The exact
+      // review below supplies the decision without asking again in the link.
+      for (const pattern of deterministicOnly || analysisFailed ? [] : cfg.permissionAsk) {
         if (
           !matchesToolPattern(
             pattern,
@@ -797,7 +821,7 @@ export function createPiAutomode(options: PiAutomodeOptions = {}) {
         event.toolName,
         input,
         ctx.cwd,
-        bashAnalysis,
+        concreteAnalysis,
       );
       if (deterministicReason) {
         if (isOwnedInspection && !deterministicOnly) state.checkedActions += 1;
@@ -808,6 +832,47 @@ export function createPiAutomode(options: PiAutomodeOptions = {}) {
           action: summary,
           kind: "deterministic-hard-deny",
         }, logCtx);
+      }
+
+      if (analysisFailed) {
+        // A command too large for analysis is also too large to review intact.
+        if (bashAnalysis!.source.length > MAX_BASH_SOURCE_LENGTH) return block(ctx, {
+          timestamp: Date.now(), toolName: event.toolName,
+          reason: `Bash input length ${bashAnalysis!.source.length} exceeds ${MAX_BASH_SOURCE_LENGTH}; cannot safely display an exact-action review.`,
+          action: summary, kind: "bash-analysis",
+        }, logCtx);
+        const sessionId = ctx.sessionManager.getSessionId();
+        const generation = analysisGeneration;
+        const receiptKey = canonicalJson([sessionId, ctx.cwd, event.toolCallId]);
+        const exactAction = canonicalJson([event.toolName, input]);
+        if (event.toolCallId && analysisReviews.get(receiptKey) === exactAction) {
+          if (!deterministicOnly) options.approvals?.confirmed?.();
+          return deterministicOnly ? undefined : allow(ctx, "user", "Exact action approved after Bash analysis failed", event.toolName, summary, logCtx);
+        }
+        const reason = "Bash analysis failed; no policy violation was established. Explicit review of the exact action is required.";
+        let approved: "user" | "yolo" | undefined;
+        let declined = false;
+        if (ctx.hasUI && ctx.mode === "tui" && !ctx.signal?.aborted) {
+          try {
+            const ask = async (signal = ctx.signal) => {
+              const answer = await ctx.ui.confirm("Review Bash analysis failure", `${reason}\n\n${exactAction}\n\nAllow only this exact action? Hard restrictions still apply.`, { signal });
+              declined = !answer && !signal?.aborted;
+              return answer;
+            };
+            approved = options.reviewAnalysis
+              ? await options.reviewAnalysis(ctx, ask)
+              : await ask() ? "user" : undefined;
+          } catch { /* An unavailable or cancelled dialog grants nothing. */ }
+        }
+        if (steering(ctx)) return interrupted(ctx, "bash-analysis", event.toolName, summary, logCtx);
+        if (approved && generation === analysisGeneration && !ctx.signal?.aborted && ctx.sessionManager.getSessionId() === sessionId &&
+            canonicalJson([event.toolName, input]) === exactAction &&
+            canonicalJson([sessionId, ctx.cwd, event.toolCallId]) === receiptKey) {
+          if (event.toolCallId && approved === "user") analysisReviews.set(receiptKey, exactAction);
+          if (!deterministicOnly && approved === "user") options.approvals?.confirmed?.();
+          return deterministicOnly ? undefined : allow(ctx, approved, approved === "yolo" ? "Allowed by YOLO after Bash analysis failed" : "Exact action approved after Bash analysis failed", event.toolName, summary, logCtx);
+        }
+        return block(ctx, { timestamp: Date.now(), toolName: event.toolName, reason: declined ? `${reason} The user declined this exact action.` : reason, action: summary, kind: "bash-analysis" }, logCtx, { eligible: false, response: declined ? "denied" : "unasked" });
       }
 
       if (isOwnedInspection && !askRequiresClassifier) return undefined;
@@ -990,6 +1055,7 @@ export function createPiAutomode(options: PiAutomodeOptions = {}) {
         canReuseApproval ? options.approvals?.context?.(event.toolName, ctx.cwd, input) ?? [] : [],
       );
       logClassifierIo(decision, logCtx);
+      if (steering(ctx)) return interrupted(ctx, "classifier", event.toolName, summary, logCtx);
       if (decision.decision === "allow") {
         state.classifierAllowed += 1;
         return allow(

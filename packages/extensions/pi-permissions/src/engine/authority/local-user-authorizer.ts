@@ -67,7 +67,9 @@ export class LocalUserAuthorizer implements TerminalAuthorizer {
     details: PromptPermissionDetails,
   ): Promise<PermissionPromptDecision> {
     return this.deps.dialogs.run(
-      () => this.present(details),
+      () => details.signal?.aborted
+        ? Promise.resolve(unansweredDecision("Permission request cancelled"))
+        : this.present(details),
       unansweredDecision,
     );
   }
@@ -90,6 +92,7 @@ export class LocalUserAuthorizer implements TerminalAuthorizer {
     return this.deps.requestPermissionDecision(
       {
         mode: this.deps.mode,
+        signal: details.signal,
         ui: this.deps.ui,
         ...this.deps.getPromptPreferences(),
         notice: describePromptNotice(

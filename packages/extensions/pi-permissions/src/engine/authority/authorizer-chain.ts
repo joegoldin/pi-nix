@@ -40,6 +40,10 @@ export function composeAuthorizerChain(
     async authorize(details) {
       for (const link of links) {
         const verdict = await link.authorize(details, query, log);
+        if (details.signal?.aborted) return {
+          approved: false, state: "denied", confirmationUnavailable: true,
+          decidedBy: { kind: "unavailable", reason: "Permission review cancelled" },
+        };
         const decision = decideFromVerdict(link.name, verdict);
         if (decision) {
           return decision;

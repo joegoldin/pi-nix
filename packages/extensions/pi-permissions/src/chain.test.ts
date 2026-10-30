@@ -210,7 +210,7 @@ const { parseToolPattern } = await import(
   `./auto/permissions.ts`
 );
 
-async function realHost(configForTrust, classifyAction, ctxOverrides = {}, approvals = undefined) {
+async function realHost(configForTrust, classifyAction, ctxOverrides = {}, approvals = undefined, analyzeBash = undefined, reviewAnalysis = undefined) {
   const handlers = new Map();
   const commands = new Map();
   let state;
@@ -242,13 +242,15 @@ async function realHost(configForTrust, classifyAction, ctxOverrides = {}, appro
   };
   withPermissionChain(createPiAutomode({
     approvals,
+    analyzeBash,
+    reviewAnalysis,
     loadConfig: (_cwd, trusted) => ({ ...config, ...configForTrust(trusted) }),
     classifyAction: async (...args) => {
       classifierCalls++;
       if (classifyAction) return classifyAction(...args);
       throw new Error("deterministic pre-pass must not call the classifier");
     },
-  }), { global: globals, readActivation: () => ({ active: true }) })(pi);
+  }), { global: globals, env: {}, readActivation: () => ({ active: true }) })(pi);
   const emit = async (name, event = {}) => {
     let result;
     for (const handler of handlers.get(name) ?? []) {
@@ -976,6 +978,80 @@ test("bookkeeping shortcuts retain explicit wrapper and nested-tool denials", as
     expect(result.reason).not.toContain("/run/agenix/");
     expect(h.classifierCalls()).toBe(0);
     expect(h.state().blockedActions).toBe(1);
+  });
+
+  test("Bash analysis uncertainty requests exact-action review, not a policy override", async () => {
+    const prompts = [];
+    let confirmed = 0;
+    const h = await realHost(() => ({ permissionDeny: [parseToolPattern("bash(*/run/agenix/*)")], permissionAsk: [parseToolPattern("bash(git push*)")] }), undefined, {
+      hasUI: true, mode: "tui", ui: { notify() {}, setStatus() {}, theme: { fg: (_color, text) => text }, confirm: async (title, body) => { prompts.push({ title, body }); return true; } },
+    }, { scope: () => undefined, has: () => false, remember() {}, confirmed: () => { confirmed++; } });
+    const call = { ...event, input: { command: "echo 'unterminated" } };
+    expect(await h.emit("tool_call", call)).toBeUndefined();
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0].body).toContain(call.input.command);
+    expect(prompts[0].body).toContain("exact action");
+    expect(await h.service.links.get("pi-automode")({ ...call, toolCall: call }, {}, log)).toEqual({ kind: "allow" });
+    expect(prompts).toHaveLength(1);
+    expect(h.state()?.blockedActions ?? 0).toBe(0);
+    expect(h.classifierCalls()).toBe(0);
+    expect(confirmed).toBe(1); // Native directory gates see the same exact-action receipt.
+    await h.emit("tool_call", { ...call, input: { command: "echo 'different" } });
+    expect(prompts).toHaveLength(2);
+    await h.emit("tool_call", { ...call, toolCallId: "retry" });
+    expect(prompts).toHaveLength(3); // A retry is a new execution, not the pre-pass/link pair.
+  });
+
+  test("analysis review honors the integrated mode decision without caching a YOLO grant", async () => {
+    let reviews = 0;
+    let yolo = true;
+    const h = await realHost(() => ({}), undefined, {
+      hasUI: true, mode: "tui", ui: { notify() {}, setStatus() {}, theme: { fg: (_color, text) => text }, confirm: async () => { throw new Error("host owns this review"); } },
+    }, undefined, undefined, async () => { reviews++; return yolo ? "yolo" : undefined; });
+    const call = { ...event, input: { command: "echo 'unterminated" } };
+    expect(await h.emit("tool_call", call)).toBeUndefined();
+    yolo = false;
+    expect((await h.emit("tool_call", call))?.block).toBe(true);
+    expect(reviews).toBe(2);
+  });
+
+  test("unsupported analysis of valid Bash asks, but concrete hard denials never ask", async () => {
+    let prompts = 0;
+    const ui = { notify() {}, setStatus() {}, theme: { fg: (_color, text) => text }, confirm: async () => { prompts++; return true; } };
+    const unsupported = () => { throw new Error("unsupported shell syntax"); };
+    const h = await realHost(() => ({}), undefined, { hasUI: true, mode: "tui", ui }, undefined, unsupported);
+    expect(await h.emit("tool_call", { ...event, input: { command: "printf '%s\\n' ok" } })).toBeUndefined();
+    expect(prompts).toBe(1);
+    const denied = await realHost(() => ({ permissionDeny: [parseToolPattern("bash(*/run/agenix/*)")] }), undefined,
+      { hasUI: true, mode: "tui", ui }, undefined, unsupported);
+    expect((await denied.emit("tool_call", { ...event, input: { command: "cat /run/agenix/test" } }))?.reason).toContain("permissions.deny");
+    const wholeTool = await realHost(() => ({ permissionDeny: [parseToolPattern("bash")] }), undefined,
+      { hasUI: true, mode: "tui", ui }, undefined, unsupported);
+    expect((await wholeTool.emit("tool_call", event))?.reason).toContain("permissions.deny");
+    const hard = await realHost(() => ({}), undefined, { hasUI: true, mode: "tui", ui });
+    expect((await hard.emit("tool_call", { ...event, input: { command: "rm -rf /" } }))?.block).toBe(true);
+    expect(prompts).toBe(1);
+  });
+
+  test("Bash analysis review rejects cancelled, stale and declined answers", async () => {
+    for (const variant of ["cancel", "session", "input", "deny"]) {
+      const controller = new AbortController();
+      let sessionId = "first";
+      const call = { ...event, input: { command: "echo 'unterminated" } };
+      const h = await realHost(() => ({}), undefined, {
+        hasUI: true, mode: "tui", signal: controller.signal,
+        sessionManager: { getSessionId: () => sessionId, getEntries: () => [] },
+        ui: { notify() {}, setStatus() {}, theme: { fg: (_color, text) => text }, confirm: async () => {
+          if (variant === "cancel") controller.abort();
+          if (variant === "session") sessionId = "second";
+          if (variant === "input") call.input.command = "echo 'changed";
+          return variant !== "deny";
+        } },
+      });
+      expect((await h.emit("tool_call", call))?.block).toBe(true);
+      expect(h.state().recentDenials[0].kind).toBe("bash-analysis");
+      expect(h.classifierCalls()).toBe(0);
+    }
   });
 
   test("a concrete secret-path match still names the deny rule", async () => {

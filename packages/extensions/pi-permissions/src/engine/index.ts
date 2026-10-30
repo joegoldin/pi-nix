@@ -165,6 +165,8 @@ export default function piPermissionSystemExtension(
   });
 
   const authorizerSelection = new AuthorizerSelection({
+    isYoloEnabled: () => configStore.current().yoloMode,
+    subscribeConfig: listener => configStore.subscribe(listener),
     detection: subagentDetection,
     events: pi.events,
     dialogs: askDialogQueue,

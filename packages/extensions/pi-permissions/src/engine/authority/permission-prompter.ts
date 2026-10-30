@@ -48,6 +48,8 @@ export interface ForwardedAskProvenance {
 
 /** Details passed when prompting the user for a permission decision. */
 export interface PromptPermissionDetails {
+  /** Local cancellation only; never serialized as delegated authority. */
+  signal?: AbortSignal;
   requestId: string;
   source: PermissionReviewSource;
   agentName: string | null;

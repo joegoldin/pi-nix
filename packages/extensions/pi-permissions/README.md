@@ -63,6 +63,20 @@ requests, and child-owned or historical denials without review metadata are not
 eligible. Cancellation and timeout grant nothing; a denial cannot open repeated
 linked questions. The existing menu remains available for direct user review.
 
+A Bash analysis failure is uncertainty, not proof that a deny rule matched.
+Concrete policy matches and known hard restrictions still block first. Otherwise,
+the terminal asks you to review the complete, exact tool input. Approval covers
+that native call only, not similar commands or later retries; cancellation,
+changed input, or a session change grants nothing. Commands beyond the analysis
+size limit remain blocked because they cannot be reviewed intact. This review is
+separate from the scoped `ask_for_approval` flow above.
+
+Turning YOLO on settles pending local approval requests as YOLO decisions and
+cancels their classifier or dialog. Late responses cannot overwrite that decision
+or open another prompt. Turning it off restores review for new requests; it does
+not create reusable grants. Explicit hard denials remain in force, and a local
+mode change does not take over child-owned or relayed pending requests.
+
 A shell command can have effects beyond its parser-proven directory access.
 For example, `cd worktree` proves traversal, not the effects of a following
 Python heredoc. The displayed approval now includes both the command scope and

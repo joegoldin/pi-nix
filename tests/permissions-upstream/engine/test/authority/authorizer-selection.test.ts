@@ -63,9 +63,54 @@ function makeDetailsOn(surface: string): PromptPermissionDetails {
   });
 }
 
+// The fork wraps the selected terminal to cancel in-flight asks. Exercise the
+// wrapper rather than asserting its object identity; it must still call the
+// correct local/parent terminal with the original action.
+async function expectTerminal(prompter: ReturnType<typeof makePrompterApi>, terminal: typeof LocalUserAuthorizer | typeof ParentAuthorizer, details = prompter.prompt.mock.calls.at(-1)![1]) {
+  expect(prompter.prompt).toHaveBeenCalledWith(expect.objectContaining({ authorize: expect.any(Function) }), details);
+  const spy = vi.spyOn(terminal.prototype, "authorize").mockResolvedValue({ approved: true, state: "approved", decidedBy: DECIDED_BY_HUMAN });
+  try {
+    await prompter.prompt.mock.calls.at(-1)![0].authorize(details);
+    expect(spy).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ ...details, signal: expect.any(AbortSignal) }));
+  } finally { spy.mockRestore(); }
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────
 
 describe("AuthorizerSelection", () => {
+  it("rechecks live mode while a classifier is pending and never opens a stale prompt", async () => {
+    let enabled = false;
+    let changed = () => {};
+    let finish!: (value: { kind: "defer" }) => void;
+    let signal: AbortSignal | undefined;
+    const registry = new AuthorizerRegistry();
+    registry.register("held", details => {
+      signal = details.signal;
+      return new Promise(resolve => { finish = resolve; });
+    });
+    const requestPermissionDecision = vi.fn().mockResolvedValue({ approved: false, state: "denied", decidedBy: DECIDED_BY_HUMAN });
+    const selection = new AuthorizerSelection({
+      ...makeDeps({ authorizerRegistry: registry, getAuthorizerChain: () => ["held"], prompter: makeInvokingPrompter(), requestPermissionDecision }),
+      isYoloEnabled: () => enabled,
+      subscribeConfig: listener => { changed = listener; return () => { changed = () => {}; }; },
+    });
+    selection.activate(makeCtx());
+    const result = selection.escalate(makeDetailsOn("bash"));
+    expect(signal?.aborted).toBe(false);
+    enabled = true;
+    changed();
+    expect((await result).decidedBy.kind).toBe("yolo");
+    expect(signal?.aborted).toBe(true);
+    finish({ kind: "defer" });
+    await Promise.resolve();
+    expect(requestPermissionDecision).not.toHaveBeenCalled();
+    enabled = false;
+    const next = selection.escalate(makeDetailsOn("bash"));
+    finish({ kind: "defer" });
+    expect((await next).approved).toBe(false);
+    expect(requestPermissionDecision).toHaveBeenCalledOnce();
+  });
+
   describe("escalate", () => {
     it("rejects before activate", async () => {
       const selection = new AuthorizerSelection(makeDeps());
@@ -83,10 +128,7 @@ describe("AuthorizerSelection", () => {
 
       const result = await selection.escalate(details);
 
-      expect(prompter.prompt).toHaveBeenCalledWith(
-        expect.any(LocalUserAuthorizer),
-        details,
-      );
+      await expectTerminal(prompter, LocalUserAuthorizer, details);
       expect(result).toEqual({
         approved: true,
         state: "approved",
@@ -102,10 +144,7 @@ describe("AuthorizerSelection", () => {
 
       await selection.escalate(makeDetails());
 
-      expect(prompter.prompt).toHaveBeenCalledWith(
-        expect.any(LocalUserAuthorizer),
-        expect.anything(),
-      );
+      await expectTerminal(prompter, LocalUserAuthorizer);
     });
 
     it("rejects after deactivate", async () => {
@@ -436,11 +475,8 @@ describe("AuthorizerSelection", () => {
 
       await selection.escalate(makeDetails());
 
-      // Empty chain ⇒ the selected value is the terminal instance itself.
-      expect(prompter.prompt).toHaveBeenCalledWith(
-        expect.any(LocalUserAuthorizer),
-        expect.anything(),
-      );
+      // No named link may replace the local terminal decision.
+      await expectTerminal(prompter, LocalUserAuthorizer);
     });
   });
 
@@ -516,12 +552,9 @@ describe("AuthorizerSelection", () => {
 
       await selection.escalate(details);
 
-      // Zero links ⇒ the composed chain *is* the terminal instance, so the
-      // registered link never ran: the serving node adjudicates this ask.
-      expect(prompter.prompt).toHaveBeenCalledWith(
-        expect.any(ParentAuthorizer),
-        details,
-      );
+      // The wrapper must delegate unchanged to the parent terminal: the
+      // serving node, not the registered local link, adjudicates this ask.
+      await expectTerminal(prompter, ParentAuthorizer, details);
     });
 
     it("records the delegated chain instead of the resolved one", async () => {

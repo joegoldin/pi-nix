@@ -140,6 +140,7 @@ export type DenialRecord = {
   action: string;
   kind:
     | "permissions.deny"
+    | "bash-analysis"
     | "permissions.ask"
     | "deterministic-hard-deny"
     | "deterministic-path-deny"
@@ -155,7 +156,8 @@ export type DecisionKind =
   | "coordination"
   | "inside-working-directory"
   /** The user allowed it at the prompt a classifier block raised (pi-nix patch). */
-  | "user";
+  | "user"
+  | "yolo";
 
 export type ClassificationDecision = {
   decision: "allow" | "block";

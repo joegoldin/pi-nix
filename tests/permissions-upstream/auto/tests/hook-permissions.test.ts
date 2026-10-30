@@ -916,7 +916,7 @@ test("the tool hook analyzes each Bash input once", async () => {
 	assert.equal(harness.classifierCalls, 0);
 });
 
-test("the tool hook fails closed when Bash analysis throws", async () => {
+test("Bash analysis failure requires exact approval even when permissions.allow matches", async () => {
 	const allow = parseToolPattern("bash(*)");
 	assert.ok(allow);
 	const harness = await setupHookTest({
@@ -925,6 +925,14 @@ test("the tool hook fails closed when Bash analysis throws", async () => {
 			throw new Error("synthetic analysis failure");
 		},
 	});
+	let questions = 0;
+	let approved = false;
+	harness.ctx.ui.confirm = async (_title, message) => {
+		questions++;
+		assert.match(message, /echo safe/);
+		assert.match(message, /exact action/);
+		return approved;
+	};
 
 	const result = await harness.emit("tool_call", {
 		toolName: "bash",
@@ -932,7 +940,11 @@ test("the tool hook fails closed when Bash analysis throws", async () => {
 	}, harness.ctx) as { block?: boolean; reason?: string };
 
 	assert.equal(result.block, true);
-	assert.match(result.reason ?? "", /synthetic analysis failure/);
+	assert.match(result.reason ?? "", /Bash analysis failed/);
+	assert.equal(questions, 1);
+	approved = true;
+	assert.equal(await harness.emit("tool_call", { toolName: "bash", input: { command: "echo safe" } }, harness.ctx), undefined);
+	assert.equal(questions, 2);
 	assert.equal(harness.classifierCalls, 0);
 });
 

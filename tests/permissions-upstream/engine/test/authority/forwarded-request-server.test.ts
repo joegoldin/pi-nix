@@ -837,6 +837,7 @@ describe("processInbox — the serving node's chain adjudicates a forwarded ask"
       hasUI: true,
       mode: "tui",
       ui: { select: vi.fn(), input: vi.fn(), custom: vi.fn() },
+      sessionManager: { getSessionId: () => "serving-session" },
     } as unknown as ExtensionContext;
   }
 

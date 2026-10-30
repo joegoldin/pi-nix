@@ -1,3 +1,4 @@
+import { PendingAuthority } from "./engine/authority/pending-authority.ts";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { coversDirectoryRequest, requestedDirectories } from "./directory-access.ts";
 import { asForwardedToolCall } from "./engine/authority/forwarded-tool-call.ts";
@@ -202,8 +203,21 @@ export default function piPermissions(pi: ExtensionAPI, autoOverrides: Pick<PiAu
 	// permission system prompts for it.
 	let autoControls: AutoModeControls | undefined;
 	let settingsController: PermissionSystemConfigController | undefined;
+	const pendingAnalysis = new PendingAuthority(
+		() => settingsController?.config.current().yoloMode === true,
+		listener => settingsController?.config.subscribe?.(listener) ?? (() => {}),
+	);
+	pi.on("session_start", () => pendingAnalysis.cancel());
+	pi.on("session_shutdown", () => pendingAnalysis.cancel());
 	withPermissionChain(createPiAutomode({
 		...autoOverrides,
+		reviewAnalysis: async (ctx, ask) => {
+			const decision = await pendingAnalysis.run(ctx.signal, !forwarded.owner(), async signal => {
+				const approved = await ask(signal);
+				return { approved, state: approved ? "approved" : "denied", decidedBy: { kind: "user", via: "dialog" } };
+			});
+			return decision.approved ? decision.decidedBy.kind === "yolo" ? "yolo" : "user" : undefined;
+		},
 		onControls: (controls) => (autoControls = controls),
 		onDenied: (review) => {
 			const current = reviewContext.getStore();
@@ -272,7 +286,10 @@ export default function piPermissions(pi: ExtensionAPI, autoOverrides: Pick<PiAu
 	}), {
 		wrapForwarded: forwarded.wrap,
 		wrapRequest: (handler, details) => (event, ctx) => requestDetails.run(details, async () => {
-			const result = await handler(event, ctx);
+			const signal = details.signal instanceof AbortSignal
+				? ctx.signal ? AbortSignal.any([ctx.signal, details.signal]) : details.signal
+				: ctx.signal;
+			const result = await handler(event, { ...ctx, signal });
 			const requested = reviewContext.getStore()?.directories ?? directories(ctx.cwd, event.toolName, event.input);
 			if (!details.forwarding && result?.block && requested.length && !wasInterruption(result.reason ?? "")) {
 				ledger.record({ toolCallId: event.toolCallId, toolName: event.toolName, input: event.input, reason: result.reason ?? "", directories: requested, cwd: ctx.cwd, sessionId: ctx.sessionManager.getSessionId(), review: { ...(reviewContext.getStore() ?? { eligible: false, response: "unasked" }) } });

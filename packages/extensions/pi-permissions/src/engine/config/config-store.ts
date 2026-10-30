@@ -49,6 +49,7 @@ export interface SessionConfigStore extends ConfigReader {
  * coupling between the class and test doubles.
  */
 export interface CommandConfigStore extends ConfigReader {
+  subscribe?(listener: () => void): () => void;
   save(
     next: PermissionSystemExtensionConfig,
     ctx: ExtensionContext,
@@ -82,6 +83,16 @@ export class ConfigStore
 {
   private config: PermissionSystemExtensionConfig;
   private configIssues: readonly string[] = [];
+  private readonly listeners = new Set<() => void>();
+
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  private notifyChanged(): void {
+    for (const listener of this.listeners) listener();
+  }
 
   constructor(private readonly deps: ConfigStoreDeps) {
     this.config = { ...DEFAULT_EXTENSION_CONFIG };
@@ -133,6 +144,7 @@ export class ConfigStore
     );
     const runtimeConfig = normalizePermissionSystemConfig(mergeResult.merged);
     this.config = runtimeConfig;
+    this.notifyChanged();
 
     this.configIssues = mergeResult.issues;
 
@@ -192,6 +204,7 @@ export class ConfigStore
 
     this.config = normalized;
     syncPermissionSystemStatus(ctx, normalized);
+    this.notifyChanged();
 
     this.deps.logger.debug("config.saved", {
       debugLog: normalized.debugLog,

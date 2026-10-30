@@ -56,8 +56,8 @@ export type PermissionPromptDecision = {
 export type UnattributedDecision = Omit<PermissionPromptDecision, "decidedBy">;
 
 export interface PermissionDecisionUi {
-  select(title: string, options: string[]): Promise<string | undefined>;
-  input(title: string, placeholder?: string): Promise<string | undefined>;
+  select(title: string, options: string[], optionsUi?: { signal?: AbortSignal }): Promise<string | undefined>;
+  input(title: string, placeholder?: string, optionsUi?: { signal?: AbortSignal }): Promise<string | undefined>;
 }
 
 const APPROVE_OPTION = "Yes";
@@ -145,7 +145,15 @@ export async function requestPermissionDecisionFromUi(
   title: string,
   message: string,
   options?: RequestPermissionOptions,
+  signal?: AbortSignal,
 ): Promise<UnattributedDecision> {
+  if (signal) {
+    const original = ui;
+    ui = {
+      select: (title, choices) => signal.aborted ? Promise.resolve(undefined) : original.select(title, choices, { signal }),
+      input: (title, placeholder) => signal.aborted ? Promise.resolve(undefined) : original.input(title, placeholder, { signal }),
+    };
+  }
   const sessionOption = options?.sessionLabel ?? APPROVE_FOR_SESSION_OPTION;
   const widthOption = options?.sessionWidth?.label;
   const decisionOptions = [

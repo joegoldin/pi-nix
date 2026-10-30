@@ -63,6 +63,7 @@ type PromptKeybindings = Pick<KeybindingsManager, "matches">;
 
 /** The resolved presentation context selected once per activation. */
 export interface PermissionPromptView extends PromptPreferences {
+  signal?: AbortSignal;
   mode: ExtensionContext["mode"];
   ui: PermissionPromptUi;
   /** What the inline dialog's terminal notification says; the fallback ignores it. */
@@ -117,6 +118,7 @@ export async function requestPermissionDecision(
       title,
       rendered.lines.join("\n"),
       options,
+      view.signal,
     ),
     "select",
   );
@@ -163,9 +165,14 @@ export async function presentInlinePermissionPrompt(
     keys: view.dialogKeys,
   };
   const finishStatus = beginPermissionStatus(view.ui);
+  let removeAbort = () => {};
   try {
     return await view.ui.custom<UnattributedDecision>(
       (tui, theme, keybindings, done) => {
+        const cancel = () => done({ approved: false, state: "denied", confirmationUnavailable: true });
+        view.signal?.addEventListener("abort", cancel, { once: true });
+        removeAbort = () => view.signal?.removeEventListener("abort", cancel);
+        if (view.signal?.aborted) queueMicrotask(cancel);
         // The factory runs once, as the dialog mounts, which is the moment the
         // human is being asked; a re-render does not come back through here.
         const notification = renderPromptNotification(
@@ -195,7 +202,7 @@ export async function presentInlinePermissionPrompt(
       },
       { overlay: false },
     );
-  } finally { finishStatus(); }
+  } finally { removeAbort(); finishStatus(); }
 }
 
 /**
