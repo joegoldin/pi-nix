@@ -4,7 +4,7 @@ import { pathToFileURL } from "node:url";
 const modules = process.argv[2];
 const load = (path) => import(pathToFileURL(`${modules}/${path}`).href);
 const { InteractiveMode } = await load("@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.js");
-const { TuiMainScreen, TuiAltScreen } = await load("@earendil-works/pi-tui/dist/index.js");
+const { TuiMainScreen, TuiAltScreen, stripTerminalSequences, visibleWidth } = await load("@earendil-works/pi-tui/dist/index.js");
 const { initTheme, getMarkdownTheme } = await load("@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js");
 initTheme("dark", false);
 const { KeybindingsManager } = await load("@earendil-works/pi-coding-agent/dist/core/keybindings.js");
@@ -112,9 +112,18 @@ for (const Tui of [TuiMainScreen, TuiAltScreen]) {
   const firstPage = guide.render(90);
   assert.match(firstPage.join("\n"), /Message another session/, "extension keys are visible on the first page");
   assert(firstPage.length <= tui.terminal.rows - 2);
+  assert.match(stripTerminalSequences(firstPage[0]), /^╭.*╮$/, "help has a closed top border");
+  assert.match(stripTerminalSequences(firstPage.at(-1)), /^╰.*╯$/, "help has a closed bottom border");
+  for (const row of firstPage) assert.equal(visibleWidth(row), 90, "help covers the transcript across its full width");
   tui.handleTerminalInput("\x1b[F");
   assert.notDeepEqual(guide.render(90), firstPage, "the long guide scrolls to its last page");
-  assert.match(guide.render(90).at(-1), /Esc closes/, "dismissal hint stays visible");
+  assert.match(guide.render(90).at(-2), /Esc closes/, "dismissal hint stays visible");
+  tui.handleTerminalInput("\x1b[H");
+  assert.deepEqual(guide.render(90), firstPage, "Home returns to the first page");
+  // Fullscreen mouse dispatch hit-tests the last composited overlay bounds.
+  tui.compositeOverlays([], tui.terminal.columns, tui.terminal.rows);
+  tui.handleTerminalInput("\x1b[<65;30;12M");
+  assert.notDeepEqual(guide.render(90), firstPage, "mouse wheel scrolls the focused guide");
   tui.handleTerminalInput("\x1b");
   assert.equal(tui.hasOverlay(), false, "Escape dismisses the guide");
   editor.text = "draft";

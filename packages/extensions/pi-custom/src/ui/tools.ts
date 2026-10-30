@@ -11,6 +11,8 @@ import type { CardModel, CardState, UiTheme } from "./card.ts";
 import type { UiConfig } from "./config.ts";
 import { countChanges, parseDiff, renderDiffRows } from "./diff.ts";
 import { iconFor } from "./icons.ts";
+import { taskLabel, taskRows } from "../tools/bg-ui.ts";
+import type { TaskSnapshot } from "../tools/bg-format.ts";
 
 export interface ToolResultLike {
 	content?: Array<{ type: string; text?: string; mimeType?: string }>;
@@ -437,6 +439,21 @@ function intercomCard(input: CardInput, deps: CardDeps): CardModel {
 	return { ...model, summary: theme.fg("toolOutput", first), body: rest.map((line) => theme.fg("toolOutput", line)) };
 }
 
+function backgroundCard(input: CardInput, deps: CardDeps): CardModel {
+	const titles: Record<string, string> = { bg_run: "Background", bg_status: "Background status", bg_logs: "Background logs", bg_kill: "Stop background" };
+	const details = input.result?.details as { task?: TaskSnapshot; tasks?: TaskSnapshot[] } | undefined;
+	const task = details?.task;
+	const model: CardModel = {
+		title: titles[input.toolName], target: task?.name ?? str(input.args.name) ?? str(input.args.taskId), state: stateOf(input),
+	};
+	if (model.state === "error") return { ...model, ...errorBody(input, deps) };
+	if (!input.result || input.isPartial) return model;
+	if (input.toolName === "bg_logs") return { ...model, summary: task ? taskLabel(task, deps.theme) : undefined, body: linesOf(textOf(input.result)), tail: true };
+	if (details?.tasks) return { ...model, summary: deps.theme.fg("muted", plural(details.tasks.length, "task")), body: taskRows(details.tasks, deps.theme) };
+	if (task) return { ...model, summary: taskLabel(task, deps.theme), body: [deps.theme.fg("dim", `$ ${task.command}`), deps.theme.fg("dim", task.outputPath)] };
+	return { ...model, body: linesOf(textOf(input.result)) };
+}
+
 export function buildCard(input: CardInput, deps: CardDeps): CardModel {
 	switch (input.toolName) {
 		case "read":
@@ -455,6 +472,11 @@ export function buildCard(input: CardInput, deps: CardDeps): CardModel {
 			return grepCard(input, deps);
 		case "intercom":
 			return intercomCard(input, deps);
+		case "bg_run":
+		case "bg_status":
+		case "bg_logs":
+		case "bg_kill":
+			return backgroundCard(input, deps);
 		default:
 			return genericCard(input, deps);
 	}

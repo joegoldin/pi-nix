@@ -40,7 +40,7 @@
  **Extensions**
  | Key | Action |
  |-----|--------|
-@@ -6999,10 +7005,46 @@
+@@ -6999,10 +7005,62 @@
  			for (const [key, shortcut] of shortcuts) {
  				const description = shortcut.description ?? shortcut.extensionPath;
  				const keyDisplay = formatKeyText(key, { capitalize: true });
@@ -62,17 +62,31 @@
 +		let page = 1;
 +		const overlay = this.ui.showOverlay({
 +			render: (width: number) => {
-+				const rows = markdown.render(width);
-+				page = Math.max(1, this.ui.terminal.rows - 6);
++				const inner = Math.max(1, width - 4);
++				const rows = markdown.render(inner);
++				page = Math.max(1, this.ui.terminal.rows - 7);
 +				maximum = Math.max(0, rows.length - page);
 +				top = Math.min(top, maximum);
++				const rule = (text: string) => theme.fg("border", text);
++				const frame = (line: string) => {
++					const fitted = TuiLayouts.truncateToWidth(line, inner);
++					return rule("│ ") + fitted + " ".repeat(Math.max(0, inner - visibleWidth(fitted))) + rule(" │");
++				};
++				const title = TuiLayouts.truncateToWidth(" Keyboard shortcuts ", Math.max(0, width - 3));
 +				return [
-+					theme.bold(theme.fg("accent", "Keyboard shortcuts")),
-+					...rows.slice(top, top + page),
-+					theme.fg("muted", "↑↓ / PgUp PgDn scroll · Esc closes"),
++					rule("╭─") + theme.bold(theme.fg("accent", title)) + rule("─".repeat(Math.max(0, width - 3 - visibleWidth(title))) + "╮"),
++					...rows.slice(top, top + page).map(frame),
++					frame(theme.fg("muted", `↑↓ PgUp/PgDn · ${top + 1}–${Math.min(rows.length, top + page)}/${rows.length} · Esc closes`)),
++					rule("╰" + "─".repeat(Math.max(0, width - 2)) + "╯"),
 +				];
 +			},
 +			invalidate: () => markdown.invalidate(),
++			handleMouse: (event: TuiLayouts.TuiMouseEvent) => {
++				if (event.type !== "wheel") return undefined;
++				top = Math.max(0, Math.min(maximum, top + (event.wheelDelta ?? 0)));
++				this.ui.requestRender();
++				return { handled: true };
++			},
 +			handleInput: (data: string) => {
 +				if (matchesKey(data, "escape") || matchesKey(data, "enter")) overlay.hide();
 +				else if (matchesKey(data, "up")) top = Math.max(0, top - 1);
@@ -81,6 +95,8 @@
 +				else if (matchesKey(data, "pageDown")) top = Math.min(maximum, top + page);
 +				else if (matchesKey(data, "home")) top = 0;
 +				else if (matchesKey(data, "end")) top = maximum;
++				else if (/^\x1b\[<64;\d+;\d+M$/.test(data)) top = Math.max(0, top - 3);
++				else if (/^\x1b\[<65;\d+;\d+M$/.test(data)) top = Math.min(maximum, top + 3);
 +				this.ui.requestRender();
 +			},
 +		}, { width: "90%", anchor: "center" });

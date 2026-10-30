@@ -13,6 +13,12 @@ model and starts a follow-up turn, so it never polls. `bg_status`, `bg_logs`
 (bounded output) and `bg_kill` inspect and stop tasks; `/jobs`, `/logs <id>` and
 `/kill <id>` do the same at the keyboard. Tasks live for the session.
 
+Tool results and completion notices use the shared custom cards and theme.
+The dock has a compact task icon. `/jobs` and `/logs <id>` open bordered views;
+Up/Down, Page Up/Down and Home/End scroll, and Escape or Enter closes them.
+Log views are bounded snapshots, not a live tail. Model-facing output and
+completion delivery are unchanged.
+
 Replaces pi-background-tasks. pi-subagents' `bg_wait` is separate: it waits for
 async subagent runs only.
 

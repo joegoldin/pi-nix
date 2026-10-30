@@ -14,9 +14,11 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { closeSync, createWriteStream, existsSync, mkdirSync, openSync, readSync, statSync, type WriteStream } from "node:fs";
 import { join, relative } from "node:path";
 import { randomBytes } from "node:crypto";
+import { stripTerminalSequences } from "@earendil-works/pi-tui";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { activityKey, reportActivity, type ActivityStatus } from "../program-status.ts";
+import { taskNotification, taskPanel, taskRows } from "./bg-ui.ts";
 import {
 	formatLogs,
 	formatNotification,
@@ -28,7 +30,6 @@ import {
 	sanitizeSegment,
 	statusLine,
 	type TaskSnapshot,
-	type TaskStatus,
 } from "./bg-format.ts";
 
 const MAX_LOG_BYTES = 50 * 1024;
@@ -93,7 +94,8 @@ export function registerBackgroundTasks(pi: ExtensionAPI): { running(): number }
 			? { state: "working", title: "Background tasks", message: `${running} background task${running === 1 ? "" : "s"} running` }
 			: latest ? { state: stateFor(latest), title: "Background tasks", message: `Background tasks settled; latest ${latest.status}` } : undefined);
 		try {
-			ctxRef?.ui.setStatus(STATUS_KEY, statusLine(list().map(snapshot), seen));
+			const summary = statusLine(list().map(snapshot), seen);
+			ctxRef?.ui.setStatus(STATUS_KEY, summary ? ctxRef.ui.theme.fg("accent", "\uf085 ") + ctxRef.ui.theme.fg("muted", summary) : undefined);
 		} catch {
 			// A replaced session's context; the next one refreshes it.
 		}
@@ -392,17 +394,9 @@ export function registerBackgroundTasks(pi: ExtensionAPI): { running(): number }
 		},
 	});
 
-	pi.registerMessageRenderer("background-task-notification", (message, _options, theme) => {
+	pi.registerMessageRenderer("background-task-notification", (message, options, theme) => {
 		const t = message.details as TaskSnapshot | undefined;
-		const colour: Record<TaskStatus, string> = { completed: "success", failed: "error", killed: "warning", running: "muted" };
-		const lines = t
-			? [
-					theme.fg(colour[t.status] as never, `[bg ${t.status}] `) + `${t.name} (${t.id})`,
-					theme.fg("dim", `Output: ${t.outputPath}`),
-					...(t.error ? [theme.fg("error", t.error)] : []),
-				]
-			: [String(message.content)];
-		return { render: () => lines, invalidate() {} };
+		return t ? taskNotification(t, theme, options.expanded) : { render: () => [String(message.content)], invalidate() {} };
 	});
 
 	pi.registerCommand("jobs", {
@@ -410,7 +404,8 @@ export function registerBackgroundTasks(pi: ExtensionAPI): { running(): number }
 		handler: async (_args, ctx) => {
 			for (const t of list()) seen.add(t.id);
 			refreshStatus();
-			ctx.ui.notify(formatSnapshotList(list().map(snapshot)), "info");
+			if (!ctx.hasUI) return ctx.ui.notify(formatSnapshotList(list().map(snapshot)), "info");
+			await ctx.ui.custom<void>((tui, theme, _keys, done) => taskPanel("Background tasks", () => taskRows(list().map(snapshot), theme), theme, () => tui.terminal.rows, () => tui.requestRender(), done), { overlay: true, overlayOptions: { width: "90%", anchor: "center" } });
 		},
 	});
 
@@ -422,7 +417,9 @@ export function registerBackgroundTasks(pi: ExtensionAPI): { running(): number }
 			try {
 				const t = resolveId(list(), id);
 				const { text, total, read } = readLog(t, clampBytes(bytes ? Number(bytes) : undefined), true);
-				ctx.ui.notify(formatLogs(text, total, read, true, t.outputPath), "info");
+				const output = formatLogs(text, total, read, true, t.outputPath);
+				if (!ctx.hasUI) return ctx.ui.notify(output, "info");
+				await ctx.ui.custom<void>((tui, theme, _keys, done) => taskPanel(`Logs · ${t.id}`, () => stripTerminalSequences(output).split("\n"), theme, () => tui.terminal.rows, () => tui.requestRender(), done), { overlay: true, overlayOptions: { width: "90%", anchor: "center" } });
 			} catch (err) {
 				ctx.ui.notify((err as Error).message, "error");
 			}
