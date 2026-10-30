@@ -93,8 +93,8 @@ test("group prompts and schemas describe one level, derived progress and stale-w
 
 test("group headers toggle independently by click and by command, including wrapped rows", async () => {
 	const h = uiHarness();
-	await h.act({ action: "create", subject: "Mac acceptance with a long heading", kind: "group" });
-	await h.act({ action: "create", subject: "Clipboard", parentId: 1 });
+	await h.act({ action: "create", acceptanceCriteria: "The named outcome is verified", subject: "Mac acceptance with a long heading", kind: "group" });
+	await h.act({ action: "create", acceptanceCriteria: "The named outcome is verified", subject: "Clipboard", parentId: 1 });
 	const widget = h.widget();
 	expect(widget.render(80).join("\n")).toContain("Clipboard");
 	widget.handleMouse({ type: "click", button: "left", y: 1 });
@@ -112,7 +112,7 @@ test("group headers toggle independently by click and by command, including wrap
 
 test("settling pauses unfinished work durably without claiming completion", async () => {
 	const h = uiHarness();
-	await h.act({ action: "create", subject: "Verify Mac", description: "Waiting for hardware; rerun acceptance" });
+	await h.act({ action: "create", acceptanceCriteria: "The named outcome is verified", subject: "Verify Mac", description: "Waiting for hardware; rerun acceptance" });
 	await h.act({ action: "update", id: 1, status: "in_progress" });
 	h.emit("agent_settled");
 	expect(h.entries.at(-1).customType).toBe("pi-custom:todo-state");
@@ -123,7 +123,7 @@ test("settling pauses unfinished work durably without claiming completion", asyn
 
 test("restoring a branch clears stale activity, while compaction during a run preserves it", async () => {
 	const h = uiHarness();
-	await h.act({ action: "create", subject: "Work" });
+	await h.act({ action: "create", acceptanceCriteria: "The named outcome is verified", subject: "Work" });
 	await h.act({ action: "update", id: 1, status: "in_progress" });
 	h.emit("session_compact");
 	expect((await h.act({ action: "get", id: 1 })).content[0].text).toContain("[in_progress]");
@@ -133,10 +133,10 @@ test("restoring a branch clears stale activity, while compaction during a run pr
 
 test("settlement pauses all active owners but preserves verified completion", async () => {
 	const h = uiHarness();
-	for (const owner of ["linux", "mac", "done"]) await h.act({ action: "create", subject: owner, owner });
+	for (const owner of ["linux", "mac", "done"]) await h.act({ action: "create", acceptanceCriteria: "The named outcome is verified", subject: owner, owner });
 	await h.act({ action: "update", id: 1, status: "in_progress" });
 	await h.act({ action: "update", id: 2, status: "in_progress" });
-	await h.act({ action: "update", id: 3, status: "completed" });
+	await h.act({ action: "update", id: 3, evidence: "Verified the named outcome", status: "completed" });
 	h.emit("agent_settled", { aborted: true });
 	const result = await h.act({ action: "list" });
 	expect(result.details.tasks.map((t: any) => t.status)).toEqual(["pending", "pending", "completed"]);
@@ -144,12 +144,12 @@ test("settlement pauses all active owners but preserves verified completion", as
 
 test("clear resets group collapse state when ids are reused", async () => {
 	const h = uiHarness();
-	await h.act({ action: "create", subject: "Old", kind: "group" });
-	await h.act({ action: "create", subject: "Old child", parentId: 1 });
+	await h.act({ action: "create", acceptanceCriteria: "The named outcome is verified", subject: "Old", kind: "group" });
+	await h.act({ action: "create", acceptanceCriteria: "The named outcome is verified", subject: "Old child", parentId: 1 });
 	await h.commands.get("todos").handler("1", h.ctx);
 	await h.act({ action: "clear" });
-	await h.act({ action: "create", subject: "New", kind: "group" });
-	await h.act({ action: "create", subject: "New child", parentId: 1 });
+	await h.act({ action: "create", acceptanceCriteria: "The named outcome is verified", subject: "New", kind: "group" });
+	await h.act({ action: "create", acceptanceCriteria: "The named outcome is verified", subject: "New child", parentId: 1 });
 	expect(h.widget().render(80).join("\n")).toContain("New child");
 });
 
@@ -162,9 +162,9 @@ function fakeTodoClock() {
 
 test("completed rows expire during a long run, but the records and counts survive", async () => {
 	const timer = fakeTodoClock(); const h = uiHarness(timer.clock);
-	await h.act({ action: "create", subject: "Finished work" });
-	await h.act({ action: "create", subject: "Next work" });
-	await h.act({ action: "update", id: 1, status: "completed" });
+	await h.act({ action: "create", acceptanceCriteria: "The named outcome is verified", subject: "Finished work" });
+	await h.act({ action: "create", acceptanceCriteria: "The named outcome is verified", subject: "Next work" });
+	await h.act({ action: "update", id: 1, evidence: "Verified the named outcome", status: "completed" });
 	expect(h.widget().render(80).join("\n")).toContain("Finished work");
 	timer.advance(30_000);
 	await h.act({ action: "list" });
@@ -182,8 +182,8 @@ test("completed rows expire during a long run, but the records and counts surviv
 
 test("all-complete and restored lists clean up without a new run; shutdown cancels the timer", async () => {
 	const timer = fakeTodoClock(); const h = uiHarness(timer.clock);
-	await h.act({ action: "create", subject: "Done" });
-	await h.act({ action: "update", id: 1, status: "completed" });
+	await h.act({ action: "create", acceptanceCriteria: "The named outcome is verified", subject: "Done" });
+	await h.act({ action: "update", id: 1, evidence: "Verified the named outcome", status: "completed" });
 	timer.advance(60_001);
 	expect(h.widget()).toBeUndefined();
 	expect(timer.jobs.size).toBe(0);
@@ -198,12 +198,12 @@ test("all-complete and restored lists clean up without a new run; shutdown cance
 
 test("old deadlines do not hide reused task IDs after clearing", async () => {
 	const timer = fakeTodoClock(); const h = uiHarness(timer.clock);
-	await h.act({ action: "create", subject: "Old" });
-	await h.act({ action: "update", id: 1, status: "completed" });
+	await h.act({ action: "create", acceptanceCriteria: "The named outcome is verified", subject: "Old" });
+	await h.act({ action: "update", id: 1, evidence: "Verified the named outcome", status: "completed" });
 	timer.advance(30_000);
 	await h.act({ action: "clear" });
-	await h.act({ action: "create", subject: "New" });
-	await h.act({ action: "update", id: 1, status: "completed" });
+	await h.act({ action: "create", acceptanceCriteria: "The named outcome is verified", subject: "New" });
+	await h.act({ action: "update", id: 1, evidence: "Verified the named outcome", status: "completed" });
 	timer.advance(30_001);
 	expect(h.widget().render(80).join("\n")).toContain("New");
 	timer.advance(30_000);
@@ -212,8 +212,8 @@ test("old deadlines do not hide reused task IDs after clearing", async () => {
 
 test("starting the next run hides completions and cancels their pending deadline", async () => {
 	const timer = fakeTodoClock(); const h = uiHarness(timer.clock);
-	await h.act({ action: "create", subject: "Done" });
-	await h.act({ action: "update", id: 1, status: "completed" });
+	await h.act({ action: "create", acceptanceCriteria: "The named outcome is verified", subject: "Done" });
+	await h.act({ action: "update", id: 1, evidence: "Verified the named outcome", status: "completed" });
 	expect(timer.jobs.size).toBe(1);
 	h.emit("agent_start");
 	expect(h.widget()).toBeUndefined();
@@ -222,11 +222,11 @@ test("starting the next run hides completions and cancels their pending deadline
 
 test("separate completions retain their own deadlines", async () => {
 	const timer = fakeTodoClock(); const h = uiHarness(timer.clock);
-	await h.act({ action: "create", subject: "First" });
-	await h.act({ action: "create", subject: "Second" });
-	await h.act({ action: "update", id: 1, status: "completed" });
+	await h.act({ action: "create", acceptanceCriteria: "The named outcome is verified", subject: "First" });
+	await h.act({ action: "create", acceptanceCriteria: "The named outcome is verified", subject: "Second" });
+	await h.act({ action: "update", id: 1, evidence: "Verified the named outcome", status: "completed" });
 	timer.advance(30_000);
-	await h.act({ action: "update", id: 2, status: "completed" });
+	await h.act({ action: "update", id: 2, evidence: "Verified the named outcome", status: "completed" });
 	expect(timer.jobs.size).toBe(1);
 	timer.advance(30_001);
 	expect(h.widget().render(80).join("\n")).not.toContain("First");
@@ -236,123 +236,6 @@ test("separate completions retain their own deadlines", async () => {
 	expect(timer.jobs.size).toBe(0);
 });
 
-
-test("pruning reminders use completion thresholds, not display expiry, and never start a run", async () => {
-	const timer = fakeTodoClock(); const h = uiHarness(timer.clock);
-	for (let i = 0; i < 10; i++) await h.act({ action: "create", subject: `Task ${i}` });
-	for (let id = 1; id <= 4; id++) await h.act({ action: "update", id, status: "completed" });
-	expect(h.messages).toHaveLength(0);
-	await h.act({ action: "update", id: 5, status: "completed" });
-	expect(h.messages).toHaveLength(0);
-	timer.advance(60_001);
-	expect(h.messages).toHaveLength(1);
-	expect(h.messages[0].message.content).toContain("5 of 10");
-	expect(h.messages[0].message.content).toContain("tombstone");
-	expect(h.messages[0].options).toEqual({ deliverAs: "followUp", triggerTurn: false });
-	await h.act({ action: "list" });
-	h.emit("session_compact");
-	h.emit("tool_execution_end", { toolName: "bash", isError: false });
-	expect(h.messages).toHaveLength(1);
-	timer.advance(600_000);
-	expect(h.messages).toHaveLength(1);
-	h.emit("tool_execution_end", { toolName: "bash", isError: false });
-	expect(h.messages).toHaveLength(1);
-	h.entries.push({ type: "custom_message", customType: h.messages[0].message.customType, details: h.messages[0].message.details });
-	h.emit("agent_settled");
-	timer.advance(60_001);
-	expect(h.messages).toHaveLength(2);
-	expect(h.messages[1].message.content).toContain("required evidence");
-});
-
-test("ten completed tasks trigger maintenance even when most work remains", async () => {
-	const timer = fakeTodoClock(); const h = uiHarness(timer.clock);
-	for (let i = 0; i < 30; i++) await h.act({ action: "create", subject: `Task ${i}` });
-	for (let id = 1; id <= 9; id++) await h.act({ action: "update", id, status: "completed" });
-	expect(h.messages).toHaveLength(0);
-	await h.act({ action: "update", id: 10, status: "completed" });
-	timer.advance(60_001);
-	expect(h.messages).toHaveLength(1);
-});
-
-test("background reminders preserve dependency evidence and wait until prior guidance is consumed", async () => {
-	const timer = fakeTodoClock(); const h = uiHarness(timer.clock);
-	for (let i = 0; i < 5; i++) await h.act({ action: "create", subject: `Evidence ${i}` });
-	await h.act({ action: "create", subject: "Needs evidence", blockedBy: [1, 2, 3, 4, 5] });
-	for (let id = 1; id <= 5; id++) await h.act({ action: "update", id, status: "completed" });
-	expect(h.messages).toHaveLength(0);
-	await h.act({ action: "update", id: 6, removeBlockedBy: [5] });
-	timer.advance(60_001);
-	expect(h.messages).toHaveLength(1);
-	expect(h.messages[0].message.content).toContain("Candidates: #5.");
-	timer.advance(600_000);
-	expect(h.messages).toHaveLength(1);
-	h.entries.push({ type: "custom_message", customType: h.messages[0].message.customType, details: h.messages[0].message.details });
-	h.emit("agent_start");
-	timer.advance(60_001);
-	expect(h.messages).toHaveLength(2);
-	const result = await h.act({ action: "list" });
-	expect(result.details.tasks).toHaveLength(6);
-	expect(result.details.tasks.filter((t: any) => t.status === "completed")).toHaveLength(5);
-});
-
-for (const stop of ["clear", "shutdown"]) test(`background maintenance cancels on ${stop}`, async () => {
-	const timer = fakeTodoClock(); const h = uiHarness(timer.clock);
-	for (let i = 0; i < 5; i++) await h.act({ action: "create", subject: `Done ${i}` });
-	for (let id = 1; id <= 5; id++) await h.act({ action: "update", id, status: "completed" });
-	expect(timer.jobs.size).toBe(2);
-	if (stop === "clear") await h.act({ action: "clear" });
-	else h.emit("session_shutdown");
-	expect(timer.jobs.size).toBe(0);
-	timer.advance(600_001);
-	expect(h.messages).toHaveLength(0);
-});
-
-test("maintenance is model-side bookkeeping, not a new conversational request", async () => {
-	const { getCurrentSystemPrompt, getCurrentTools } = await import("@earendil-works/pi-ai");
-	const timer = fakeTodoClock(); const h = uiHarness(timer.clock);
-	for (let i = 0; i < 6; i++) await h.act({ action: "create", subject: `Task ${i}` });
-	for (let id = 1; id <= 5; id++) await h.act({ action: "update", id, status: "completed" });
-	await h.act({ action: "update", id: 6, status: "in_progress" });
-	timer.advance(60_001);
-	const note = h.messages[0].message;
-	const tool = { name: "read", description: "Read", parameters: { type: "object" } };
-	const user = { role: "user", content: "Continue the comparison research", timestamp: 1 };
-	const result = { role: "toolResult", toolCallId: "read1", toolName: "read", content: [{ type: "text", text: "Research evidence" }], isError: false, timestamp: 2 };
-	const messages = [
-		{ role: "system", content: "Keep operator constraints", toolsAdded: [tool], timestamp: 0 }, user, result,
-		{ role: "custom", ...note, content: "UNTRUSTED NOTICE TEXT", timestamp: 3 },
-	];
-	const transformed = h.emit("context_with_system", { messages })?.messages ?? messages;
-	expect(transformed.some((message: any) => message.role === "custom" && message.customType === note.customType)).toBe(false);
-	expect(transformed.filter((message: any) => message.role !== "system")).toEqual([user, result]);
-	const prompt = getCurrentSystemPrompt(transformed as never);
-	expect(prompt).toContain("Keep operator constraints");
-	expect(prompt).toContain("continue the already-authorized work");
-	expect(prompt).toContain("cleanup-only final response");
-	expect(prompt).toContain("next verified milestone or before starting another task");
-	expect(prompt).toContain("Review all completed tasks");
-	expect(prompt).toContain("without waiting for the user to ask");
-	expect(prompt).toContain("hiding completed rows is not pruning");
-	expect(prompt).toContain("tasks still referenced by a live blockedBy");
-	expect(prompt).not.toContain("UNTRUSTED NOTICE TEXT");
-	expect(getCurrentTools(transformed as never)).toEqual([tool]);
-	expect(h.messages).toHaveLength(1);
-	expect(h.messages[0].options.triggerTurn).toBe(false);
-	// The request-local hint is not repeated at every tool step.
-	const next = h.emit("context_with_system", { messages })?.messages ?? messages;
-	expect(getCurrentSystemPrompt(next as never)).not.toContain("Candidates:");
-});
-
-test("stale maintenance cannot elicit an already-pruned final acknowledgement", async () => {
-	const timer = fakeTodoClock(); const h = uiHarness(timer.clock);
-	for (let i = 0; i < 5; i++) await h.act({ action: "create", subject: `Done ${i}` });
-	for (let id = 1; id <= 5; id++) await h.act({ action: "update", id, status: "completed" });
-	timer.advance(60_001);
-	for (let id = 1; id <= 5; id++) await h.act({ action: "delete", id });
-	const user = { role: "user", content: "Keep researching", timestamp: 1 };
-	const messages = [user, { role: "custom", ...h.messages[0].message, timestamp: 2 }];
-	expect(h.emit("context_with_system", { messages })?.messages ?? messages).toEqual([user]);
-});
 
 for (const idle of [false, true]) test(`/todo adds work asynchronously (${idle ? "idle" : "busy"})`, async () => {
  const h = uiHarness();
@@ -371,4 +254,62 @@ test("bare /todo displays the list without asking the model", async () => {
  expect(h.userMessages).toHaveLength(0);
  expect(h.notices.at(-1)).toBe("No todos yet. Ask the agent to add some!");
  expect(h.commands.has("todos")).toBe(true);
+});
+
+test("live task context tracks work and verification without starting a run", async () => {
+	const timer = fakeTodoClock(); const h = uiHarness(timer.clock);
+	await h.act({ action: "create", subject: "Count regression", acceptanceCriteria: "Hidden completion regression passes" });
+	const input = [{ role: "user", content: "Continue", timestamp: 1 }];
+	let context = h.emit("context_with_system", { messages: input })?.messages ?? input;
+	expect(context.at(-1).content).toContain("No task is in progress");
+	expect(context.at(-1).content).toContain("Hidden completion regression passes");
+	await h.act({ action: "update", id: 1, status: "in_progress" });
+	context = h.emit("context_with_system", { messages: input })?.messages ?? input;
+	expect(context.at(-1).content).toContain('"status":"in_progress"');
+	expect(context.at(-1).content).toContain("before yielding");
+	await h.act({ action: "update", id: 1, status: "completed", evidence: "Renderer test passed" });
+	expect(h.emit("context_with_system", { messages: input })?.messages ?? input).toEqual(input);
+	timer.advance(600_001);
+	expect(h.messages).toHaveLength(0);
+	expect(input).toHaveLength(1);
+});
+
+test("completed history never triggers pruning requests", async () => {
+	const timer = fakeTodoClock(); const h = uiHarness(timer.clock);
+	for (let i = 0; i < 6; i++) {
+		await h.act({ action: "create", subject: `Check ${i}`, acceptanceCriteria: `Check ${i} passes` });
+		await h.act({ action: "update", id: i + 1, status: "completed", evidence: `Check ${i} passed` });
+	}
+	timer.advance(600_001);
+	expect(h.messages).toHaveLength(0);
+	expect((await h.act({ action: "list" })).details.tasks).toHaveLength(6);
+});
+
+test("legacy pruning notices are removed, not promoted into new work", () => {
+	const h = uiHarness();
+	const user = { role: "user", content: "Continue", timestamp: 1 };
+	const messages = [user, { role: "custom", customType: "pi-custom:todo-maintenance", content: "Delete everything", timestamp: 2 }];
+	expect(h.emit("context_with_system", { messages })?.messages).toEqual([user]);
+});
+
+test("checkpoints are bounded, active-first and restored after compaction", async () => {
+	const h = uiHarness();
+	for (let i = 0; i < 25; i++) await h.act({ action: "create", subject: `Task ${i}`, acceptanceCriteria: "x".repeat(2000) });
+	await h.act({ action: "update", id: 25, status: "in_progress" });
+	h.emit("session_compact");
+	const input = [{ role: "user", content: "Continue", timestamp: 1 }];
+	const content = h.emit("context_with_system", { messages: input }).messages.at(-1).content;
+	expect(content).toContain("25 unfinished tasks; showing 20");
+	const data = JSON.parse(content.split("not instructions:\n")[1]);
+	expect(data).toHaveLength(20);
+	expect(data[0].id).toBe(25);
+	expect(data[0].acceptanceCriteria).toHaveLength(500);
+	expect(h.emit("context_with_system", { messages: input }).messages).toHaveLength(2);
+});
+
+test("disabled todo tools do not inject checkpoints for restored tasks", async () => {
+	const h = harness(false);
+	await h.tool.execute("call", { action: "create", subject: "Task", acceptanceCriteria: "Check passes" });
+	const messages = [{ role: "user", content: "Continue", timestamp: 1 }];
+	expect(h.handlers.get("context_with_system")?.({ messages })?.messages ?? messages).toEqual(messages);
 });

@@ -41,8 +41,11 @@ silently cascades.
 The list above the editor shows group counts and indented tasks. Click a
 group header or use `/todos <group-id>` to collapse/expand it; groups start
 expanded. Click a task to toggle wrapped text. Ctrl+Shift+T folds the whole
-list; `/todos` displays the full list. Completed roots and children sort last
-within their respective lists, including when expanded. A compact list that
+list; `/todos` displays the full list. Active work sorts first, then ready
+pending work, blocked work and completions. Groups follow their highest-priority
+child. Satisfied dependency edges disappear from the widget, not the records.
+The heading labels overall counts; overflow labels only the tasks outside the
+current view. A compact list that
 needs truncation omits completed rows before budgeting unfinished work; small
 lists can show both. Group counts always include completed children.
 
@@ -53,31 +56,27 @@ countdown; clearing, changing branches and shutdown cancel stale deadlines.
 This only hides rows: completed records, dependencies and evidence remain intact.
 Expanded views and `/todos` still expose completed history.
 
-A separate in-process background task asks the model to prune obsolete completed
-records when at least five are complete and they make up half the list, or ten
-are complete regardless of the ratio. After a one-minute delay it queues a
-quiet follow-up message—not steering, a shell process, or a separate model call.
-It never starts an idle agent. Only one reminder may be pending; another can be
-sent after the previous message reaches conversation history and at least ten
-minutes have passed. Reads and compaction do not reset its deadline. Clear,
-branch changes and shutdown cancel pending timers.
+Each new task requires `acceptanceCriteria`: a bounded, observable completion
+check. Once set, it cannot be rewritten. Newly discovered scope needs another
+task; progress, blockers and next actions belong in `description`. A transition
+to completed requires `evidence` naming the check and observed result. These
+fields are preserved in snapshots and shown by `get`. Legacy tasks remain
+readable and can acquire criteria on update. Validation requires recorded
+criteria and evidence, not proof that their claims are true.
 
-The reminder tells the model to review the current list before tombstoning
-obsolete completed tasks, preserving unfinished work, blockers, dependency
-references and required evidence. The background task never deletes tasks itself;
-if every completion is still referenced, it sends no reminder. At request time,
-maintenance receipts are removed from conversational messages so they cannot
-become a new user request. An eligible reminder becomes one bounded system hint,
-reconstructed from the live list rather than its raw text. Stale reminders are
-omitted. Cleanup is quiet bookkeeping: continue already-authorized work afterward,
-not a cleanup-only final response. This never restarts completed, blocked or
-waiting work, and the original receipt remains in session history for auditing.
+Every model request receives a request-local checkpoint from current unfinished
+tasks, active first (up to 20 tasks, with bounded text and a total count). It
+asks the agent to resume the actual task when none is active, reconcile verified
+milestones before switching work, and record blockers before yielding. It does
+not queue messages, start turns, or infer completion. Completed history stays
+available without pruning; legacy pruning notices are excluded from model
+context while remaining in recorded history.
 
 Starting a task returns conflicting active tasks to pending. Simultaneous
 work requires distinct explicit owners, not several unowned in-progress
 rows. On settlement, including interruption, or session/branch restoration,
 unfinished tasks return to pending; completion is never inferred. Descriptions
-retain acceptance criteria, evidence, blockers and next actions. Running
+retain blockers and next actions; criteria and evidence have separate fields. Running
 background jobs retain their own lifecycle; record their IDs in the task
 rather than using an idle agent's status as proof that work is running.
 

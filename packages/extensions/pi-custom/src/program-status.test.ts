@@ -53,10 +53,10 @@ test("todo progress counts live tasks, not groups or tombstones, and pending is 
 	h.emit("session_start");
 	const call = async (params: object) => { await h.tools.get("todo").execute("test", params); h.emit("tool_execution_end", { toolName: "todo" }); };
 	await call({ action: "create", subject: "PRIVATE_GROUP", kind: "group" });
-	await call({ action: "create", subject: "one", parentId: 1 });
-	await call({ action: "create", subject: "two", parentId: 1 });
+	await call({ action: "create", subject: "one", acceptanceCriteria: "First outcome verified", parentId: 1 });
+	await call({ action: "create", subject: "two", acceptanceCriteria: "Second outcome verified", parentId: 1 });
 	expect(h.reports.at(-1)?.status?.state).toBe("idle");
-	await call({ action: "update", id: 2, status: "completed" });
+	await call({ action: "update", id: 2, status: "completed", evidence: "First outcome passed" });
 	await call({ action: "update", id: 3, status: "in_progress" });
 	expect(h.reports.at(-1)?.status).toMatchObject({ state: "working", progress: 50 });
 	expect(JSON.stringify(h.reports)).not.toContain("PRIVATE_GROUP");
