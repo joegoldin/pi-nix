@@ -185,23 +185,33 @@ diff --git a/packages/coding-agent/src/core/agent-session.ts b/packages/coding-a
 index 3a9174cf..c7a21dd4 100644
 --- a/packages/coding-agent/src/core/agent-session.ts
 +++ b/packages/coding-agent/src/core/agent-session.ts
-@@ -393,6 +393,7 @@ export class AgentSession {
+@@ -393,6 +393,8 @@ export class AgentSession {
  
  	/** Tracks pending steering messages for UI display. Removed when delivered. */
  	private _steeringMessages: string[] = [];
 +	private readonly _submittedQueueMessages = new WeakSet<AgentMessage>();
++	private readonly _sendingQueueMessages = new Set<AgentMessage>();
  	/** Tracks pending follow-up messages for UI display. Removed when delivered. */
  	private _followUpMessages: string[] = [];
  	/** Messages queued to be included with the next user prompt as context ("asides"). */
-@@ -1122,7 +1123,7 @@ export class AgentSession {
+@@ -1122,7 +1123,8 @@ export class AgentSession {
  		if (event.type === "message_start" && event.message.role === "user") {
  			this._overflowRecoveryAttempted = false;
++			this._sendingQueueMessages.delete(event.message);
  			const messageText = contentText(event.message.content, "");
 -			if (messageText) {
 +			if (!this._submittedQueueMessages.delete(event.message)) {
  				// Check steering queue first
  				const steeringIndex = this._steeringMessages.indexOf(messageText);
  				if (steeringIndex !== -1) {
+@@ -1141,3 +1141,7 @@ export class AgentSession {
+ 
+ 		// Emit to extensions first, then notify public listeners.
++		if (event.type === "agent_end") {
++			this._sendingQueueMessages.clear();
++			this._emitQueueUpdate();
++		}
+ 		await this._emitExtensionEvent(event);
 @@ -1870,12 +1871,16 @@ export class AgentSession {
  	 * starting another, and an abort requested meanwhile aborts the run as soon as it exists.
  	 * @param onStarted Called once the run's messages are prepared, before the first request.
@@ -229,13 +239,26 @@ index 3a9174cf..c7a21dd4 100644
  
  		// Compaction before the prompt may have scheduled a retry; the new prompt replaces it.
  		this._failedResponse = undefined;
-@@ -2473,6 +2478,37 @@ export class AgentSession {
+@@ -2465,3 +2465,4 @@ export class AgentSession {
+ 	clearQueue(): { steering: string[]; followUp: string[] } {
++		this._sendingQueueMessages.clear();
+ 		const steering = [...this._steeringMessages];
+ 		const followUp = [...this._followUpMessages];
+@@ -2473,6 +2478,45 @@ export class AgentSession {
  		return { steering, followUp };
  	}
  
++	/** Captured messages still awaiting delivery, never later queue arrivals. */
++	get queuedMessagesSendingCount(): number {
++		return this._sendingQueueMessages.size;
++	}
++
 +	/** Deliver processed queued input at the next safe boundary, or start it when idle. */
 +	async sendQueuedMessagesNow(): Promise<void> {
 +		if (!this.isIdle) {
++			for (const message of this.agent.getQueuedMessages()) {
++				if (message.role === "user") this._sendingQueueMessages.add(message);
++			}
 +			this.agent.prioritizeQueuedUserMessages();
 +			this._steeringMessages.push(...this._followUpMessages);
 +			this._followUpMessages = [];
@@ -317,7 +340,7 @@ index e4e2ffb1..fc847b4f 100644
  		this.defaultEditor.onAction("app.message.dequeue", () => this.handleDequeue());
  		this.defaultEditor.onAction("app.session.new", () => this.handleClearCommand());
  		this.defaultEditor.onAction("app.session.tree", () => this.showTreeSelector());
-@@ -4443,6 +4449,40 @@ export class InteractiveMode {
+@@ -4443,6 +4449,42 @@ export class InteractiveMode {
  		}
  	}
  
@@ -327,6 +350,8 @@ index e4e2ffb1..fc847b4f 100644
 +	private async handleSendQueuedNow(interrupt = false): Promise<void> {
 +		if (this.sendNowPending || !this.session.pendingMessageCount) return;
 +		this.sendNowPending = true;
++		this.updatePendingMessagesDisplay();
++		this.ui.requestRender();
 +		const generation = ++this.sendNowGeneration;
 +		const steering = globalThis as Record<symbol, unknown>;
 +		const key = Symbol.for("pi-custom.steering");
@@ -358,12 +383,15 @@ index e4e2ffb1..fc847b4f 100644
  	private async handleFollowUp(): Promise<void> {
  		const text = (this.editor.getExpandedText?.() ?? this.editor.getText()).trim();
  		if (!text) return;
-@@ -4697,15 +4737,16 @@ export class InteractiveMode {
+@@ -4697,15 +4737,23 @@ export class InteractiveMode {
  		if (steeringMessages.length > 0 || followUpMessages.length > 0) {
  			this.pendingMessagesContainer.addChild(new Spacer(1));
++			const sending = this.session.queuedMessagesSendingCount;
++			let sendingRemaining = sending;
  			for (const message of steeringMessages) {
 -				const text = theme.fg("dim", `Steering: ${message}`);
-+				const text = theme.fg("dim", `Steering: ${message || "[image attachment]"}`);
++				const armed = sendingRemaining-- > 0;
++				const text = theme.fg(armed ? "accent" : "dim", `${armed ? "Sending next" : "Steering"}: ${message || "[image attachment]"}`);
  				this.pendingMessagesContainer.addChild(new TruncatedText(text, 1, 0));
  			}
  			for (const message of followUpMessages) {
@@ -373,7 +401,11 @@ index e4e2ffb1..fc847b4f 100644
  			}
  			const dequeueHint = this.getAppKeyDisplay("app.message.dequeue");
 -			const hintText = theme.fg("dim", `↳ ${dequeueHint} to edit all queued messages`);
-+			const sendHint = ` · ${this.getAppKeyDisplay("app.message.sendNow")} after current operation · ${this.getAppKeyDisplay("app.message.interruptAndSend")} interrupt + send`;
++			const sendHint = this.sendNowPending
++				? " · Scheduling queued messages…"
++				: sending > 0
++					? ` · ✓ ${sending} ${sending === 1 ? "message" : "messages"} will send after current operation`
++					: ` · ${this.getAppKeyDisplay("app.message.sendNow")} after current operation · ${this.getAppKeyDisplay("app.message.interruptAndSend")} interrupt + send`;
 +			const hintText = theme.fg("dim", `↳ ${dequeueHint} to edit all queued messages${sendHint}`);
  			this.pendingMessagesContainer.addChild(new TruncatedText(hintText, 1, 0));
  		}

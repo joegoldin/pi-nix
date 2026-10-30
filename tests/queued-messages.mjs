@@ -55,6 +55,17 @@ assert(text.includes("Alt+Up to edit"));
 assert(text.includes("Ctrl+Enter after current operation"));
 assert(text.includes("Ctrl+Shift+Enter interrupt + send"));
 assert(text.includes("/tmp/screenshot.png"));
+display.session.queuedMessagesSendingCount = 1;
+proto.updatePendingMessagesDisplay.call(display);
+const armed = display.pendingMessagesContainer.render(160).map(stripTerminalSequences).join("\n");
+assert(armed.includes("Sending next:"), "Ctrl-Enter must visibly arm queued messages");
+assert(armed.includes("will send after current operation"));
+assert(!armed.includes("Ctrl+Enter after current operation"), "an armed batch must not still ask to be sent");
+display.session.queuedMessagesSendingCount = 0;
+display.sendNowPending = true;
+proto.updatePendingMessagesDisplay.call(display);
+assert(display.pendingMessagesContainer.render(160).map(stripTerminalSequences).join("\n").includes("Scheduling queued messages"));
+display.sendNowPending = false;
 assert(!text.includes("Queued messages:"), "there is only the native queue hint");
 display.getAllQueuedMessages = () => ({ steering: [""], followUp: [] });
 proto.updatePendingMessagesDisplay.call(display);
@@ -254,7 +265,9 @@ for (const { interrupt, followUp, atBoundary, cancel } of [
       assert.equal(requests.length, 1, "wait for the running operation, not just its start");
       assert.deepEqual(live.getFollowUpMessages(), [], "follow-ups become next-boundary input");
       assert.deepEqual(live.getSteeringMessages(), ["same text", "follow-up"]);
+      assert.equal(live.queuedMessagesSendingCount, 2, "only the captured batch is armed");
       await live._queueSteer("same text", [image]);
+      assert.equal(live.queuedMessagesSendingCount, 2, "a later duplicate is not armed");
       finish.resolve();
     }
     await within(Promise.all([running, sending]));
@@ -271,6 +284,7 @@ for (const { interrupt, followUp, atBoundary, cancel } of [
     assert.deepEqual(events.filter(e => e.type === "agent_settled").map(e => e.aborted), cancel ? [true] : interrupt ? [true, false] : [false]);
     assert.equal(live.agent.getQueuedMessages().length, 0, "cancelled input must not reappear after settlement");
     assert.equal(live.pendingMessageCount, 0);
+    assert.equal(live.queuedMessagesSendingCount, 0, "delivery or cancellation clears feedback");
     assert.equal(ui.editor.getText(), "UNSUBMITTED DRAFT");
     assert.equal(live.isIdle, true);
   } finally {
