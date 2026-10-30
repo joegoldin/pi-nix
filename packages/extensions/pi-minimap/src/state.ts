@@ -86,7 +86,7 @@ export const emptyUsage = (): Usage => ({
 });
 export const emptySnapshot = (): Snapshot => ({
 	version: 2,
-	enabled: true,
+	enabled: false,
 	model: "qwen",
 	lastId: "",
 	history: [],

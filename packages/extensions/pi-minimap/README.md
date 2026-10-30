@@ -3,10 +3,10 @@
 A source-linked semantic sidebar for fullscreen Pi. It observes the conversation;
 it cannot run tools, edit files, steer the agent or inject chat messages.
 
-Enable the package with `programs.pi.coding-agent.minimap.enable = true`, and it opens by
-default in new fullscreen sessions. Use `/minimap off` to hide it and pause
-inference. Explicit visibility choices and the selected model are restored from
-the current session branch.
+Enable the package with `programs.pi.coding-agent.minimap.enable = true`. New chats
+start with the panel off; use `/minimap on` to open it. Reopened chats restore the
+last saved on/off choice and selected model from the current session branch.
+Use `/minimap off` to hide it and pause inference.
 
 ## Controls
 

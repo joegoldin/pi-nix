@@ -787,11 +787,17 @@ test("structured focus does not need a duplicate prose purpose field", () => {
 	expect(result.focus?.[0]?.subtopics).toEqual(["Check batching"]);
 });
 
- test("new sessions show the minimap, while saved hidden sessions stay hidden", () => {
- expect(emptySnapshot().enabled).toBe(true);
- const hidden = {...emptySnapshot(), enabled: false};
- expect(restore([{type: "custom", customType: STATE_TYPE, data: hidden}]).enabled).toBe(false);
- });
+test("new chats default off and reopened chats restore their last minimap choice", () => {
+	expect(emptySnapshot().enabled).toBe(false);
+	expect(restore([]).enabled).toBe(false);
+	const saved = (enabled: boolean) => ({
+		type: "custom", customType: STATE_TYPE, data: { ...emptySnapshot(), enabled },
+	});
+	expect(restore([saved(true)]).enabled).toBe(true);
+	expect(restore([saved(false)]).enabled).toBe(false);
+	expect(restore([saved(false), saved(true)]).enabled).toBe(true);
+	expect(restore([saved(true), saved(false)]).enabled).toBe(false);
+});
 
 
 test("scrollable summary text survives parsing and session restoration without short cuts", () => {
