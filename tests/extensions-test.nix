@@ -31,6 +31,7 @@ let
     # vendor a lockfile.
     # They are listed in sorted order with the rest rather than grouped,
     # because the assertion compares against `builtins.attrNames`, which sorts.
+    "ext-aliou-pi-synthetic"
     "ext-pi-custom"
     "ext-pi-fast"
     "ext-pi-foreign-skills"
@@ -39,6 +40,7 @@ let
     "ext-pi-minimap"
     "ext-pi-notify"
     "ext-pi-permissions"
+    "ext-pi-provider-umans"
     "ext-pi-subagents"
     "ext-pi-voice"
     "ext-pi-web-access"
@@ -108,6 +110,8 @@ pkgs.runCommand "pi-nix-extensions-tests" { nativeBuildInputs = [ pkgs.jq ]; } '
     done
   }
 
+  check ${exts.ext-aliou-pi-synthetic} deps
+  check ${exts.ext-pi-provider-umans} deps
   check ${exts.ext-pi-subagents} deps
   check ${exts.ext-pi-permissions} deps
   check ${exts.ext-pi-mcp-adapter} deps

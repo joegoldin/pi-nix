@@ -40,5 +40,23 @@
     "entrypoints": [],
     "skills": [],
     "prompts": []
+  },
+  "@aliou/pi-synthetic": {
+    "version": "0.30.0",
+    "url": "https://registry.npmjs.org/@aliou/pi-synthetic/-/pi-synthetic-0.30.0.tgz",
+    "hash": "sha512-vIHNmVnTrB34mkiL8cbG+ZYIgHPFMAUOip/BPsRlD6YQzGvvFtgIKy1ETdeFcSJLzkFM5YcClNcqs/HoBN0hxA==",
+    "bundled": false,
+    "entrypoints": [],
+    "skills": [],
+    "prompts": []
+  },
+  "pi-provider-umans": {
+    "version": "1.5.1",
+    "url": "https://registry.npmjs.org/pi-provider-umans/-/pi-provider-umans-1.5.1.tgz",
+    "hash": "sha512-rmHPWNuCrfl/mZh6/Jk57QdBv+KTCO7kigX5tKqNgXa4PlVOemYA71nYgl7UT9IrquXYylM7UYhMghZv4okgOw==",
+    "bundled": false,
+    "entrypoints": [],
+    "skills": [],
+    "prompts": []
   }
 }

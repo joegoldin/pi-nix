@@ -1,0 +1,18 @@
+{
+  "lockfileVersion": 1,
+  "configVersion": 1,
+  "workspaces": {
+    "": {
+      "name": "@aliou/pi-synthetic",
+      "dependencies": {
+        "@aliou/pi-utils-settings": "^0.22.0",
+        "@aliou/pi-utils-ui": "^0.5.1",
+      },
+    },
+  },
+  "packages": {
+    "@aliou/pi-utils-settings": ["@aliou/pi-utils-settings@0.22.0", "", { "dependencies": { "@aliou/pi-utils-ui": "^0.5.0" }, "peerDependencies": { "@earendil-works/pi-coding-agent": ">=0.74.0 <2", "ts-json-schema-generator": ">=2.4.0 <3" }, "optionalPeers": ["@earendil-works/pi-coding-agent", "ts-json-schema-generator"], "bin": { "pi-settings-schema": "bin/pi-settings-schema.mjs" } }, "sha512-MzKG5KTpnOVczSAZLRzA0A9gYi28VRiM7b7lh/Q5A3fs/pkcSEojZS55rptwC8qDR4J38m9DkCLrAeUNA2i8EA=="],
+
+    "@aliou/pi-utils-ui": ["@aliou/pi-utils-ui@0.5.1", "", { "peerDependencies": { "@earendil-works/pi-coding-agent": ">=0.74.0 <2", "@earendil-works/pi-tui": ">=0.74.0 <2" }, "optionalPeers": ["@earendil-works/pi-coding-agent", "@earendil-works/pi-tui"] }, "sha512-a+m9yo+No2mXBGitWk/sPep+FXam+w3oavpj80WgJRQsnyBzzjlzZFcBikhnweRifL8UASqbWWrHN4NjESIrRw=="],
+  }
+}
