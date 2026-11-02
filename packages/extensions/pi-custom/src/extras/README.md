@@ -13,7 +13,7 @@ There is no footer here; the status line belongs to another extension.
 | ctrl+g l | Open the stash list (restore, copy, delete, clear) |
 | ctrl+g c / x | Copy or cut the prompt to the system clipboard |
 | alt+i | Insert a literal tab |
-| Ctrl+Enter (with messages queued) | Finish the current operation, then send queued messages without interrupting the run or goal. The draft stays in the editor |
+| Ctrl+Enter (with messages queued) | Finish the current operation (the next completed line or summary while thinking), then send queued messages without interrupting the run or goal. The draft stays in the editor |
 | Ctrl+Shift+Enter (with messages queued) | Abort the current operation, then send queued messages and continue the goal. The draft stays in the editor |
 | Escape | Cancel a pending send request. With queued guidance, restore it to the editor and keep the goal active; otherwise interrupt normally |
 | ctrl+? | Show these keys |

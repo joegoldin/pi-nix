@@ -10,10 +10,14 @@ index c0a482d3..5f5e1ff2 100644
  	public mode: QueueMode;
  
  	constructor(mode: QueueMode) {
-@@ -162,7 +163,13 @@ class PendingMessageQueue {
+@@ -162,7 +163,17 @@ class PendingMessageQueue {
  		return this.messages.length > 0;
  	}
  
++	hasPrioritizedMessages(): boolean {
++		return this.batchSize > 0;
++	}
++
 +	prependBatch(messages: AgentMessage[]): void {
 +		this.messages.unshift(...messages);
 +		this.batchSize += messages.length;
@@ -138,9 +142,10 @@ index c0a482d3..5f5e1ff2 100644
  	private createLoopConfig(options: { skipInitialSteeringPoll?: boolean } = {}): AgentLoopConfig {
  		let skipInitialSteeringPoll = options.skipInitialSteeringPoll === true;
  		return {
-@@ -504,13 +561,15 @@ export class Agent {
+@@ -504,13 +561,16 @@ export class Agent {
  			transformContext: this.transformContext,
  			getApiKey: this.getApiKey,
++			shouldYieldAfterThinking: () => this.steeringQueue.hasPrioritizedMessages(),
  			getSteeringMessages: async () => {
 +				// A settling tool can leave one more poll after abort. Keep input for the replacement run.
 +				if (this.signal?.aborted) return [];
@@ -419,3 +424,61 @@ index e4e2ffb1..fc847b4f 100644
  | \`${pasteImage}\` | Paste files on macOS, images, or text from clipboard |
  | \`/\` | Slash commands |
  | \`!\` | Run bash command |
+diff --git a/packages/agent/src/types.ts b/packages/agent/src/types.ts
+--- a/packages/agent/src/types.ts
++++ b/packages/agent/src/types.ts
+@@ -291,6 +291,9 @@
+ 	 * Contract: must not throw or reject. Return [] when no steering messages are available.
+ 	 */
+ 	getSteeringMessages?: () => Promise<AgentMessage[]>;
++
++	/** Whether explicitly prioritized input should yield at the next completed thinking line. */
++	shouldYieldAfterThinking?: () => boolean;
+ 
+ 	/**
+ 	 * Returns follow-up messages to process after the agent would otherwise stop.
+diff --git a/packages/agent/src/agent-loop.ts b/packages/agent/src/agent-loop.ts
+--- a/packages/agent/src/agent-loop.ts
++++ b/packages/agent/src/agent-loop.ts
+@@ -409,11 +409,14 @@
+ 	const resolvedApiKey =
+ 		(config.getApiKey ? await config.getApiKey(config.model.provider) : undefined) || config.apiKey;
+ 
++	// Yielding thinking cancels only this request, never the run or a running tool.
++	const requestController = new AbortController();
++	const requestSignal = signal ? AbortSignal.any([signal, requestController.signal]) : requestController.signal;
+ 	const response = await streamFunction(config.model, llmContext, {
+ 		...config,
+ 		apiKey: resolvedApiKey,
+ 		identity: mergeClientIdentity(DEFAULT_AGENT_IDENTITY, config.identity),
+-		signal,
++		signal: requestSignal,
+ 	});
+ 	// Record the requested level, whichever stream function answered.
+ 	const result = async () => Object.assign(await response.result(), { thinkingLevel: config.reasoning ?? "off" });
+@@ -447,6 +450,25 @@
+ 						assistantMessageEvent: event,
+ 						message: { ...partialMessage },
+ 					});
++					const completedThinkingLine = event.type === "thinking_end" ||
++						(event.type === "thinking_delta" && /\r?\n/.test(event.delta));
++					if (completedThinkingLine && config.shouldYieldAfterThinking?.() && !signal?.aborted &&
++						!partialMessage.content.some((part) => part.type === "toolCall")) {
++						// Providers mutate their partial on cancellation. Preserve a detached snapshot,
++						// not an aborted reply or an incomplete signed reasoning item for replay.
++						const yielded = structuredClone(partialMessage);
++						yielded.stopReason = "stop";
++						yielded.thinkingLevel = config.reasoning ?? "off";
++						delete yielded.responseId;
++						const thinking = yielded.content[event.contentIndex];
++						if (thinking?.type === "thinking" && event.type !== "thinking_end") {
++							delete thinking.thinkingSignature;
++						}
++						requestController.abort();
++						context.messages[context.messages.length - 1] = yielded;
++						await emit({ type: "message_end", message: yielded });
++						return yielded;
++					}
+ 				}
+ 				break;
+ 

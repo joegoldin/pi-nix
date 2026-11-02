@@ -305,3 +305,100 @@ const earlyAbort = new Agent({
 earlyAbort.subscribe(event => { if (event.type === "agent_start") earlyAbort.abort(); });
 await earlyAbort.prompt("Keep the original task in context");
 assert(earlyAbort.state.messages.some(message => message.role === "user" && (typeof message.content === "string" ? message.content === "Keep the original task in context" : message.content.some(part => part.type === "text" && part.text === "Keep the original task in context"))), "abort must not erase the original prompt while protecting queued input");
+
+// A thinking line is an operation boundary, not the whole reasoning response.
+for (const { boundary, mode = "prioritized" } of [
+  { boundary: "\n" }, { boundary: "\n\n" }, { boundary: "thinking_end" },
+  { boundary: "\n", mode: "ordinary" }, { boundary: "\n", mode: "cleared" },
+  { boundary: "\n", mode: "toolcall" },
+]) {
+  const started = deferred();
+  const delivered = deferred();
+  const requests = [];
+  const events = [];
+  let firstStream;
+  let requestSignal;
+  let partial;
+  const model = getModel("openai", "gpt-4o");
+  const thinkingAgent = new Agent({
+    initialState: { model },
+    streamFn: (_model, context, options) => {
+      requests.push(structuredClone(context.messages));
+      const stream = createAssistantMessageEventStream();
+      const message = {
+        role: "assistant", api: model.api, provider: model.provider, model: model.id,
+        content: [], stopReason: "stop", timestamp: Date.now(),
+        usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+      };
+      if (requests.length === 1) {
+        firstStream = stream;
+        requestSignal = options.signal;
+        partial = message;
+        queueMicrotask(() => {
+          stream.push({ type: "start", partial });
+          partial.content.push({ type: "thinking", thinking: "in progress" });
+          stream.push({ type: "thinking_start", contentIndex: 0, partial });
+          started.resolve();
+        });
+        options.signal.addEventListener("abort", () => {
+          // Providers mutate their partial on abort; retained history must not share it.
+          partial.stopReason = "aborted";
+          stream.push({ type: "error", reason: "aborted", error: partial });
+        }, { once: true });
+      } else {
+        message.content = [{ type: "text", text: "handled queued input" }];
+        queueMicrotask(() => stream.push({ type: "done", reason: "stop", message }));
+        delivered.resolve();
+      }
+      return stream;
+    },
+  });
+  thinkingAgent.subscribe(event => events.push(event));
+  let running;
+  try {
+    running = thinkingAgent.prompt("original task");
+    await within(started.promise);
+    thinkingAgent.followUp(message);
+    if (mode !== "ordinary") thinkingAgent.prioritizeQueuedUserMessages();
+    if (mode === "toolcall") {
+      partial.content.push({ type: "toolCall", id: "pending-tool", name: "unknown_tool", arguments: {} });
+      partial.stopReason = "toolUse";
+    }
+    if (mode === "cleared") {
+      thinkingAgent.clearAllQueues();
+      thinkingAgent.followUp(message);
+    }
+    partial.content[0].thinking += " still unfinished";
+    firstStream.push({ type: "thinking_delta", contentIndex: 0, delta: " still unfinished", partial });
+    await new Promise(setImmediate);
+    assert.equal(requestSignal.aborted, false, "never cut a thinking line mid-chunk");
+    if (boundary === "thinking_end") {
+      firstStream.push({ type: "thinking_end", contentIndex: 0, content: partial.content[0].thinking, partial });
+    } else {
+      partial.content[0].thinking += boundary;
+      firstStream.push({ type: "thinking_delta", contentIndex: 0, delta: boundary, partial });
+    }
+    if (mode !== "prioritized") {
+      await new Promise(setImmediate);
+      assert.equal(requestSignal.aborted, false, "ordinary or cleared queues must not cut thinking");
+      assert.equal(requests.length, 1);
+      firstStream.push({ type: "done", reason: "stop", message: partial });
+    }
+    await within(delivered.promise);
+    await within(running);
+    assert.equal(requestSignal.aborted, mode === "prioritized", "stop only an armed provider request at the completed line");
+    assert.equal(events.filter(e => e.type === "agent_start").length, 1, "steering keeps the same run");
+    assert.equal(events.filter(e => e.type === "agent_end").length, 1);
+    assert(!thinkingAgent.state.messages.some(m => m.role === "assistant" && m.stopReason === "aborted"));
+    assert(requests[1].some(m => m.role === "user" && m.content?.some?.(c => c.type === "image")), "queued images survive thinking-line steering");
+    assert.equal(thinkingAgent.getQueuedMessages().length, 0);
+    if (mode === "toolcall") {
+      assert(requests[1].some(m => m.role === "toolResult" && m.toolCallId === "pending-tool"), "never strand a streamed tool call without a result");
+    }
+  } finally {
+    thinkingAgent.abort();
+    await running;
+  }
+}
+console.log("Thinking boundary: chunked line, OpenAI summary separator, block-end fallback, ordinary/cleared queues, request-only cancellation, same-run delivery and images pass.");
