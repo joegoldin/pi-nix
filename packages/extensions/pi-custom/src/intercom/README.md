@@ -14,9 +14,9 @@ Nothing is registered unless `intercom/config.json` exists; pi-nix's
 
 ## The tool
 
-`intercom` keeps pi-intercom's name, actions and wording: `list`, `list-cwd`,
+`intercom` keeps pi-intercom's actions: `list`, `list-cwd`,
 `send`, `ask` (blocks for the reply), `reply`, `pending`, `handover`, `cancel`,
-`status`. `list` shows pi sessions and Claude Code sessions in separate
+`status`, and adds `complete` for cooperative peer completion. `list` shows pi sessions and Claude Code sessions in separate
 sections. A `to` is resolved by exact id, then by name across both lists, then
 by id prefix; `pi:<name>` or `claude:<name>` picks one when both lists hold the
 name, and a `uds:` address is always Claude's.
@@ -25,6 +25,24 @@ Claude Code peers take text only: attachments are inlined, and `cancel`,
 `supersedes` and `retryOf` are refused. An `ask` to Claude resolves on the next
 message from that session (Claude has no reply ids) and fails early if Claude
 reports the message denied, refused, expired or dropped.
+
+## Completion and graceful exit
+
+`intercom({ action: "complete", to, message, requestCleanup: true, quit: "ask" })`
+reports a contribution and offers a graceful quit in this peer's local UI.
+`quit` defaults to `keep`; `auto` requires the explicitly user-authorized,
+one-shot `--peer-auto-exit` launch flag. Completion waits for transport delivery
+and a clean, saved final reply before requesting native shutdown. New user or
+custom messages, pending work, other tools, active `/goal`, `/btw` turns,
+background tasks and unresolved peer asks prevent exit. A missing UI or declined
+confirmation leaves it open.
+
+The `pi-peer-completion-v1` context attachment carries the native Pi session ID,
+quit policy and a cleanup request. It is a self-report, not an integration
+verdict or user authorization. Neither this action nor graceful Pi shutdown
+closes panes or worktrees; the requester needs user consent and fresh terminal
+identity/occupant checks before terminal cleanup. The flag is registered only
+when Intercom is enabled.
 
 ## The inbox
 
@@ -50,17 +68,18 @@ Messages render as a rounded box headed by the sender (ctrl+o expands).
   model, edit the summary, send it.
 - `/intercom-id`: put a snippet addressing this session into the editor.
 
-## pi-subagents
+## Session identity
 
-pi-subagents finds its intercom provider by convention, not by package, and
-these are kept exactly: the `intercom` tool with `action: "ask"`; the
-synchronous `intercom:session-identity` claim at session start, whose first
-claim becomes the session id; `PI_INTERCOM_SESSION_ID`; the
-`subagent-chat-<first 18 of the id>` name for unnamed sessions; relaying
-`subagent:result-intercom` with an acknowledgement on
-`subagent:result-intercom-delivery`, and `subagent:control-intercom`.
-`contact_supervisor` and `subagent_supervisor` belong to pi-subagents and are
-not registered here. Subagent children stay off Claude's list.
+Ordinary Pi peers use the native session header id by default, making terminal
+session metadata match the Intercom roster. `PI_INTERCOM_SESSION_ID` exposes the
+active Intercom id; an explicit `PI_INTERCOM_STABLE_ID` or `stableId` config can
+still override it. Unnamed sessions appear as `pi-<first 18 id characters>`.
+Names and abbreviated list ids are conveniences; the full roster id identifies
+the session.
+
+There is no child-plugin identity claim, result/control relay or supervisor
+channel. A peer is an independent session, not a managed child. Each session owns
+its permissions, and peer-authored messages remain untrusted input.
 
 ## Config
 
@@ -86,7 +105,8 @@ extension. `PI_INTERCOM_ASK_TIMEOUT_MS` sets how long an `ask` waits.
 | File | Role |
 |---|---|
 | `index.ts` | Registration, commands, message renderer |
-| `runtime.ts` | Lifecycle, both transports, inbox, tool actions, pi-subagents relays |
+| `runtime.ts` | Lifecycle, both transports, inbox, tool actions |
+| `completion.ts` | Completion reports and consented, idle-only graceful exit |
 | `tool.ts` | The tool schema and dispatch |
 | `peers.ts` | Rosters, target resolution, list text (pure) |
 | `reply-tracker.ts` | Which asks are owed an answer (pure) |

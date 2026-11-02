@@ -671,42 +671,20 @@ assert !(lib.any (e: lib.hasInfix "pi-foreign-skills" e) (evalPi { }).extensions
 assert lib.any (e: lib.hasInfix "pi-foreign-skills" e)
   (evalPi { pi.coding-agent.foreignSkills.enable = true; }).extensions;
 
-# pi-subagents resolves the permission system by name, so it has to be findable
-# at `npm/node_modules/<name>` -- the launcher links the store path there.
+# Independent sessions load their own permission package, without a managed-child
+# resolver link. Only extension config files belong in the launcher prelude.
+assert lib.all
+  (cfg: !(lib.hasInfix "npm/node_modules" (builtins.readFile (lib.getExe cfg.package))))
+  [
+    autoWithPermissionSystem
+    autoChainOff
+    autoOn
+    autoOff
+  ];
 assert
-  let
-    launcher = builtins.readFile (lib.getExe autoWithPermissionSystem.package);
-  in
-  lib.hasInfix "npm/node_modules/@gotgenes/pi-permission-system" launcher;
-# It must never be written into `extensions/`, which is a pi discovery root: a
-# package.json there would load the extension a second time on top of the
-# --extension flag. Only config.json belongs in that directory.
-assert
-  let
-    launcher = builtins.readFile (lib.getExe autoWithPermissionSystem.package);
-  in
-  !(lib.hasInfix "extensions/pi-permission-system/package.json" launcher);
-# The link tracks the package being loaded, not the chain being armed: a
-# subagent needs to find it either way.
-assert
-  let
-    launcher = builtins.readFile (lib.getExe autoChainOff.package);
-  in
-  lib.hasInfix "npm/node_modules/@gotgenes/pi-permission-system" launcher;
-# pi-permissions carries the permission system, so the link names it: a child
-# finds both halves there.
-assert
-  let
-    launcher = builtins.readFile (lib.getExe autoOn.package);
-  in
-  lib.hasInfix "npm/node_modules/@gotgenes/pi-permission-system" launcher
-  && lib.hasInfix "-pi-ext-pi-permissions-" launcher;
-# No permission system loaded, nothing to link.
-assert
-  let
-    launcher = builtins.readFile (lib.getExe autoOff.package);
-  in
-  !(lib.hasInfix "npm/node_modules" launcher);
+  !(lib.hasInfix "extensions/pi-permission-system/package.json" (
+    builtins.readFile (lib.getExe autoWithPermissionSystem.package)
+  ));
 
 # An explicit `[ ]` survives to the rendered file as an empty array, so the
 # extension sees a section that was configured to hold nothing.

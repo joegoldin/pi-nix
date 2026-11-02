@@ -8,12 +8,6 @@
 // model under one trigger policy. Replies are always explicit tool calls;
 // nothing is sent on the model's behalf.
 //
-// What pi-subagents needs from an intercom provider lives here too, kept to the
-// letter: the synchronous `intercom:session-identity` claim at session start,
-// PI_INTERCOM_SESSION_ID, the `subagent-chat-` alias for unnamed sessions, and
-// relaying `subagent:result-intercom` (acknowledged within its 500 ms) and
-// `subagent:control-intercom`. Subagent traffic only ever goes to pi peers.
-
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -39,10 +33,6 @@ import {
 } from "./peers.ts";
 import { ReplyTracker } from "./reply-tracker.ts";
 
-export const SESSION_IDENTITY_EVENT = "intercom:session-identity";
-const RESULT_EVENT = "subagent:result-intercom";
-const RESULT_DELIVERY_EVENT = "subagent:result-intercom-delivery";
-const CONTROL_EVENT = "subagent:control-intercom";
 const SESSION_ID_ENV = "PI_INTERCOM_SESSION_ID";
 const STABLE_ID_ENV = "PI_INTERCOM_STABLE_ID";
 const DEDUPE_MAX = 1000;
@@ -127,8 +117,6 @@ export class Intercom {
 	private generation = 0;
 	private piSessionId: string | null = null;
 	private intercomId: string | null = null;
-	/** Set when pi-subagents claimed this session's id: a child, kept off Claude's list. */
-	private child = false;
 	private startedAt = 0;
 	private model = "unknown";
 	private agentRunning = false;
@@ -155,21 +143,13 @@ export class Intercom {
 
 	// ── lifecycle ─────────────────────────────────────────────────────────
 
-	/** Session start or replacement. The identity claim has to happen synchronously, here. */
+	/** Session start or replacement, preserving the native session id by default. */
 	start(ctx: ExtensionContext): void {
 		this.teardownSession("Session replaced");
 		this.generation++;
 		this.ctx = ctx;
 		this.piSessionId = ctx.sessionManager.getSessionId();
-		let claimed: string | undefined;
-		this.pi.events.emit(SESSION_IDENTITY_EVENT, {
-			version: 1,
-			claim: (id: unknown) => {
-				claimed ??= (typeof id === "string" && id.trim()) || undefined;
-			},
-		});
-		this.child = claimed !== undefined;
-		this.intercomId = claimed ?? (process.env[STABLE_ID_ENV]?.trim() || this.config.stableId || this.piSessionId);
+		this.intercomId = process.env[STABLE_ID_ENV]?.trim() || this.config.stableId || this.piSessionId;
 		process.env[SESSION_ID_ENV] = this.intercomId;
 		this.model = ctx.model?.id ?? "unknown";
 		this.startedAt = Date.now();
@@ -332,14 +312,6 @@ export class Intercom {
 		this.namePoll.unref?.();
 	}
 
-	/** Whether `to` names this session, by any of the names it answers to. */
-	isSelf(to: string): boolean {
-		const wanted = to.trim().toLowerCase();
-		return [this.piSessionId, this.intercomId, this.client?.sessionId, this.pi.getSessionName(), this.identity().name]
-			.filter((v): v is string => Boolean(v?.trim()))
-			.some((v) => v.trim().toLowerCase() === wanted);
-	}
-
 	// ── broker connection ─────────────────────────────────────────────────
 
 	async connect(): Promise<IntercomClient> {
@@ -404,11 +376,9 @@ export class Intercom {
 			this.claudeNote = "Claude Code peering is off (intercom config claude.enabled).";
 			return;
 		}
-		// Subagent children and print-mode runs stay off Claude's list: a child
-		// would show up as a duplicate pi-<dir>, and a one-shot run would be
-		// listed only until it exits.
-		if (this.child || !ctx.hasUI) {
-			this.claudeNote = "Claude Code sessions are reachable from interactive top-level sessions only.";
+		// One-shot runs would be listed only until they exit.
+		if (!ctx.hasUI) {
+			this.claudeNote = "Claude Code sessions are reachable from interactive sessions only.";
 			return;
 		}
 		if (this.claude) return;
@@ -646,71 +616,6 @@ export class Intercom {
 		);
 
 		this.receipt(entry, "injected");
-	}
-
-	// ── pi-subagents relays ───────────────────────────────────────────────
-
-	relaySubagent(payload: unknown, kind: "control" | "result"): void {
-		if (typeof payload !== "object" || payload === null) return;
-		const p = payload as Record<string, unknown>;
-		if (typeof p.to !== "string" || typeof p.message !== "string") return;
-		const to = p.to;
-		const body = p.message;
-		const requestId = typeof p.requestId === "string" ? p.requestId : undefined;
-		const ack = (delivered: boolean, error?: unknown) => {
-			if (kind !== "result" || !requestId) return;
-			this.pi.events.emit(RESULT_DELIVERY_EVENT, { requestId, delivered, ...(error ? { error: errorText(error) } : {}) });
-		};
-		const errorEntry = kind === "result" ? "intercom_result_error" : "intercom_control_error";
-		const local = () => {
-			const sender = kind === "result" ? "subagent-result" : "subagent-control";
-			const now = Date.now();
-			this.inject(
-				{
-					from: { transport: "pi", id: sender, name: sender, cwd: this.ctx?.cwd ?? "" },
-					message: { id: randomUUID(), timestamp: now, content: { text: body } },
-					bodyText: body,
-					isReply: false,
-				},
-				"trigger",
-				true,
-			);
-			ack(true);
-		};
-		if (this.isSelf(to)) {
-			local();
-			return;
-		}
-		const generation = this.generation;
-		void (async () => {
-			try {
-				const client = await this.connect();
-				const resolved = resolveTarget(to, await client.listSessions(), []);
-				if (generation !== this.generation) return;
-				const id = resolved.ok && resolved.target.transport === "pi" ? resolved.target.session.id : to;
-				if (id === client.sessionId || this.isSelf(id)) {
-					local();
-					return;
-				}
-				const result = await client.send(id, { text: body });
-				if (!result.delivered) throw new Error(result.reason ?? "Session may not exist or has disconnected.");
-				ack(true);
-			} catch (error) {
-				if (generation !== this.generation) return;
-				this.pi.appendEntry(errorEntry, { to, message: body, error: errorText(error), timestamp: Date.now() });
-				ack(false, error);
-			}
-		})();
-	}
-
-	subscribe(): () => void {
-		const off = [
-			this.pi.events.on(CONTROL_EVENT, (payload) => this.relaySubagent(payload, "control")),
-			this.pi.events.on(RESULT_EVENT, (payload) => this.relaySubagent(payload, "result")),
-		];
-		return () => {
-			for (const unsubscribe of off) unsubscribe();
-		};
 	}
 
 	// ── outbound: what the tool and commands call ─────────────────────────
@@ -975,6 +880,16 @@ export class Intercom {
 		} catch (error) {
 			return fail(`Failed to reply: ${errorText(error)}`);
 		}
+	}
+
+	/** The current completion call may finish; other local conversations may not. */
+	exitBlockers(completionCallId: string): string[] {
+		return [
+			...([...this.activeTools.keys()].some(id => id !== completionCallId) ? ["Other tools are still executing"] : []),
+			...(this.waiter ? ["An outbound peer ask is still waiting"] : []),
+			...(this.held.length ? ["Held peer messages need attention"] : []),
+			...(this.tracker.pending().length ? ["Unanswered peer asks need attention"] : []),
+		];
 	}
 
 	pending(): ToolResult {

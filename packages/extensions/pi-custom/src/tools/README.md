@@ -19,8 +19,7 @@ Up/Down, Page Up/Down and Home/End scroll, and Escape or Enter closes them.
 Log views are bounded snapshots, not a live tail. Model-facing output and
 completion delivery are unchanged.
 
-Replaces pi-background-tasks. pi-subagents' `bg_wait` is separate: it waits for
-async subagent runs only.
+Replaces pi-background-tasks.
 
 ## Todo list (`todo.ts`, `todo-state.ts`)
 
@@ -148,8 +147,7 @@ Pi session. `/btw new` starts blank; `/btw` or `/btw list` resumes a conversatio
 Sessions, drafts and tool mode survive restarts. A fork made while a parent tool
 is pending records that its result is unavailable; it never claims to have run it.
 
-Side conversations appear in the existing Down-arrow fleet menu. Select one and
-press Enter to open or continue it. Inside a side conversation:
+Use `/btw` or `/btw list` to select and continue a side conversation. Inside it:
 
 - Enter sends a follow-up. Responses stream into the native overlay.
 - Alt+s switches conversations; Alt+f forks the current side conversation;
@@ -171,10 +169,9 @@ answers follow the tail unless you have scrolled up. The main editor and footer
 remain full-width. Child status and editor writes cannot replace them.
 
 Side transcripts stay in their own session files. The main session stores a
-resume reference, not side messages; the fleet receives only identity/activity
-metadata. Side discussions do not enter the main model context or minimap unless
-you explicitly bring them back. Main-conversation Ctrl+c is unchanged; Ctrl+c in
-the fleet, including its steering forms, returns to main without stopping a child.
+resume reference, not side messages. Side discussions do not enter the main model
+context or minimap unless you explicitly bring them back. Main-conversation
+Ctrl+c is unchanged.
 
 Replaces pi-btw; the independent conversation workflow was inspired by
 [pi-side-chat](https://github.com/nicobailon/pi-side-chat).

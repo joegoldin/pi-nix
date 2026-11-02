@@ -1,13 +1,11 @@
-// The `intercom` tool. One tool for both kinds of peer: the name and the
-// `action: "ask"` value are what pi-subagents keys on (a blocking ask, an
-// agent that requires intercom), and the parameters are pi-intercom's minus
-// Herdr's project-pane options, so the model's habits and recorded sessions
-// carry over.
+// The `intercom` tool. One tool for both kinds of peer, with pi-intercom's
+// parameters minus Herdr's project-pane options, so recorded sessions carry over.
 
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import type { Intercom } from "./runtime.ts";
+import { registerPeerCompletion } from "./completion.ts";
 
 const DESCRIPTION = `Send a message to another agent session running on this machine: another pi session, or a Claude Code session.
 Use this to communicate findings, request help, or coordinate work with other sessions.
@@ -28,10 +26,15 @@ Usage:
   intercom({ action: "cancel", messageId: "..." })                 → Request cancellation of a sent message (pi sessions only)
   intercom({ action: "reply", message: "..." })                      → Reply to the active/single pending ask
   intercom({ action: "pending" })                                      → List unresolved inbound asks
-  intercom({ action: "status" })                  → Show connection status`;
+  intercom({ action: "status" })                  → Show connection status
+  intercom({ action: "complete", to: "requester-id", message: "Evidence and results", requestCleanup: true, quit: "ask" }) → Report completion, request pane cleanup, optionally ask the local user to exit
+
+Completion is self-reported, not proof of integration. Cleanup requests do not authorize pane closure.
+quit defaults to "keep". "ask" requires local user confirmation; "auto" requires this Pi instance to have been launched with --peer-auto-exit after explicit user authorization. Exit waits for a clean final reply and refuses unfinished local work. It never closes panes or worktrees.`;
 
 /** `intercom()` is null between sessions, before the first session_start. */
-export function registerIntercomTool(pi: ExtensionAPI, intercom: () => Intercom | null): void {
+export function registerIntercomTool(pi: ExtensionAPI, intercom: () => Intercom | null, workBlockers: () => string[] = () => []): void {
+	const complete = registerPeerCompletion(pi, intercom, workBlockers);
 	pi.registerTool({
 		name: "intercom",
 		label: "Intercom",
@@ -39,9 +42,9 @@ export function registerIntercomTool(pi: ExtensionAPI, intercom: () => Intercom 
 		// One fixed string: a snippet that changed with state would break prompt caching (pi-intercom #118).
 		promptSnippet: "Use to coordinate with other local agent sessions (pi or Claude Code): list peers, send updates, ask for help, or check intercom connectivity.",
 		parameters: Type.Object({
-			action: StringEnum(["list", "list-cwd", "send", "ask", "handover", "reply", "pending", "status", "cancel"] as const, {
+			action: StringEnum(["list", "list-cwd", "send", "ask", "handover", "reply", "pending", "status", "cancel", "complete"] as const, {
 				description:
-					"Action: 'list', 'list-cwd', 'send', 'ask', 'handover', 'reply', 'pending', 'status', or 'cancel'. 'handover' summarizes this session with the current model and sends it to the target, which acts on it; 'message' is the optional next task.",
+					"Action: 'list', 'list-cwd', 'send', 'ask', 'handover', 'reply', 'pending', 'status', 'cancel', or 'complete'. 'complete' reports contribution evidence and optionally requests graceful exit; it never authorizes terminal cleanup. 'handover' summarizes this session with the current model and sends it to the target, which acts on it; 'message' is the optional next task.",
 			}),
 			to: Type.Optional(
 				Type.String({
@@ -50,8 +53,10 @@ export function registerIntercomTool(pi: ExtensionAPI, intercom: () => Intercom 
 				}),
 			),
 			message: Type.Optional(
-				Type.String({ description: "Message to send (for 'send', 'ask', or 'reply' action). For 'handover', the optional next task for the receiver." }),
+				Type.String({ description: "Message to send (for 'send', 'ask', 'reply', or 'complete'; completion should include evidence and blockers). For 'handover', the optional next task for the receiver." }),
 			),
+			quit: Type.Optional(StringEnum(["keep", "ask", "auto"] as const, { description: "For complete: keep this Pi open (default), ask its local user to exit, or use an explicitly authorized --peer-auto-exit launch. Never closes a pane." })),
+			requestCleanup: Type.Optional(Type.Boolean({ description: "For complete: ask the requester to arrange terminal cleanup. This is a request, not permission to close anything." })),
 			attachments: Type.Optional(
 				Type.Array(
 					Type.Object({
@@ -107,6 +112,10 @@ export function registerIntercomTool(pi: ExtensionAPI, intercom: () => Intercom 
 					return runtime.pending();
 				case "status":
 					return runtime.status();
+				case "complete":
+					if (!to || !message) return missing("Completion requires explicit 'to' and 'message' parameters");
+					if (cwd || supersedes || retryOf || attachments?.length) return missing("Completion uses an explicit requester and its own metadata; cwd, supersedes, retryOf, and attachments are not supported.");
+					return complete(_id, ctx, { to, message, replyTo, quit: params.quit, requestCleanup: params.requestCleanup }, signal);
 				case "cancel":
 					if (!messageId) return missing("Missing 'messageId' parameter");
 					return runtime.cancel(messageId);

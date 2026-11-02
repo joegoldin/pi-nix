@@ -9,18 +9,22 @@ test("Intercom retains its command and uses Alt+j, not minimap's Alt+m", () => {
 	const previous = process.env.PI_CODING_AGENT_DIR;
 	const shortcuts = new Map<string, any>();
 	const commands = new Map<string, any>();
+	const flags = new Map<string, any>();
 	try {
 		mkdirSync(join(dir, "intercom"));
 		writeFileSync(join(dir, "intercom/config.json"), "{}");
 		process.env.PI_CODING_AGENT_DIR = dir;
 		intercom({
 			on() {}, registerTool() {}, registerMessageRenderer() {},
+			registerFlag: (name: string, spec: any) => flags.set(name, spec),
+			getFlag: (name: string) => flags.get(name)?.default,
 			registerShortcut: (key: string, spec: any) => shortcuts.set(key, spec),
 			registerCommand: (name: string, spec: any) => commands.set(name, spec),
 		} as any);
 		expect(shortcuts.get("alt+j")?.description).toBe("Message another session");
 		expect(shortcuts.has("alt+m")).toBe(false);
 		expect(commands.has("intercom")).toBe(true);
+		expect(flags.get("peer-auto-exit")).toMatchObject({ type: "boolean", default: false });
 	} finally {
 		if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
 		else process.env.PI_CODING_AGENT_DIR = previous;
