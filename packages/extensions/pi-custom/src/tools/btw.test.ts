@@ -374,7 +374,7 @@ it("Ctrl+C returns from BTW without aborting its request or allowing a second co
 it("resumes streamed work after closing and restores a private draft after registration restarts", async () => {
 	const { registerBtw } = await import("./btw.ts");
 	const h = commandHarness();
-	registerBtw(h.api as never, h.createRuntime as never);
+	const activity = registerBtw(h.api as never, h.createRuntime as never);
 	const mainBefore = JSON.stringify(
 		h.ctx.sessionManager.buildSessionContext().messages,
 	);
@@ -383,6 +383,7 @@ it("resumes streamed work after closing and restores a private draft after regis
 	h.component().handleInput("Private unsent draft");
 	h.component().handleInput("\x03");
 	await first;
+	expect(activity.running()).toBe(1);
 	expect(h.requests[0].signal.aborted).toBe(false);
 	expect(h.draft()).toBe("Existing main draft");
 	h.requests[0].resolve({
@@ -390,6 +391,7 @@ it("resumes streamed work after closing and restores a private draft after regis
 		content: [{ type: "text", text: "Private answer" }],
 	});
 	await flush();
+	expect(activity.running()).toBe(0);
 	registerBtw(h.api as never, h.createRuntime as never);
 	const resumed = h.command().handler("list", h.ctx);
 	await flush();

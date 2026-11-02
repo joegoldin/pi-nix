@@ -1,14 +1,7 @@
 import { describe, expect, it } from "bun:test";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import {
-	agentDirs,
-	agentSuggestions,
 	keywordAt,
-	loadAgents,
 	looselyMatches,
-	parseAgentFile,
 	referenceAt,
 	referencesIn,
 	relativeTime,
@@ -19,7 +12,7 @@ import {
 describe("finding references in text", () => {
 	it("sees the reference being typed at the cursor", () => {
 		expect(referenceAt("look at @session:abc")).toEqual({ kind: "session", query: "abc" });
-		expect(referenceAt("@agent:")).toEqual({ kind: "agent", query: "" });
+		expect(referenceAt("@agent:")).toBeUndefined();
 		expect(referenceAt("mail@agent:x")).toBeUndefined();
 	});
 
@@ -32,7 +25,6 @@ describe("finding references in text", () => {
 	it("collects every reference in a submitted prompt", () => {
 		expect(referencesIn("@session:1 and @agent:oracle, then @session:2")).toEqual([
 			{ kind: "session", value: "1" },
-			{ kind: "agent", value: "oracle," },
 			{ kind: "session", value: "2" },
 		]);
 	});
@@ -86,41 +78,5 @@ describe("sessions", () => {
 		expect(digest.startsWith("[1 earlier turns omitted]")).toBe(true);
 		expect(digest).toContain("c".repeat(50));
 		expect(digest).not.toContain("a".repeat(50));
-	});
-});
-
-describe("agents", () => {
-	it("reads name and description from frontmatter", () => {
-		expect(parseAgentFile("---\nname: oracle\ndescription: wise\n---\nbody")).toEqual({ name: "oracle", description: "wise" });
-		expect(parseAgentFile("no frontmatter")).toBeUndefined();
-	});
-
-	it("lets a later directory override an earlier one of the same name", () => {
-		const root = mkdtempSync(join(tmpdir(), "pi-custom-agents-"));
-		const a = join(root, "builtin");
-		const b = join(root, "user");
-		mkdirSync(a);
-		mkdirSync(b);
-		writeFileSync(join(a, "o.md"), "---\nname: oracle\ndescription: builtin\n---");
-		writeFileSync(join(b, "o.md"), "---\nname: oracle\ndescription: mine\n---");
-		writeFileSync(join(b, "r.md"), "---\nname: researcher\ndescription: digs\n---");
-		const agents = loadAgents([a, b, join(root, "missing")]);
-		expect(agents).toEqual([
-			{ name: "oracle", description: "mine" },
-			{ name: "researcher", description: "digs" },
-		]);
-		expect(agentSuggestions(agents, "res").map((i) => i.value)).toEqual(["@agent:researcher"]);
-		// "or" loosely matches both; the one that starts with it comes first.
-		expect(agentSuggestions([{ name: "cursor-agent", description: "" }, ...agents], "or")[0].value).toBe("@agent:oracle");
-	});
-
-	it("looks where pi-subagents looks, package first and project last", () => {
-		expect(agentDirs("/pkg/agents", "/repo", "/home/u", "/home/u/.pi/agent")).toEqual([
-			"/pkg/agents",
-			"/home/u/.pi/agent/agents",
-			"/home/u/.agents",
-			"/repo/.pi/agents",
-			"/repo/.agents",
-		]);
 	});
 });

@@ -57,3 +57,8 @@ describe("the file", () => {
 		expect(Object.keys(JSON.parse(readFileSync(path, "utf8")))).toEqual(Object.keys(DEFAULTS));
 	});
 });
+
+it("ignores the removed agent-reference setting in existing config files", () => {
+	expect(normalise({ agentReferences: true, sessionReferences: false })).not.toHaveProperty("agentReferences");
+	expect(normalise({ agentReferences: true, sessionReferences: false }).sessionReferences).toBe(false);
+});

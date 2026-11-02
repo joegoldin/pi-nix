@@ -1,5 +1,5 @@
 // pi-custom's interface part: Claude Code-style tool cards, markdown touches, /ui,
-// /context, @session: and @agent: references, FFF-backed search, and the
+// /context, @session: references, FFF-backed search, and the
 // prompt box.
 //
 // Registration happens in the factory because pi asks for renderers and tools
@@ -9,7 +9,7 @@
 // surfaces those draw on.
 
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import {
 	buildSessionContext,
 	CustomEditor,
@@ -35,9 +35,6 @@ import { type EntryLike, GroupState, LiveFeed, type MessageLike, RunModel } from
 import { HoverTracker, movesPointer } from "./hover.ts";
 import { transformMarkdown } from "./markdown.ts";
 import {
-	type AgentSummary,
-	agentDirs,
-	loadAgents,
 	referencesIn,
 	type SessionSummary,
 	sessionDigest,
@@ -208,15 +205,6 @@ export default function piUi(pi: ExtensionAPI): void {
 		}));
 	});
 
-	const agents = cached<AgentSummary[]>(() => {
-		if (!ctxRef) return [];
-		// pi-subagents' own agents ship in its package; the subagent tool's
-		// registration says where that package is.
-		const tool = pi.getAllTools().find((t) => t.name === "subagent");
-		const root = tool ? (tool.sourceInfo.baseDir ?? dirname(tool.sourceInfo.path)) : undefined;
-		return loadAgents(agentDirs(root ? join(root, "agents") : undefined, ctxRef.cwd));
-	});
-
 	// References: the digest rides along with the prompt as its own message.
 	pi.registerMessageRenderer(REFERENCE_TYPE, (message, options, theme) => {
 		const details = (message.details ?? {}) as { label?: string };
@@ -242,17 +230,6 @@ export default function piUi(pi: ExtensionAPI): void {
 						content: `<referenced-session id="${info.id}" name="${label.replace(/"/g, "'")}">\n${sessionDigest(messages as never)}\n</referenced-session>`,
 						display: true,
 						details: { label: `session: ${label}` },
-					},
-					{ deliverAs: "nextTurn" },
-				);
-			} else if (ref.kind === "agent" && config.agentReferences) {
-				if (!agents.get().some((a) => a.name === ref.value)) continue;
-				pi.sendMessage(
-					{
-						customType: REFERENCE_TYPE,
-						content: `The user referenced the "${ref.value}" subagent. Delegate this work to it with the subagent tool.`,
-						display: true,
-						details: { label: `agent: ${ref.value}` },
 					},
 					{ deliverAs: "nextTurn" },
 				);
@@ -341,7 +318,6 @@ export default function piUi(pi: ExtensionAPI): void {
 	pi.on("session_start", (_event, ctx) => {
 		ctxRef = ctx;
 		sessions.clear();
-		agents.clear();
 		loadRuns(ctx);
 		if (config.fffSearch) index.open(ctx.cwd, getAgentDir());
 		if (ctx.mode !== "tui") return;
@@ -355,10 +331,8 @@ export default function piUi(pi: ExtensionAPI): void {
 			ctx.ui.addAutocompleteProvider(
 				createCompleter({
 					sessionsEnabled: () => config.sessionReferences,
-					agentsEnabled: () => config.agentReferences,
 					files: (query) => (config.fffSearch && index.finder ? fileSuggestions(index, query) : undefined),
 					sessions: () => sessions.get(),
-					agents: () => agents.get(),
 					currentSessionId: () => ctxRef?.sessionManager.getSessionId(),
 					trackFile: (query, value) => trackSelection(index, query, value),
 				}),

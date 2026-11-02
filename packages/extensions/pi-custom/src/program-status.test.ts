@@ -63,33 +63,6 @@ test("todo progress counts live tasks, not groups or tombstones, and pending is 
 	await h.emit("session_shutdown");
 });
 
-test("subagent status uses bounded read-only snapshots, never prompt labels or foreign stale replies", async () => {
-	const integration = await import("./program-status.ts") as any;
-	const h = harness(); const listeners = new Map<string, Set<Function>>();
-	const requests: any[] = [];
-	const events = {
-		on(name: string, fn: Function) { const set = listeners.get(name) ?? new Set(); set.add(fn); listeners.set(name, set); return () => set.delete(fn); },
-		emit(name: string, data: unknown) { for (const fn of [...(listeners.get(name) ?? [])]) fn(data); },
-	};
-	Object.assign(h.pi, { events });
-	events.on("subagents:rpc:v1:request", (request: unknown) => requests.push(request));
-	integration.registerSubagentStatus?.(h.pi);
-	h.emit("session_start"); await new Promise(resolve => setTimeout(resolve, 70));
-	expect(requests).toHaveLength(1); expect(requests[0].method).toBe("status");
-	const reply = (request: any, active: number, state: string) => events.emit(`subagents:rpc:v1:reply:${request.requestId}`, { version: 1, requestId: request.requestId, success: true, data: {
-		fleet: { version: 1, totalActive: active }, asyncSnapshot: { kind: "pi-subagents.async-status-snapshot", version: 1, runs: [{ id: "run/1", kind: "workflow", label: "PRIVATE_TASK", state, children: [{ id: "child", kind: "step", label: "PRIVATE_PROMPT", state }] }] },
-	} });
-	reply(requests[0], 1, "running");
-	expect(h.reports.at(-1)?.status.state).toBe("working");
-	events.emit("subagent:jobs-changed", { version: 1 }); await new Promise(resolve => setTimeout(resolve, 70));
-	reply(requests[1], 0, "failed"); expect(h.reports.some(row => row.status?.state === "error")).toBe(true);
-	expect(JSON.stringify(h.reports)).not.toContain("PRIVATE_");
-	events.emit("subagent:jobs-changed", {}); await new Promise(resolve => setTimeout(resolve, 70));
-	h.emit("session_start"); const before = h.reports.length;
-	reply(requests[2], 2, "running"); expect(h.reports.length).toBe(before);
-	h.emit("session_shutdown");
-});
-
 for (const outcome of ["failed", "cancelled"] as const) {
 	test(`background ${outcome} emits ${outcome === "failed" ? "error" : "idle"}, not success`, async () => {
 		const h = harness(); const cwd = mkdtempSync(join(tmpdir(), "pi-rex-outcome-")); h.ctx.cwd = cwd;
@@ -106,8 +79,9 @@ for (const outcome of ["failed", "cancelled"] as const) {
 
 test("a goal's user wait clears on real input and completion emits done", async () => {
 	const h = harness({ id: "g", text: "PRIVATE_OBJECTIVE", status: "active", startedAt: Date.now(), updatedAt: Date.now(), iteration: 0, automaticModelTurns: 0, toolFreeRepeatCount: 0, tokensUsed: 0, baselineTokens: 0, timeUsedSeconds: 0, waiting: { waitingFor: "user", reason: "PRIVATE_REASON" } });
-	registerGoal(h.pi as never, () => ({ goalTurnLimit: 0, goalNoProgressTurns: 0 }) as never);
+	const activity = registerGoal(h.pi as never, () => ({ goalTurnLimit: 0, goalNoProgressTurns: 0 }) as never);
 	h.emit("session_start"); expect(h.reports.at(-1)?.status.state).toBe("blocked");
+	expect(activity.active()).toBe(true);
 	h.emit("input", { text: "continue", source: "interactive" }); expect(h.reports.at(-1)?.status.state).toBe("working");
 	const original = globalThis.setTimeout; let footerExpiry: (() => void) | undefined;
 	const timer = spyOn(globalThis, "setTimeout").mockImplementation(((callback: () => void, delay: number) => {
@@ -116,23 +90,9 @@ test("a goal's user wait clears on real input and completion emits done", async 
 	}) as typeof setTimeout);
 	try {
 		await h.tools.get("goal_complete").execute("finish", { goal_id: "g", summary: "Completed your task and verified the checks." }, undefined, undefined, h.ctx);
+		expect(activity.active()).toBe(false);
 		expect(h.reports.at(-1)?.status.state).toBe("done");
 		footerExpiry!(); expect(h.reports.at(-1)?.status.state).toBe("done");
 		h.emit("input", { text: "next task", source: "interactive" }); expect(h.reports.at(-1)?.status).toBeUndefined();
 	} finally { timer.mockRestore(); await h.emit("session_shutdown"); }
-});
-
-test("subagent workflows share one bounded record budget", async () => {
-	const { EventEmitter } = await import("node:events"); const { registerSubagentStatus } = await import("./program-status.ts");
-	const h = harness(); const bus = new EventEmitter(); let request: any;
-	h.pi.events = { on(name: string, fn: (...args: any[]) => void) { bus.on(name, fn); return () => bus.off(name, fn); }, emit: bus.emit.bind(bus) } as any;
-	bus.on("subagents:rpc:v1:request", value => { request = value; });
-	registerSubagentStatus(h.pi as never); h.emit("session_start");
-	try {
-		await new Promise(resolve => setTimeout(resolve, 70));
-		const runs = Array.from({ length: 128 }, (_, id) => ({ id: String(id), state: "running", children: [{ id: "one", state: "running" }, { id: "two", state: "running" }] }));
-		bus.emit(`subagents:rpc:v1:reply:${request.requestId}`, { version: 1, requestId: request.requestId, success: true, data: { fleet: { version: 1, totalActive: 128 }, asyncSnapshot: { version: 1, kind: "pi-subagents.async-status-snapshot", runs } } });
-		expect(h.reports.filter(row => row.key !== "subagents" && row.status?.state === "working").length).toBeLessThanOrEqual(128);
-		expect(h.reports.at(-1)?.status.state).toBe("working");
-	} finally { h.emit("session_shutdown"); }
 });

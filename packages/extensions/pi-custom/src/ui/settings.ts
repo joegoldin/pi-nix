@@ -42,7 +42,6 @@ const ROWS: Row[] = [
 	{ key: "promptIcon", label: "Prompt icon", description: "The ❯ before your messages and in the prompt box.", values: ON_OFF },
 	{ key: "shimmer", label: "Working shimmer", description: "The sweep across the working indicator.", values: ON_OFF },
 	{ key: "sessionReferences", label: "@session: references", description: "Pull an earlier session's gist into a prompt.", values: ON_OFF },
-	{ key: "agentReferences", label: "@agent: references", description: "Name a subagent in a prompt.", values: ON_OFF },
 	{ key: "fffSearch", label: "FFF search", description: "find, grep and @ files through the frecency index.", values: ON_OFF },
 	{
 		key: "goalTurnLimit",

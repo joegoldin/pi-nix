@@ -40,8 +40,6 @@ export interface UiConfig {
 	shimmer: boolean;
 	/** @session: references to earlier sessions. */
 	sessionReferences: boolean;
-	/** @agent: references to subagents. */
-	agentReferences: boolean;
 	/** find, grep and @ file completion through FFF's frecency index. */
 	fffSearch: boolean;
 	/** Automatic /goal turns before the goal pauses for review; 0 for no limit. */
@@ -67,7 +65,6 @@ export const DEFAULTS: UiConfig = {
 	promptIcon: true,
 	shimmer: true,
 	sessionReferences: true,
-	agentReferences: true,
 	fffSearch: true,
 	goalTurnLimit: 25,
 	goalNoProgressTurns: 3,
@@ -113,7 +110,6 @@ export function normalise(raw: unknown): UiConfig {
 		promptIcon: pickBool(v.promptIcon, DEFAULTS.promptIcon),
 		shimmer: pickBool(v.shimmer, DEFAULTS.shimmer),
 		sessionReferences: pickBool(v.sessionReferences, DEFAULTS.sessionReferences),
-		agentReferences: pickBool(v.agentReferences, DEFAULTS.agentReferences),
 		fffSearch: pickBool(v.fffSearch, DEFAULTS.fffSearch),
 		goalTurnLimit: pickInt(v.goalTurnLimit, DEFAULTS.goalTurnLimit, 0, 10_000),
 		goalNoProgressTurns: pickInt(v.goalNoProgressTurns, DEFAULTS.goalNoProgressTurns, 0, 100),

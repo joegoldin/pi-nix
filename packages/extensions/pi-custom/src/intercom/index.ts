@@ -1,8 +1,7 @@
 // pi-custom's intercom part: messaging between this session and other agent
 // sessions on the machine, pi or Claude Code.
 //
-//   runtime.ts        one session's peers, inbox, asks and replies; the
-//                     pi-subagents contract
+//   runtime.ts        one session's peers, inbox, asks and replies
 //   tool.ts           the `intercom` tool
 //   peers.ts          rosters, target resolution, list text (pure)
 //   reply-tracker.ts  which inbound asks are owed an answer (pure)
@@ -30,7 +29,7 @@ function failed(result: ToolResult): boolean {
 	return result.details.error === true || result.details.delivered === false;
 }
 
-export default function intercom(pi: ExtensionAPI): void {
+export default function intercom(pi: ExtensionAPI, workBlockers: () => string[] = () => []): void {
 	const config = loadConfig();
 	if (!config.enabled) {
 		// Nothing registered: a tool that can only fail would cost every prompt
@@ -47,9 +46,8 @@ export default function intercom(pi: ExtensionAPI): void {
 		return;
 	}
 	let runtime: Intercom | null = null;
-	let unsubscribe: (() => void) | null = null;
 
-	registerIntercomTool(pi, () => runtime);
+	registerIntercomTool(pi, () => runtime, workBlockers);
 
 	pi.registerMessageRenderer("intercom_message", (message, options, theme) => {
 		const details = message.details as InboundDetails | undefined;
@@ -66,14 +64,11 @@ export default function intercom(pi: ExtensionAPI): void {
 	pi.on("session_start", (_event, ctx) => {
 		if (!runtime) {
 			runtime = new Intercom(pi, config);
-			unsubscribe = runtime.subscribe();
 		}
 		runtime.start(ctx);
 	});
 
 	pi.on("session_shutdown", async () => {
-		unsubscribe?.();
-		unsubscribe = null;
 		const current = runtime;
 		runtime = null;
 		await current?.shutdown();

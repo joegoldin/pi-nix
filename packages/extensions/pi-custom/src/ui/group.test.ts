@@ -76,7 +76,7 @@ describe("runs from a session branch", () => {
 	});
 
 	it("breaks a run on a call that does not group, and leaves that call out", () => {
-		const model = loaded(assistant(call("a"), call("e", "edit"), call("b", "ls")), assistant(call("s", "subagent")), assistant(call("c")));
+		const model = loaded(assistant(call("a"), call("e", "edit"), call("b", "ls")), assistant(call("s", "intercom")), assistant(call("c")));
 		expect(model.runOf("e")).toBeUndefined();
 		expect(model.runOf("s")).toBeUndefined();
 		expect(ids(model.runOf("a"))).toEqual(["a"]);

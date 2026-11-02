@@ -66,14 +66,14 @@ test("editing loads real child permission prompts and preserves parent ownership
 		);
 	const directory = mkdtempSync(join(tmpdir(), "btw-permissions-"));
 	const oldAgentDir = process.env.PI_CODING_AGENT_DIR;
-	const key = Symbol.for("pi-subagents.required-child-extensions.v1");
+	const key = Symbol.for("pi-custom.required-side-extensions.v1");
 	const root = globalThis as unknown as Record<symbol, unknown>;
 	const previous = root[key];
 	process.env.PI_CODING_AGENT_DIR = directory;
 	const parent = SessionManager.create(directory, directory);
 	const child = SessionManager.create(directory, directory);
 	const parentRules = [
-		{ id: "pi-permissions", path: entry, requireForAllRunners: true },
+		{ id: "pi-permissions", path: entry, requiredForEdits: true },
 	];
 	const registry = {
 		version: 1,

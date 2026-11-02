@@ -1,11 +1,11 @@
 import { isAbsolute } from "node:path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 
-const REQUIRED_CHILD_EXTENSIONS = Symbol.for(
-	"pi-subagents.required-child-extensions.v1",
+const REQUIRED_SIDE_EXTENSIONS = Symbol.for(
+	"pi-custom.required-side-extensions.v1",
 );
 
-/** Honor the same mandatory permission extensions as managed subagents. */
+/** Keep edit-mode side sessions gated without depending on a child plugin. */
 export function requiredSideExtensions(
 	owner: string,
 	root: Record<symbol, unknown> = globalThis as unknown as Record<
@@ -14,7 +14,7 @@ export function requiredSideExtensions(
 	>,
 	requirePermission = false,
 ): string[] {
-	const store = root[REQUIRED_CHILD_EXTENSIONS];
+	const store = root[REQUIRED_SIDE_EXTENSIONS];
 	if (store === undefined && !requirePermission) return [];
 	if (
 		!store ||
@@ -25,7 +25,7 @@ export function requiredSideExtensions(
 		!(store.bySession instanceof Map)
 	)
 		throw new Error(
-			"Cannot start a side conversation: invalid required-child extension registry.",
+			"Cannot start a side conversation: invalid required side-session extension registry.",
 		);
 	const entries: unknown = store.bySession.get(owner) ?? [];
 	if (!Array.isArray(entries))
@@ -36,7 +36,7 @@ export function requiredSideExtensions(
 			(entry) =>
 				entry &&
 				entry.id === "pi-permissions" &&
-				entry.requireForAllRunners === true,
+				entry.requiredForEdits === true,
 		)
 	)
 		throw new Error("Editing requires the parent's child permission gates.");

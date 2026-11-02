@@ -182,35 +182,25 @@ Esc with messages queued (pi-custom's steer) interrupts a check without
 recording a denial: the call does not run, and it is logged and counted as
 interrupted.
 
-## Subagents
+## Peer and side sessions
 
-Every subagent is gated, and grandchildren after it. At each session start
-pi-permissions registers itself in pi-subagents' registry of required child
-extensions, for every runner: every child of the session loads it, no agent
-default, override or empty extension list removes it, a child that cannot
-load it fails to start rather than running ungated, and a child is refused on
-a runner that cannot load it (a remote machine). A child registers itself for
-its own children in turn. A child is headless, so it never asks: what auto
-mode would block there is blocked.
+Ordinary peer Pi instances load this package through their own normal profile.
+They own separate permission ledgers and prompts. Intercom messages do not
+transfer grants or route an independent peer's approvals through another session.
+The native subagent plugin and its package-name resolver link are no longer
+shipped.
 
-pi-subagents also loads the permission system in a child from
-`npm/node_modules/@gotgenes/pi-permission-system`, which pi-nix links to this
-package, and a child's asks are forwarded to the parent session. The package
-registers once per session however many times a child is handed it.
+Local `/btw` edit sessions still require this extension. At session start it
+registers an absolute entrypoint in the first-party
+`pi-custom.required-side-extensions.v1` registry, scoped to that owner session.
+A missing or invalid mandatory permission entry refuses edit mode instead of
+running ungated. A side session registers and unregisters its own requirement
+as it starts and stops; this registry does not connect separate Pi processes.
+Duplicate configured paths still register this package only once per session.
 
-Forwarded requests carry the original tool name, call ID and complete arguments;
-child call IDs never select an unrelated cached parent call. Denials appear in
-the parent's menu with the child name and session ID, including denials resolved
-by the serving node's policy. Incomplete legacy requests and explicit rule
-denials are visible but cannot be approved out of those restrictions.
-
-Child menu approvals remain bound to that child session and working directory.
-They never authorize the parent or sibling workers. Exact child grants still
-pass deterministic checks; scoped grants are reviewed with that child's own
-scopes and cwd, even when several children are asking concurrently. The parent
-receives instructions to relay the retry to the named child, not execute it
-itself. Revocation and restored ledgers retain the same ownership boundary.
-
+The permission engine's defensive forwarded-call handling is retained for hosts
+that emit those events; it is not part of peer messaging. Original tool identity,
+child ownership, deterministic checks and hard-denial boundaries remain enforced.
 
 ## Config
 

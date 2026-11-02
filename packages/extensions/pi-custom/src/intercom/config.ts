@@ -134,7 +134,7 @@ export function parseConfig(value: unknown): IntercomConfig {
 	return config;
 }
 
-/** PI_INTERCOM_ASK_TIMEOUT_MS, shared with pi-subagents; a bad value falls back to the default. */
+/** PI_INTERCOM_ASK_TIMEOUT_MS; a bad value falls back to the default. */
 export function askTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
 	const raw = env.PI_INTERCOM_ASK_TIMEOUT_MS?.trim();
 	if (!raw) return DEFAULT_ASK_TIMEOUT_MS;

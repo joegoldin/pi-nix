@@ -5,9 +5,8 @@
 # pi supplies some packages to every extension itself and aliases their imports
 # to its own copy (pi-coding-agent 1.0.0, `src/core/extensions/loader.ts`). Since
 # 1.0.0 it also warns at startup about every extension whose package.json lists
-# one of them under `dependencies`, which several pins do: pi-automode and
-# pi-subagents declare `typebox` there, and normalise-package-json.nix hoists the
-# `typebox` peer of others into it.
+# one of them under `dependencies`. normalise-package-json.nix can also hoist
+# a host-provided peer into that section.
 #
 # The fix belongs in the shipped manifest, not the install. Dropping `typebox`
 # before bun runs would leave transitive users such as @juicesharp/rpiv-config

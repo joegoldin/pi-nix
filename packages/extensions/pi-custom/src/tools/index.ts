@@ -20,12 +20,17 @@ import { registerGoal } from "./goal.ts";
 import { registerTodo } from "./todo.ts";
 import { registerRunSummary } from "./turn.ts";
 
-export default function tools(pi: ExtensionAPI): void {
+export default function tools(pi: ExtensionAPI): { exitBlockers(): string[] } {
 	const shells = registerBackgroundTasks(pi);
 	registerTodo(pi);
 	registerAsk(pi);
 	// Read on use, so a limit changed in /ui applies to the running goal.
-	registerGoal(pi, () => loadConfig());
-	registerBtw(pi);
+	const goal = registerGoal(pi, () => loadConfig());
+	const sides = registerBtw(pi);
 	registerRunSummary(pi, () => loadConfig(), shells.running);
+	return { exitBlockers: () => [
+		...(shells.running() ? ["Background tasks are still running"] : []),
+		...(sides.running() ? ["/btw turns are still running"] : []),
+		...(goal.active() ? ["An active /goal needs to be completed or stopped"] : []),
+	] };
 }

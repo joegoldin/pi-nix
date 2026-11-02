@@ -41,7 +41,6 @@ let
     "ext-pi-notify"
     "ext-pi-permissions"
     "ext-pi-provider-umans"
-    "ext-pi-subagents"
     "ext-pi-voice"
     "ext-pi-web-access"
   ];
@@ -58,19 +57,19 @@ let
 
   evalAssertions =
     assert lib.sort (a: b: a < b) (builtins.attrNames exts) == expectedNames;
+    assert !(pins ? pi-subagents);
+    assert !(exts ? ext-pi-subagents);
     assert synthetic.passthru.piEntrypoint == [ "${synthetic}/dist/index.js" ];
     assert synthetic.passthru.piSkills == [ "${synthetic}/skills" ];
     assert synthetic.passthru.piPrompts == [ ];
     assert synthetic.passthru.settings == { acme.enabled = true; };
     assert synthetic.passthru.promptFragment == "Use the acme tool for acme things.";
-    # An empty entrypoints list means "hand pi the package root and let it read
-    # the pi manifest", which is the normal path for every real pin.
-    assert exts.ext-pi-subagents.passthru.piEntrypoint == [ "${exts.ext-pi-subagents}" ];
+    # An empty entrypoints list lets Pi resolve the package manifest.
+    assert exts.ext-pi-web-access.passthru.piEntrypoint == [ "${exts.ext-pi-web-access}" ];
     assert exts.ext-pi-web-access.passthru.piPrompts == [ ];
-    assert exts.ext-pi-subagents.passthru.piPrompts == [ "${exts.ext-pi-subagents}/prompts" ];
     assert exts.ext-pi-web-access.passthru.piSkills == [ ];
-    assert exts.ext-pi-subagents.passthru.settings == { };
-    assert exts.ext-pi-subagents.passthru.promptFragment == null;
+    assert exts.ext-pi-web-access.passthru.settings == { };
+    assert exts.ext-pi-web-access.passthru.promptFragment == null;
     # A first-party extension names its entrypoint explicitly instead, because
     # nothing about it is resolved from an npm manifest.
     assert exts.ext-pi-notify.passthru.piEntrypoint == [ "${exts.ext-pi-notify}/src/index.ts" ];
@@ -112,13 +111,8 @@ pkgs.runCommand "pi-nix-extensions-tests" { nativeBuildInputs = [ pkgs.jq ]; } '
 
   check ${exts.ext-aliou-pi-synthetic} deps
   check ${exts.ext-pi-provider-umans} deps
-  check ${exts.ext-pi-subagents} deps
   check ${exts.ext-pi-permissions} deps
   check ${exts.ext-pi-mcp-adapter} deps
-
-  # Skills and prompts advertised through the passthru must be real directories.
-  test -d ${exts.ext-pi-subagents}/skills
-  test -d ${exts.ext-pi-subagents}/prompts
 
   # pi-permissions' engines: auto mode's command analysis, and the permission
   # system's tree-sitter parser with the WASM grammars it loads at runtime.

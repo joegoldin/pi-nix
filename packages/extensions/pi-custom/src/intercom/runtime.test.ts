@@ -1,10 +1,10 @@
 // Two runtimes over a real broker, with pi faked: the inbox policy, ask and
-// reply, and the contract pi-subagents holds an intercom provider to.
+// reply, and ordinary session identity.
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { parseConfig } from "./config.ts";
-import { Intercom, SESSION_IDENTITY_EVENT } from "./runtime.ts";
+import { Intercom } from "./runtime.ts";
 
 type Handler = (payload: unknown) => void;
 
@@ -76,10 +76,9 @@ async function session(id: string, name: string) {
 	const pi = fakePi(name);
 	const ctx = fakeCtx(id);
 	const runtime = new Intercom(pi as never, config);
-	const off = runtime.subscribe();
 	runtime.start(ctx as never);
 	await runtime.connect();
-	return { pi, ctx, runtime, off };
+	return { pi, ctx, runtime };
 }
 
 async function until(check: () => boolean, ms = 3000): Promise<void> {
@@ -90,31 +89,21 @@ async function until(check: () => boolean, ms = 3000): Promise<void> {
 	}
 }
 
-describe("pi-subagents contract", () => {
-	it("lets a claim made synchronously at session start become the id, and publishes it", async () => {
+describe("session identity", () => {
+	it("uses the native Pi id, without asking a child plugin to claim it", async () => {
 		const pi = fakePi();
-		pi.events.on(SESSION_IDENTITY_EVENT, (request) => (request as { claim(id: string): void }).claim("subagent-worker-run1-1"));
+		let claims = 0;
+		pi.events.on("intercom:session-identity", (request) => {
+			claims++;
+			(request as { claim(id: string): void }).claim("legacy-child-id");
+		});
 		const runtime = new Intercom(pi as never, config);
-		runtime.start(fakeCtx("session-abc") as never);
-		expect(process.env.PI_INTERCOM_SESSION_ID).toBe("subagent-worker-run1-1");
-		await runtime.shutdown();
+		try {
+			runtime.start(fakeCtx("session-abc") as never);
+			expect(process.env.PI_INTERCOM_SESSION_ID).toBe("session-abc");
+			expect(claims).toBe(0);
+		} finally { await runtime.shutdown(); }
 		expect(process.env.PI_INTERCOM_SESSION_ID).toBe(previousId);
-	});
-
-	it("delivers a result addressed to this session locally and acknowledges it", async () => {
-		const pi = fakePi();
-		const runtime = new Intercom(pi as never, config);
-		const off = runtime.subscribe();
-		runtime.start(fakeCtx("session-0123456789abcdefghij") as never);
-		const acks: unknown[] = [];
-		pi.events.on("subagent:result-intercom-delivery", (a) => acks.push(a));
-		pi.events.emit("subagent:result-intercom", { to: "subagent-chat-0123456789abcdefgh", message: "child done", requestId: "r1" });
-		expect(acks).toEqual([{ requestId: "r1", delivered: true }]);
-		expect(pi.sent[0]?.message.customType).toBe("intercom_message");
-		expect(pi.prompts).toEqual([]);
-		expect(pi.sent[0]?.options).toEqual({ triggerTurn: true });
-		off();
-		await runtime.shutdown();
 	});
 });
 
@@ -136,11 +125,14 @@ describe("between two sessions", () => {
 		// An ask blocks until the reply arrives; the reply resolves it.
 		const asked = a.runtime.ask(a.ctx as never, { to: "beta", message: "what is 2+2?" });
 		await until(() => b.runtime.tracker.pending().length === 1);
+		expect(a.runtime.exitBlockers("completion-call")).toContain("An outbound peer ask is still waiting");
+		expect(b.runtime.exitBlockers("completion-call")).toContain("Unanswered peer asks need attention");
 		expect((await b.runtime.reply({ message: "4" })).details.delivered).toBe(true);
 		expect((await asked).content[0]!.text).toBe("**Reply from beta:**\n4");
+		expect(a.runtime.exitBlockers("completion-call")).toEqual([]);
+		expect(b.runtime.exitBlockers("completion-call")).toEqual([]);
 
 		for (const s of [a, b]) {
-			s.off();
 			await s.runtime.shutdown();
 		}
 	});
@@ -157,7 +149,6 @@ describe("between two sessions", () => {
 		b.runtime.agentEnd();
 		await until(() => b.pi.sent.length === 1);
 		for (const s of [a, b]) {
-			s.off();
 			await s.runtime.shutdown();
 		}
 	});

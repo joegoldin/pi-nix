@@ -6,10 +6,6 @@
 // model can say `to: "dotfiles"` either way; when that is ambiguous the error
 // names both spellings, `pi:<name>` and `claude:<name>`, rather than guessing.
 //
-// The pi half keeps pi-intercom's rules and wording, which pi-subagents and the
-// model already rely on: exact id, then case-insensitive name, then a unique id
-// prefix, and list rows that show the shortest unique id prefix.
-
 import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import type { Attachment, Message, SessionInfo } from "./broker/types.ts";
@@ -36,14 +32,9 @@ export interface PeerRef {
 	address?: string;
 }
 
-const UNNAMED_PREFIX = "subagent-chat";
+const UNNAMED_PREFIX = "pi";
 
-/**
- * The name peers see for this session. An unnamed session gets
- * `subagent-chat-<first 18 of its id>`, the alias pi-subagents computes on its
- * side to address a parent (intercom-bridge.js resolveIntercomSessionTarget);
- * the two have to agree character for character.
- */
+/** Give unnamed peers a readable alias; the complete session id is authoritative. */
 export function presenceName(sessionName: string | undefined, sessionId: string): { name: string; fallback: boolean } {
 	const named = sessionName?.trim();
 	if (named) return { name: named, fallback: false };

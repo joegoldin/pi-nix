@@ -1,30 +1,27 @@
-// The @ completer: sessions, agents and files, layered over pi's own.
+// The @ completer: sessions and files, layered over pi's own.
 //
 // pi stacks completers by wrapping: each factory receives the one before it.
 // This one answers what it owns and hands everything else down unchanged, so
 // slash commands, paths and whatever another extension added keep working.
 
 import type { AutocompleteItem, AutocompleteProvider, AutocompleteSuggestions } from "@earendil-works/pi-tui";
-import { agentSuggestions, keywordAt, referenceAt, sessionSuggestions, type AgentSummary, type SessionSummary, type Suggestion } from "./references.ts";
+import { keywordAt, referenceAt, sessionSuggestions, type SessionSummary, type Suggestion } from "./references.ts";
 
 export interface CompleterSources {
 	sessionsEnabled(): boolean;
-	agentsEnabled(): boolean;
 	/** Files ranked by FFF, or undefined when FFF is off or has no index. */
 	files(query: string): Suggestion[] | undefined;
 	sessions(): Promise<SessionSummary[]>;
-	agents(): AgentSummary[];
 	currentSessionId(): string | undefined;
 	trackFile(query: string, value: string): void;
 }
 
-const KEYWORDS: Array<{ kind: "session" | "agent"; description: string }> = [
+const KEYWORDS: Array<{ kind: "session"; description: string }> = [
 	{ kind: "session", description: "reference an earlier session" },
-	{ kind: "agent", description: "name a subagent" },
 ];
 
 function keywordItems(partial: string, sources: CompleterSources): AutocompleteItem[] {
-	return KEYWORDS.filter((k) => (k.kind === "session" ? sources.sessionsEnabled() : sources.agentsEnabled()))
+	return KEYWORDS.filter(() => sources.sessionsEnabled())
 		.filter((k) => `${k.kind}:`.startsWith(partial))
 		.map((k) => ({ value: `@${k.kind}:`, label: `@${k.kind}:`, description: k.description }));
 }
@@ -40,15 +37,9 @@ export function createCompleter(sources: CompleterSources) {
 			const before = (lines[cursorLine] ?? "").slice(0, cursorCol);
 
 			const ref = referenceAt(before);
-			if (ref) {
-				const enabled = ref.kind === "session" ? sources.sessionsEnabled() : sources.agentsEnabled();
-				if (enabled) {
-					const items =
-						ref.kind === "session"
-							? sessionSuggestions(await sources.sessions(), ref.query, sources.currentSessionId())
-							: agentSuggestions(sources.agents(), ref.query);
-					return items.length ? { items, prefix: `@${ref.kind}:${ref.query}` } : null;
-				}
+			if (ref && sources.sessionsEnabled()) {
+				const items = sessionSuggestions(await sources.sessions(), ref.query, sources.currentSessionId());
+				return items.length ? { items, prefix: `@session:${ref.query}` } : null;
 			}
 
 			const partial = keywordAt(before);
@@ -72,7 +63,7 @@ export function createCompleter(sources: CompleterSources) {
 		},
 
 		applyCompletion(lines, cursorLine, cursorCol, item, prefix) {
-			if (/^@(session|agent):/.test(item.value)) {
+			if (/^@session:/.test(item.value)) {
 				const line = lines[cursorLine] ?? "";
 				const start = cursorCol - prefix.length;
 				// A bare keyword keeps the cursor after the colon so the search can start.
