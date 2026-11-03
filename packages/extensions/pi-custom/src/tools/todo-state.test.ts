@@ -398,10 +398,10 @@ describe("completed group headers", () => {
 });
 
 describe("work-focused compact view", () => {
-	it("separates total completions from overflow after completed rows fade", () => {
+	it("excludes archived completions from counts and overflow after rows fade", () => {
 		const state: TodoState = { nextId: 9, tasks: Array.from({ length: 8 }, (_, i) => ({ id: i + 1, subject: `task ${i + 1}`, status: i < 3 ? "completed" : "pending" })) };
 		const lines = widgetLines(state, new Set([1, 2, 3]), 4, plain);
-		expect(lines[0]).toContain("3 complete");
+		expect(lines[0]).toContain("0 complete");
 		expect(lines.at(-1)).toContain("3 more unfinished");
 		expect(lines.join("\n")).not.toContain("0 completed");
 	});
@@ -450,5 +450,44 @@ describe("task contracts", () => {
 		const state: TodoState = { tasks: [{ id: 1, subject: "Legacy", status: "pending" }], nextId: 2 };
 		expect(replay([{ type: "custom", customType: "pi-custom:todo-state", data: state }])).toEqual(state);
 		expect(reduce(state, { action: "update", id: 1, acceptanceCriteria: "Legacy check passes" }).state.tasks[0].acceptanceCriteria).toBe("Legacy check passes");
+	});
+});
+
+describe("completed history leaves the working list", () => {
+	const state = run(
+		{ action: "create", subject: "Finished", acceptanceCriteria: "Tests pass" },
+		{ action: "update", id: 1, status: "completed", evidence: "Tests passed" },
+		{ action: "create", subject: "Next", acceptanceCriteria: "Acceptance passes", blockedBy: [1] },
+	).state;
+
+	it("lists unfinished tasks by default without deleting evidence or dependencies", () => {
+		expect(reduce(state, { action: "list" }).text).toBe("[pending] #2 Next ⛓ #1");
+		expect(reduce(state, { action: "list", status: "completed" }).text).toBe("[completed] #1 Finished");
+		expect(reduce(state, { action: "get", id: 1 }).text).toContain("evidence: Tests passed");
+		expect(reduce(state, { action: "list" }).state).toBe(state);
+	});
+
+	it("returns no tasks for a completed-only working list", () => {
+		expect(reduce({ ...state, tasks: state.tasks.slice(0, 1) }, { action: "list" }).text).toBe("No tasks");
+	});
+
+	it("excludes archived completions from compact counts, but retains expanded history", () => {
+		const compact = widgetLines(state, new Set([1]), 12, plain).join("\n");
+		expect(compact).toContain("Todos (0/1)");
+		expect(compact).not.toContain("Finished");
+		expect(compact).not.toContain("⛓");
+		const expanded = widgetLines(state, new Set([1]), 12, plain, true).join("\n");
+		expect(expanded).toContain("Todos (1/2)");
+		expect(expanded).toContain("Finished");
+	});
+
+	it("hides completed groups and children from default lists", () => {
+		const grouped = run(
+			{ action: "create", subject: "Batch", kind: "group" },
+			{ action: "create", subject: "Child", parentId: 1, acceptanceCriteria: "Tests pass" },
+			{ action: "update", id: 2, status: "completed", evidence: "Tests passed" },
+		).state;
+		expect(reduce(grouped, { action: "list" }).text).toBe("No tasks");
+		expect(reduce(grouped, { action: "list", status: "completed" }).text).toContain("[group completed]");
 	});
 });

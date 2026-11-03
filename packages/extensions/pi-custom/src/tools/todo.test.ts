@@ -160,7 +160,7 @@ function fakeTodoClock() {
 	return { clock, jobs, advance(ms: number) { now += ms; for (const [fn, at] of [...jobs]) if (at <= now) { jobs.delete(fn); fn(); } } };
 }
 
-test("completed rows expire during a long run, but the records and counts survive", async () => {
+test("completed rows expire during a long run, keeping records without inflating counts", async () => {
 	const timer = fakeTodoClock(); const h = uiHarness(timer.clock);
 	await h.act({ action: "create", acceptanceCriteria: "The named outcome is verified", subject: "Finished work" });
 	await h.act({ action: "create", acceptanceCriteria: "The named outcome is verified", subject: "Next work" });
@@ -173,7 +173,7 @@ test("completed rows expire during a long run, but the records and counts surviv
 	const text = h.widget().render(80).join("\n");
 	expect(text).not.toContain("Finished work");
 	expect(text).toContain("Next work");
-	expect(text).toContain("1/2");
+	expect(text).toContain("0/1");
 	expect((await h.act({ action: "get", id: 1 })).details.tasks[0].status).toBe("completed");
 	expect(h.widget().render(80).join("\n")).not.toContain("Finished work");
 	h.widget().handleMouse({ type: "click", button: "left", y: 0 });
@@ -372,4 +372,19 @@ test("clearing a batch resets cadence and completed-only batches do not demand r
 	await h.act({ action: "update", id: 1, status: "completed", evidence: "Tests passed" });
 	timer.advance(120_000);
 	expect(checkpoint(h)).toBe("");
+});
+
+test("working lists stay bounded across completions and restoration while history survives", async () => {
+	const h = uiHarness(fakeTodoClock().clock);
+	for (let i = 0; i < 20; i++) {
+		await h.act({ action: "create", subject: `Finished ${i}`, acceptanceCriteria: "Check passes" });
+		await h.act({ action: "update", id: i + 1, status: "completed", evidence: "Check passed" });
+	}
+	await h.act({ action: "create", subject: "Remaining", acceptanceCriteria: "Acceptance passes", blockedBy: [20] });
+	h.emit("session_tree");
+	expect((await h.act({ action: "list" })).content[0].text).toBe("[pending] #21 Remaining ⛓ #20");
+	expect((await h.act({ action: "list", status: "completed" })).content[0].text.split("\n")).toHaveLength(20);
+	expect((await h.act({ action: "get", id: 20 })).content[0].text).toContain("evidence: Check passed");
+	expect(h.tool.description).toContain("unfinished tasks by default");
+	expect(h.apply(h.base("Custom instructions"))).toContain("automatically leave the default list");
 });

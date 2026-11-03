@@ -52,7 +52,10 @@ Completed rows fade at the next agent run or after 60 seconds, whichever comes
 first. A single deadline timer handles long-running and idle sessions without
 model calls. Reading the list or compacting the session does not renew the
 countdown; clearing, changing branches and shutdown cancel stale deadlines.
-This only hides rows: completed records, dependencies and evidence remain intact.
+This only archives rows: completed records, dependencies and evidence remain intact.
+The default `todo list` returns unfinished work; `list status=completed` and `get`
+provide completed history. Compact widget counts exclude completions once hidden,
+so they do not grow for the lifetime of a conversation.
 Expanded views and `/todos` still expose completed history.
 
 Each new task requires `acceptanceCriteria`: a bounded, observable completion

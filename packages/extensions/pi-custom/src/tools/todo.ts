@@ -38,7 +38,7 @@ const CLOCK: TodoClock = {
 
 const GUIDELINES = [
 	"New tasks require acceptanceCriteria: a bounded, observable completion check. Keep that contract stable; discovery adds a separate task rather than expanding an existing outcome. Use description for changing progress, blockers and next actions. Completion requires evidence naming the check and observed result; populated text is not itself proof. Do not invent criteria or evidence merely to satisfy validation.",
-	"Task bookkeeping is not a new user request. Preserve completed history; do not prune tasks merely to shorten the display. Reconcile statuses while continuing authorized work, never start another run solely for bookkeeping.",
+	"Task bookkeeping is not a new user request. Completed tasks automatically leave the default list and fade from the compact widget; retain their evidence and dependencies as history, accessible with list status=completed or get. Do not delete tasks merely to shorten the display. Reconcile statuses while continuing authorized work, never start another run solely for bookkeeping.",
 	"When a Todo review due checkpoint appears (after 6 model turns or 2 minutes without a full-list review, or on resume/compaction), call todo list without a status filter before further substantive work. Reconcile the whole unfinished list against observed results: complete verified outcomes with evidence, correct stale activity, and record blockers/next actions. Do not delete older tasks just because they are old, resume unrelated work, or treat the reminder as permission to expand scope. A list read acknowledges the checkpoint; it does not itself verify any outcome.",
 	"Use `todo` proactively for substantial multi-step work: multiple deliverables, platforms, implementation stages, or verification gates. Do not wait to be asked. After enough initial inspection to identify the work, populate the list before substantive implementation. Skip single-step edits, quick lookups, and conversation; respect an explicit request not to use todos.",
 	"Each task must describe one independently verifiable outcome, not the whole request. Split implementation, distinct platform/feature acceptance checks, and authorized release work when they can succeed or fail separately. For example, use 'Verify Linux packaging' and 'Verify Mac clipboard' rather than 'Implement everything and verify Linux and Mac'. When an umbrella goal helps organize the work, convert it to a group (kind: group) and attach concrete child tasks with parentId. Otherwise replace it with the milestones; never keep a duplicate whole-goal task active alongside them. Avoid one task per shell command.",
@@ -185,7 +185,7 @@ export function registerTodo(pi: ExtensionAPI, clock: TodoClock = CLOCK): void {
 		name: "todo",
 		label: "Todo",
 		description:
-			"Track substantial multi-step work proactively as separate, verifiable tasks, optionally under one level of groups with derived progress. Actions: create (new task), update (change status/fields/dependencies), list (all tasks, optionally filtered by status), get (single task details), delete (tombstone), clear (reset all). Task status: pending → in_progress → completed, plus deleted tombstone. Starting work pauses conflicting active tasks; session settlement pauses unfinished work. Keep progress, verification evidence, and blockers current; skip trivial single-step work.",
+			"Track substantial multi-step work proactively as separate, verifiable tasks, optionally under one level of groups with derived progress. Actions: create (new task), update (change status/fields/dependencies), list (unfinished tasks by default; use status=completed for history), get (single task details), delete (tombstone), clear (reset all). Task status: pending → in_progress → completed, plus deleted tombstone. Starting work pauses conflicting active tasks; session settlement pauses unfinished work. Keep progress, verification evidence, and blockers current; skip trivial single-step work.",
 		promptSnippet: "Track separate verifiable milestones and keep multi-step progress current",
 		promptGuidelines: GUIDELINES,
 		parameters: Type.Object({
@@ -202,7 +202,7 @@ export function registerTodo(pi: ExtensionAPI, clock: TodoClock = CLOCK): void {
 			status: Type.Optional(
 				StringEnum(["pending", "in_progress", "completed", "deleted"] as const, {
 					description:
-						"Set this task's status (update): one of pending, in_progress, completed, deleted. When action is list, filters returned tasks by this status.",
+						"Set this task's status (update): one of pending, in_progress, completed, deleted. When action is list, filters returned tasks by this status; default lists omit completed tasks.",
 				}),
 			),
 			blockedBy: Type.Optional(Type.Array(Type.Number(), { description: "Initial blockedBy ids (create only)" })),

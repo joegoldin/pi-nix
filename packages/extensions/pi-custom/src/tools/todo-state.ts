@@ -261,7 +261,7 @@ function reduceAction(state: TodoState, p: TodoParams): Outcome {
 		case "list": {
 			const shown = state.tasks
 				.filter((t) => p.includeDeleted === true || t.status !== "deleted")
-				.filter((t) => !p.status || t.status === p.status);
+				.filter((t) => p.status ? t.status === p.status : t.status !== "completed");
 			if (shown.length === 0) return { state, text: "No tasks" };
 			return {
 				state,
@@ -377,7 +377,9 @@ export function widgetRows(
 	}
 	const visible = blocks.flat();
 	if (!visible.length) return [];
-	const leaves = live.filter((t) => t.kind !== "group");
+	// Archived completions remain available for dependency resolution and history,
+	// but must not inflate the working list for the rest of the conversation.
+	const leaves = live.filter((t) => t.kind !== "group" && (showAll || !hidden.has(t.id)));
 	const done = leaves.filter((t) => t.status === "completed").length;
 	const open = visible.some(({ task }) => task.status !== "completed");
 	const lines: TodoWidgetRow[] = [{ text: `${theme.fg(open ? "accent" : "dim", open ? "●" : "○")} Todos (${done}/${leaves.length}) · ${done} complete · ${leaves.filter((t) => t.status === "in_progress").length} active · ${leaves.filter((t) => t.status === "pending").length} pending` }];
