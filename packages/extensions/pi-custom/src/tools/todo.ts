@@ -19,6 +19,8 @@ const WIDGET_KEY = "pi-custom:todos";
 const MAX_WIDGET_LINES = 12;
 const COMPLETED_GRACE_MS = 60_000;
 const MAINTENANCE_MESSAGE = "pi-custom:todo-maintenance";
+const REVIEW_TURNS = 6;
+const REVIEW_MS = 120_000;
 
 export interface TodoClock {
 	now(): number;
@@ -37,6 +39,7 @@ const CLOCK: TodoClock = {
 const GUIDELINES = [
 	"New tasks require acceptanceCriteria: a bounded, observable completion check. Keep that contract stable; discovery adds a separate task rather than expanding an existing outcome. Use description for changing progress, blockers and next actions. Completion requires evidence naming the check and observed result; populated text is not itself proof. Do not invent criteria or evidence merely to satisfy validation.",
 	"Task bookkeeping is not a new user request. Preserve completed history; do not prune tasks merely to shorten the display. Reconcile statuses while continuing authorized work, never start another run solely for bookkeeping.",
+	"When a Todo review due checkpoint appears (after 6 model turns or 2 minutes without a full-list review, or on resume/compaction), call todo list without a status filter before further substantive work. Reconcile the whole unfinished list against observed results: complete verified outcomes with evidence, correct stale activity, and record blockers/next actions. Do not delete older tasks just because they are old, resume unrelated work, or treat the reminder as permission to expand scope. A list read acknowledges the checkpoint; it does not itself verify any outcome.",
 	"Use `todo` proactively for substantial multi-step work: multiple deliverables, platforms, implementation stages, or verification gates. Do not wait to be asked. After enough initial inspection to identify the work, populate the list before substantive implementation. Skip single-step edits, quick lookups, and conversation; respect an explicit request not to use todos.",
 	"Each task must describe one independently verifiable outcome, not the whole request. Split implementation, distinct platform/feature acceptance checks, and authorized release work when they can succeed or fail separately. For example, use 'Verify Linux packaging' and 'Verify Mac clipboard' rather than 'Implement everything and verify Linux and Mac'. When an umbrella goal helps organize the work, convert it to a group (kind: group) and attach concrete child tasks with parentId. Otherwise replace it with the milestones; never keep a duplicate whole-goal task active alongside them. Avoid one task per shell command.",
 	"Grouping is optional and limited to one level: top-level groups contain tasks, never other groups or grandchildren. Keep small lists flat. Group progress is derived from live children and groups are excluded from task totals; do not mark a group in_progress/completed yourself. Put any final audit in a child task. Hierarchy does not imply blockedBy dependencies, which must reference tasks, not groups. Set parentId to null to detach a task; move or delete children before deleting a group.",
@@ -71,6 +74,15 @@ export function registerTodo(pi: ExtensionAPI, clock: TodoClock = CLOCK): void {
 	let wrapped = false;
 	let ctxRef: ExtensionContext | undefined;
 	let requestRender: (() => void) | undefined;
+	let turnsSinceReview = 0;
+	let lastReviewAt = clock.now();
+	let restoredReview = false;
+
+	function acknowledgeReview(): void {
+		turnsSinceReview = 0;
+		lastReviewAt = clock.now();
+		restoredReview = false;
+	}
 
 	function cleanCompleted(): void {
 		cancelCleanup?.();
@@ -102,6 +114,8 @@ export function registerTodo(pi: ExtensionAPI, clock: TodoClock = CLOCK): void {
 
 	function load(ctx: ExtensionContext, pause = false): void {
 		state = replay(ctx.sessionManager.getBranch() as never);
+		acknowledgeReview();
+		restoredReview = state.tasks.some((t) => t.kind !== "group" && (t.status === "pending" || t.status === "in_progress"));
 		ctxRef = ctx;
 		collapsedGroups.clear();
 		if (pause) {
@@ -210,6 +224,8 @@ export function registerTodo(pi: ExtensionAPI, clock: TodoClock = CLOCK): void {
 		async execute(_id, params) {
 			const outcome = reduce(state, params as TodoParams);
 			state = outcome.state;
+			// Updating one task must not suppress a review of the rest of the backlog.
+			if (!outcome.error && (params.action === "clear" || (params.action === "list" && !params.status))) acknowledgeReview();
 			if (params.action === "clear") {
 				cancelCleanup?.();
 				cancelCleanup = undefined;
@@ -344,9 +360,14 @@ export function registerTodo(pi: ExtensionAPI, clock: TodoClock = CLOCK): void {
 				description: t.description?.slice(0, 500),
 				blockedBy: (t.blockedBy ?? []).filter((id) => state.tasks.find((dep) => dep.id === id)?.status !== "completed"),
 			}));
+			const reviewDue = restoredReview || turnsSinceReview >= REVIEW_TURNS || clock.now() - lastReviewAt >= REVIEW_MS;
+			// Check elapsed time only at model boundaries; never wake an idle agent.
+			const review = reviewDue
+				? "Todo review due: call todo list without a status filter before further substantive work, then reconcile the whole unfinished list against observed results. Complete only verified outcomes with evidence; correct stale activity and record blockers/next actions. Do not delete older tasks or resume unrelated work. Reading the list acknowledges this checkpoint, not completion. "
+				: "";
 			// Request-local state survives compaction without queued reminders or extra turns.
 			messages.push({ role: "system", timestamp: clock.now(), content:
-				"Task checkpoint (bookkeeping, not a new request): " +
+				"Task checkpoint (bookkeeping, not a new request): " + review +
 				(active.length ? "Reconcile the active outcome against the latest results. " : "No task is in progress. Before substantive work, mark the task you are actually resuming in_progress. ") +
 				"At a verified milestone, complete that task with evidence before starting another; before yielding, record blockers and next actions for unfinished work. " +
 				"Do not infer completion from tool success alone, change acceptance criteria, or create a bookkeeping-only turn. Continue only the authorized work. " +
@@ -355,6 +376,10 @@ export function registerTodo(pi: ExtensionAPI, clock: TodoClock = CLOCK): void {
 			});
 		}
 		if (messages.length !== event.messages.length || messages.some((message, i) => message !== event.messages[i])) return { messages };
+	});
+
+	pi.on("turn_end", () => {
+		turnsSinceReview++;
 	});
 
 	pi.on("before_agent_start", (event) => {

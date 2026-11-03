@@ -71,6 +71,21 @@ not queue messages, start turns, or infer completion. Completed history stays
 available without pruning; legacy pruning notices are excluded from model
 context while remaining in recorded history.
 
+A stronger **Todo review due** checkpoint appears after 6 model turns or
+120 seconds without an unfiltered `todo list` read, whichever comes first.
+Session start, branch restoration and compaction also require a fresh review
+when unfinished tasks exist. The checkpoint asks for the full list before
+further substantive work, then reconciliation against observed results:
+verified completions with evidence, stale activity, blockers and next actions.
+Reading one task, listing a status subset, or updating one row does not dismiss
+a backlog review. An unfiltered list read acknowledges the checkpoint; it is
+not proof that reconciliation or verification happened. Clearing a batch also
+resets the cadence. The reminder remains due until acknowledged. Elapsed time
+is checked at the next model request, not by a timer: idle sessions and long
+running tools are never interrupted or woken for bookkeeping. Empty and
+completed-only lists produce no checkpoint. Older tasks are not deleted or
+resumed merely because a review is due.
+
 Starting a task returns conflicting active tasks to pending. Simultaneous
 work requires distinct explicit owners, not several unowned in-progress
 rows. On settlement, including interruption, or session/branch restoration,

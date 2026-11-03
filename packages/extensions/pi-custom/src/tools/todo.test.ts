@@ -313,3 +313,63 @@ test("disabled todo tools do not inject checkpoints for restored tasks", async (
 	const messages = [{ role: "user", content: "Continue", timestamp: 1 }];
 	expect(h.handlers.get("context_with_system")?.({ messages })?.messages ?? messages).toEqual(messages);
 });
+
+function checkpoint(h: ReturnType<typeof uiHarness>): string {
+	return h.emit("context_with_system", { messages: [] })?.messages.at(-1)?.content ?? "";
+}
+
+test("six model turns require a full-list review, not just another task update", async () => {
+	const timer = fakeTodoClock(); const h = uiHarness(timer.clock);
+	await h.act({ action: "create", subject: "Work", acceptanceCriteria: "Tests pass" });
+	await h.act({ action: "list" });
+	for (let i = 0; i < 5; i++) h.emit("turn_end");
+	expect(checkpoint(h)).not.toContain("Todo review due");
+	h.emit("turn_end");
+	expect(checkpoint(h)).toContain("Todo review due");
+	await h.act({ action: "update", id: 1, description: "Still working" });
+	await h.act({ action: "get", id: 1 });
+	await h.act({ action: "list", status: "in_progress" });
+	expect(checkpoint(h)).toContain("Todo review due");
+	await h.act({ action: "list" });
+	expect(checkpoint(h)).not.toContain("Todo review due");
+});
+
+test("two minutes require review at the next request without timers or idle wakeups", async () => {
+	const timer = fakeTodoClock(); const h = uiHarness(timer.clock);
+	await h.act({ action: "create", subject: "Work", acceptanceCriteria: "Tests pass" });
+	await h.act({ action: "list" });
+	timer.advance(119_999);
+	expect(checkpoint(h)).not.toContain("Todo review due");
+	timer.advance(1);
+	expect(checkpoint(h)).toContain("Todo review due");
+	expect(timer.jobs.size).toBe(0);
+	expect(h.messages).toHaveLength(0);
+	expect(h.userMessages).toHaveLength(0);
+	await h.act({ action: "list" });
+	expect(checkpoint(h)).not.toContain("Todo review due");
+});
+
+for (const event of ["session_start", "session_compact", "session_tree"]) test(`${event} requires fresh reconciliation of restored tasks`, async () => {
+	const h = uiHarness(fakeTodoClock().clock);
+	await h.act({ action: "create", subject: "Work", acceptanceCriteria: "Tests pass" });
+	await h.act({ action: "list" });
+	h.emit(event);
+	expect(checkpoint(h)).toContain("Todo review due");
+	expect(checkpoint(h)).toContain("todo list");
+	expect(checkpoint(h)).toContain("Do not delete");
+	await h.act({ action: "list" });
+	expect(checkpoint(h)).not.toContain("Todo review due");
+});
+
+test("clearing a batch resets cadence and completed-only batches do not demand review", async () => {
+	const timer = fakeTodoClock(); const h = uiHarness(timer.clock);
+	await h.act({ action: "create", subject: "Old", acceptanceCriteria: "Tests pass" });
+	timer.advance(120_000);
+	expect(checkpoint(h)).toContain("Todo review due");
+	await h.act({ action: "clear" });
+	await h.act({ action: "create", subject: "New", acceptanceCriteria: "Tests pass" });
+	expect(checkpoint(h)).not.toContain("Todo review due");
+	await h.act({ action: "update", id: 1, status: "completed", evidence: "Tests passed" });
+	timer.advance(120_000);
+	expect(checkpoint(h)).toBe("");
+});
