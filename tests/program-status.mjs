@@ -160,11 +160,23 @@ check("owned prompt markers and full resets restore status, including split writ
 	assert.deepEqual(capture(() => terminal.write("ordinary output")), []);
 	output = capture(() => terminal.write("\x1bc")); assert.equal(output.length, 2);
 });
-check("explicit worker cancellation returns an otherwise settled program to idle", () => {
+check("child results never replace the main program outcome", () => {
+ const { reporter, root } = reporterFixture();
+ reporter.setActivity("background/task", { state: "working" });
+ reporter.setActivity("background/task", { state: "done" });
+ assert.equal(root().state, "idle");
+ reporter.handleEvent({ type: "agent_start" });
+ reporter.setActivity("background/task", { state: "error" });
+ assert.equal(root().state, "working");
+ reporter.handleEvent({ type: "agent_settled", aborted: false });
+ reporter.setActivity("background/task", { state: "error", message: "Another result" });
+ assert.equal(root().state, "done");
+});
+check("worker cancellation preserves the settled agent outcome", () => {
 	const { reporter, root } = reporterFixture();
 	reporter.handleEvent({ type: "agent_start" }); reporter.handleEvent({ type: "agent_settled", aborted: false });
 	reporter.setActivity("goal", { state: "working" });
-	reporter.setActivity("goal", { state: "idle" }); assert.equal(root().state, "idle");
+	reporter.setActivity("goal", { state: "idle" }); assert.equal(root().state, "done");
 });
 check("tool execution and retry waits stay working with non-sensitive phase messages", () => {
 	const { reporter, root, values } = reporterFixture();
@@ -196,7 +208,8 @@ for (const outcome of ["done", "error", "idle"]) {
 		} } } };
 		const pending = InteractiveMode.prototype.loginProvider.call(host, { signal: abort.signal }, "test", "Test", "oauth");
 		if (outcome === "done") await pending; else await assert.rejects(pending);
-		assert.equal(root().state, outcome);
+		assert.equal(root().state, "idle");
+		assert(values.some(value => value.id === "pi/authentication" && value.state === outcome));
 		assert(!JSON.stringify(values).includes("PRIVATE_CREDENTIAL"));
 		console.log(`PASS authentication ${outcome}`);
 	} catch (error) { failures.push(error); console.error(`FAIL authentication ${outcome}: ${error.message}`); }

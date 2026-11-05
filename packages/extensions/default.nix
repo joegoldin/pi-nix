@@ -79,7 +79,10 @@ let
         let
           patches = bunPkgs.callPackage ./pi-lens-patches.nix { };
         in
-        patches.lazyCoreTools + patches.quietEmptyWidget + bunPkgs.callPackage ./pi-lens-grammars.nix { };
+        patches.lazyCoreTools
+        + patches.quietEmptyWidget
+        + patches.compactToggleWidget
+        + bunPkgs.callPackage ./pi-lens-grammars.nix { };
     };
   };
 in

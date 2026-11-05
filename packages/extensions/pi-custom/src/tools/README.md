@@ -14,7 +14,9 @@ model and starts a follow-up turn, so it never polls. `bg_status`, `bg_logs`
 `/kill <id>` do the same at the keyboard. Tasks live for the session.
 
 Tool results and completion notices use the shared custom cards and theme.
-The dock has a compact task icon. `/jobs` and `/logs <id>` open bordered views;
+The dock shows compact counts (`↻` running, `✗` failed, `■` stopped, `✓` done).
+Acknowledged results disappear from the dock and Rex metadata, not history.
+Automatic follow-up results remain working until consumed by the next turn. `/jobs` and `/logs <id>` open bordered views;
 Up/Down, Page Up/Down and Home/End scroll, and Escape or Enter closes them.
 Log views are bounded snapshots, not a live tail. Model-facing output and
 completion delivery are unchanged.
@@ -37,10 +39,12 @@ groups. Dependencies (`blockedBy`) connect tasks independently of grouping.
 Move or delete all live children before deleting a group; deletion never
 silently cascades.
 
-The list above the editor shows group counts and indented tasks. Click a
-group header or use `/todos <group-id>` to collapse/expand it; groups start
-expanded. Click a task to toggle wrapped text. Ctrl+Shift+T folds the whole
-list; `/todos` displays the full list. Active work sorts first, then ready
+The list above the editor starts in focus mode: up to two active tasks, or one
+next task when nothing is active. Click the heading or a task to cycle through
+focus, a five-task preview, and the full wrapped list with history. Ctrl+Shift+T
+cycles the same modes. The full view shows group counts and indented tasks;
+click a group header or use `/todos <group-id>` to collapse/expand it.
+`/todos` displays the full list without changing the focus view. Active work sorts first, then ready
 pending work, blocked work and completions. Groups follow their highest-priority
 child. Satisfied dependency edges disappear from the widget, not the records.
 The heading labels overall counts; overflow labels only the tasks outside the

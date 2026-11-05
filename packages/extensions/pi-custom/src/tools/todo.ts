@@ -68,10 +68,9 @@ export function registerTodo(pi: ExtensionAPI, clock: TodoClock = CLOCK): void {
 	const fading = new Map<number, number>();
 	let cancelCleanup: (() => void) | undefined;
 	const hidden = new Set<number>();
-	let collapsed = false;
+	let view: "minimal" | "preview" | "full" = "minimal";
 	const collapsedGroups = new Set<number>();
-	// A click on the list shows every task in full, wrapped; another puts it back.
-	let wrapped = false;
+	const cycleView = () => { view = view === "minimal" ? "preview" : view === "preview" ? "full" : "minimal"; };
 	let ctxRef: ExtensionContext | undefined;
 	let requestRender: (() => void) | undefined;
 	let turnsSinceReview = 0;
@@ -117,6 +116,7 @@ export function registerTodo(pi: ExtensionAPI, clock: TodoClock = CLOCK): void {
 		acknowledgeReview();
 		restoredReview = state.tasks.some((t) => t.kind !== "group" && (t.status === "pending" || t.status === "in_progress"));
 		ctxRef = ctx;
+		view = "minimal";
 		collapsedGroups.clear();
 		if (pause) {
 			fading.clear();
@@ -137,7 +137,7 @@ export function registerTodo(pi: ExtensionAPI, clock: TodoClock = CLOCK): void {
 			title: "Tasks", message: `${completed}/${tasks.length} tasks completed`,
 			...(active ? { progress: Math.floor(completed * 100 / tasks.length) } : {}),
 		} : undefined);
-		const expanded = wrapped || ctx.ui.getToolsExpanded();
+		const expanded = view === "full" || ctx.ui.getToolsExpanded();
 		const anything = state.tasks.some((t) => t.status !== "deleted" && (expanded || !hidden.has(t.id)));
 		if (!anything) {
 			ctx.ui.setWidget(WIDGET_KEY, undefined);
@@ -155,23 +155,28 @@ export function registerTodo(pi: ExtensionAPI, clock: TodoClock = CLOCK): void {
 				let rows: TodoWidgetRow[] = [];
 				return {
 					render: (width: number) => {
-						rows = widgetRows(
-							state, hidden, MAX_WIDGET_LINES, theme as never,
-							wrapped || (ctxRef?.ui.getToolsExpanded() ?? false), wrapped ? width : undefined, collapsedGroups,
-						);
-						if (collapsed) rows = rows.length ? [rows[0], { text: theme.fg("dim", "└─ ctrl+shift+t to expand") }] : [];
-						return [...rows.map((row) => row.text), ""].map((line) => truncateToWidth(line, width, "…"));
+						const full = view === "full" || (ctxRef?.ui.getToolsExpanded() ?? false);
+						if (full) rows = widgetRows(state, hidden, MAX_WIDGET_LINES, theme as never, true, width, collapsedGroups);
+						else {
+							const live = state.tasks.filter(t => t.kind !== "group" && t.status !== "deleted" && !hidden.has(t.id));
+							const active = live.filter(t => t.status === "in_progress");
+							const ranked = [...live].sort((a, b) => Number(b.status === "in_progress") - Number(a.status === "in_progress") || Number(a.status === "completed") - Number(b.status === "completed"));
+							const chosen = view === "minimal" ? (active.length ? active.slice(0, 2) : ranked.slice(0, 1)) : ranked.slice(0, 5);
+							// Keep dependency evidence outside the displayed subset available.
+							const ids = new Set(chosen.map(t => t.id));
+							const subset = { ...state, tasks: state.tasks.filter(t => t.kind !== "group").map(t => ({ ...t, parentId: undefined })) };
+							rows = widgetRows(subset, new Set(subset.tasks.filter(t => !ids.has(t.id)).map(t => t.id)), MAX_WIDGET_LINES, theme as never);
+							if (rows.length) rows[0].text = theme.fg("dim", `▸ Todos · ${live.filter(t => t.status === "completed").length}/${live.length} · ${view === "minimal" ? "focus" : `${chosen.length} shown`}`);
+						}
+						return rows.map(row => truncateToWidth(row.text, width, "…"));
 					},
 					handleMouse: (event: TuiMouseEvent): TuiMouseEventResult | undefined => {
 						if (event.type !== "click" || event.button !== "left") return undefined;
-						if (collapsed) collapsed = false;
-						else {
-							const groupId = rows[event.y]?.groupId;
-							if (groupId !== undefined) {
-								if (collapsedGroups.has(groupId)) collapsedGroups.delete(groupId);
-								else collapsedGroups.add(groupId);
-							} else wrapped = !wrapped;
-						}
+						const groupId = rows[event.y]?.groupId;
+						if (groupId !== undefined) {
+							if (collapsedGroups.has(groupId)) collapsedGroups.delete(groupId);
+							else collapsedGroups.add(groupId);
+						} else cycleView();
 						return { handled: true, render: true };
 					},
 					invalidate() {},
@@ -281,7 +286,7 @@ export function registerTodo(pi: ExtensionAPI, clock: TodoClock = CLOCK): void {
 			}
 			if (collapsedGroups.has(id)) collapsedGroups.delete(id);
 			else collapsedGroups.add(id);
-			collapsed = false;
+			view = "full";
 			for (const t of live) if (t.id === id || t.parentId === id) hidden.delete(t.id);
 			cleanCompleted();
 			show(ctx);
@@ -340,9 +345,9 @@ export function registerTodo(pi: ExtensionAPI, clock: TodoClock = CLOCK): void {
 	});
 
 	pi.registerShortcut("ctrl+shift+t", {
-		description: "Collapse or expand the todo list",
+		description: "Cycle todo focus, preview and full views",
 		handler: async () => {
-			collapsed = !collapsed;
+			cycleView();
 			requestRender?.();
 		},
 	});

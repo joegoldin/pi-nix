@@ -30,6 +30,28 @@ in
       ${lib.escapeShellArg "  if (!langStr && !lspChip && !summary && totalSuppressed === 0 && recencySorted.length === 0)\n    return [];\n  lines.push(fitLine(header, w));\n  if (totalSuppressed > 0) {"}
   '';
 
+  # Details are useful on demand, but should not consume prompt-dock height.
+  compactToggleWidget = ''
+    substituteInPlace dist/index.js --replace-fail \
+      ${lib.escapeShellArg "      const compactWidget = getLensFlag(\"lens-compact-widget\") === true;"} \
+      ${lib.escapeShellArg "      let compactWidget = true;"}
+    substituteInPlace dist/index.js --replace-fail \
+      ${lib.escapeShellArg "          return renderWidget(width, theme, { compact: compactWidget });\n        },\n        invalidate:"} \
+      ${lib.escapeShellArg ''
+          return renderWidget(width, theme, { compact: compactWidget });
+        },
+        handleMouse: (event) => {
+          if (event.type !== "click" || event.button !== "left") return;
+          compactWidget = !compactWidget;
+          tui.requestRender();
+          return { handled: true, render: true };
+        },
+        invalidate:''}
+    substituteInPlace dist/index.js --replace-fail \
+      ${lib.escapeShellArg "fitCompactHeader(w, cyan(\"pi-lens\"), langStr ? dim(langStr) : \"\", lspChip, summary)"} \
+      ${lib.escapeShellArg "fitCompactHeader(w, cyan(\"◇ lens\"), \"\", lspChip, summary)"}
+  '';
+
   lazyCoreTools = lib.concatMapStrings (name: ''
     substituteInPlace dist/index.js --replace-fail \
       ${lib.escapeShellArg "        piName: \"${name}\","} \

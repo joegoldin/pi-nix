@@ -158,10 +158,10 @@ export function statusLine(tasks: TaskSnapshot[], seen: Set<string>): string | u
 	const killed = unseen.filter((t) => t.status === "killed").length;
 	const done = unseen.filter((t) => t.status === "completed").length;
 	const parts = [
-		running ? `${running} running` : "",
-		failed ? `${failed} failed` : "",
-		killed ? `${killed} stopped` : "",
-		done ? `${done} done` : "",
+		running ? `${running}↻` : "",
+		failed ? `${failed}✗` : "",
+		killed ? `${killed}■` : "",
+		done ? `${done}✓` : "",
 	].filter(Boolean);
 	return parts.length ? `bg ${parts.join(" · ")}` : undefined;
 }

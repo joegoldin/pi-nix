@@ -15,7 +15,7 @@ The native `ProgramStatusReporter` owns the root record (`app=pi`). Extensions p
 | Goal completion | `done`; the footer's timeout does not clear it |
 | Goal stopped at an unresolved blocker | `error` |
 | Paused/cancelled work | `idle` |
-| Background shell task | `working` → `done`, `error`, or `idle` on cancellation |
+| Background shell task | `working` while running or queued for automatic follow-up; otherwise `done`, `error`, or `idle` on cancellation until acknowledged |
 | Structured question | `blocked`, `kind=question`, cleared on answer, abort, or UI failure |
 | Auto-mode or engine permission prompt | `blocked`, `kind=permission`, cleared on every exit path |
 | Authentication | `blocked`, `kind=auth` → `done`, `error`, or `idle` |
@@ -23,7 +23,9 @@ The native `ProgramStatusReporter` owns the root record (`app=pi`). Extensions p
 | Side conversation | Independent working/result record, even with its panel closed; child statuses are namespaced beneath it |
 | Subagents/workflows/worker monitors | Bounded, hierarchical records from the provider's public status snapshot |
 
-A real user blocker takes precedence over autonomous work. Otherwise active work keeps the root working after the model settles. Completed child records do not stop other workers. Source-specific clearing removes that source's descendants, not unrelated siblings. Session reset retires old records and blockers; live producers republish their state.
+A real user blocker takes precedence over autonomous work. Otherwise active work keeps the root working after the model settles. Child outcomes never overwrite the root agent outcome. Completed child records do not stop other workers. Source-specific clearing removes that source's descendants, not unrelated siblings. Session reset retires old records and blockers; live producers republish their state.
+
+Background results with automatic follow-up remain `working` until the next agent turn consumes them; completion is not a request for user input. Results without follow-up retain their actual process outcome until the next turn, interactive input, or inspection through `bg_status`, `bg_logs`, or `/jobs`. Acknowledgement clears terminal records and footer counts, not task history or output files. The aggregate background record never announces the latest worker result as the whole program's outcome. Only exit code zero without a signal or recorded I/O error counts as success.
 
 Subagent snapshots are requested only at startup and on lifecycle events, coalesced over 50 ms. Requests use the versioned, read-only `status` RPC, with bounded replies, cancellation on session replacement, and a two-second response deadline. There is no polling, spawning, remote provider probing, or inference. Worker attention does not imply a human blocker: a supervisor may resolve it autonomously. Unknown plugins must use the activity API; footer text is not parsed as a substitute for lifecycle information.
 

@@ -96,6 +96,8 @@ test("group headers toggle independently by click and by command, including wrap
 	await h.act({ action: "create", acceptanceCriteria: "The named outcome is verified", subject: "Mac acceptance with a long heading", kind: "group" });
 	await h.act({ action: "create", acceptanceCriteria: "The named outcome is verified", subject: "Clipboard", parentId: 1 });
 	const widget = h.widget();
+	widget.handleMouse({ type: "click", button: "left", y: 0 });
+	widget.handleMouse({ type: "click", button: "left", y: 0 });
 	expect(widget.render(80).join("\n")).toContain("Clipboard");
 	widget.handleMouse({ type: "click", button: "left", y: 1 });
 	expect(widget.render(80).join("\n")).not.toContain("Clipboard");
@@ -103,8 +105,7 @@ test("group headers toggle independently by click and by command, including wrap
 	expect(widget.render(80).join("\n")).toContain("Clipboard");
 	await h.commands.get("todos").handler("", h.ctx);
 	expect(h.notices.at(-1)).toContain("0/1");
-	// Clicking a child enables wrapping; a wrapped group continuation is still its header.
-	widget.handleMouse({ type: "click", button: "left", y: 2 });
+	// Full view wraps group continuation rows, retaining their hit targets.
 	widget.render(22);
 	widget.handleMouse({ type: "click", button: "left", y: 2 });
 	expect(widget.render(80).join("\n")).not.toContain("Clipboard");
@@ -165,6 +166,7 @@ test("completed rows expire during a long run, keeping records without inflating
 	await h.act({ action: "create", acceptanceCriteria: "The named outcome is verified", subject: "Finished work" });
 	await h.act({ action: "create", acceptanceCriteria: "The named outcome is verified", subject: "Next work" });
 	await h.act({ action: "update", id: 1, evidence: "Verified the named outcome", status: "completed" });
+	h.widget().handleMouse({ type: "click", button: "left", y: 0 });
 	expect(h.widget().render(80).join("\n")).toContain("Finished work");
 	timer.advance(30_000);
 	await h.act({ action: "list" });
@@ -176,6 +178,7 @@ test("completed rows expire during a long run, keeping records without inflating
 	expect(text).toContain("0/1");
 	expect((await h.act({ action: "get", id: 1 })).details.tasks[0].status).toBe("completed");
 	expect(h.widget().render(80).join("\n")).not.toContain("Finished work");
+	h.widget().handleMouse({ type: "click", button: "left", y: 0 });
 	h.widget().handleMouse({ type: "click", button: "left", y: 0 });
 	expect(h.widget().render(80).join("\n")).toContain("Finished work");
 });
@@ -387,4 +390,35 @@ test("working lists stay bounded across completions and restoration while histor
 	expect((await h.act({ action: "get", id: 20 })).content[0].text).toContain("evidence: Check passed");
 	expect(h.tool.description).toContain("unfinished tasks by default");
 	expect(h.apply(h.base("Custom instructions"))).toContain("automatically leave the default list");
+});
+
+
+test("todo clicks cycle minimal, five-task preview, full, then minimal", async () => {
+ const h = uiHarness();
+ for (let i = 1; i <= 8; i++) await h.act({ action: "create", subject: `Work ${i}`, acceptanceCriteria: "Verified" });
+ await h.act({ action: "update", id: 6, status: "in_progress" });
+ const widget = h.widget();
+ const text = () => widget.render(100).join("\n");
+ expect(text()).toContain("Work 6");
+ expect(text()).not.toContain("Work 1");
+ expect(widget.render(100).length).toBeLessThanOrEqual(3);
+ widget.handleMouse({ type: "click", button: "left", y: 0 });
+ expect(text().match(/Work \d/g)).toHaveLength(5);
+ widget.handleMouse({ type: "click", button: "left", y: 0 });
+ expect(text().match(/Work \d/g)).toHaveLength(8);
+ widget.handleMouse({ type: "click", button: "left", y: 0 });
+ expect(text().match(/Work \d/g)).toHaveLength(1);
+});
+
+
+test("focus view retains completed dependency evidence outside the visible tasks", async () => {
+ const h = uiHarness();
+ await h.act({ action: "create", subject: "Prerequisite", acceptanceCriteria: "Verified" });
+ await h.act({ action: "create", subject: "Dependent", acceptanceCriteria: "Verified", blockedBy: [1] });
+ await h.act({ action: "update", id: 1, status: "completed", evidence: "Passed" });
+ await h.act({ action: "update", id: 2, status: "in_progress" });
+ const text = h.widget().render(100).join("\n");
+ expect(text).toContain("Dependent");
+ expect(text).not.toContain("Prerequisite");
+ expect(text).not.toContain("⛓");
 });

@@ -8,7 +8,7 @@ const colours: Record<TaskStatus, string> = { running: "accent", completed: "suc
 const clean = (text: string) => stripTerminalSequences(text).replace(/[\x00-\x08\x0b-\x1f\x7f]/g, "");
 
 export function taskLabel(task: TaskSnapshot, theme: UiTheme): string {
-	return theme.fg(colours[task.status], `${icons[task.status]} ${task.status}`) + ` ${clean(task.name).replace(/\s+/g, " ")} ` + theme.fg("dim", task.id);
+	return theme.fg(colours[task.status], `${icons[task.status]} ${task.status}${task.exitCode !== undefined ? ` (${task.exitCode})` : task.signal ? ` (${task.signal})` : ""}`) + ` ${clean(task.name).replace(/\s+/g, " ")} ` + theme.fg("dim", task.id);
 }
 
 export function taskRows(tasks: TaskSnapshot[], theme: UiTheme): string[] {

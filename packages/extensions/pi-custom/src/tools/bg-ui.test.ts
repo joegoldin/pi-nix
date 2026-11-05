@@ -43,3 +43,11 @@ test("job and log panels are framed, scrollable, resize-safe and dismissible", (
   expect(closed).toBe(true);
   expect(stripTerminalSequences(taskRows([task], theme).join("\n"))).toContain("assertion failed");
 });
+
+
+test("collapsed background notifications show actual exit outcomes", () => {
+ const failed = taskNotification({ ...task, exitCode: 7 }, theme, false).render(100).join("\n");
+ expect(failed).toContain("failed (7)");
+ const stopped = taskNotification({ ...task, status: "killed", error: undefined, signal: "SIGTERM" }, theme, false).render(100).join("\n");
+ expect(stopped).toContain("killed (SIGTERM)");
+});
