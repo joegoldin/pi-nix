@@ -68,7 +68,7 @@ export function registerTodo(pi: ExtensionAPI, clock: TodoClock = CLOCK): void {
 	const fading = new Map<number, number>();
 	let cancelCleanup: (() => void) | undefined;
 	const hidden = new Set<number>();
-	let view: "minimal" | "preview" | "full" = "minimal";
+	let view: "minimal" | "preview" | "full" = "preview";
 	const collapsedGroups = new Set<number>();
 	const cycleView = () => { view = view === "minimal" ? "preview" : view === "preview" ? "full" : "minimal"; };
 	let ctxRef: ExtensionContext | undefined;
@@ -116,7 +116,7 @@ export function registerTodo(pi: ExtensionAPI, clock: TodoClock = CLOCK): void {
 		acknowledgeReview();
 		restoredReview = state.tasks.some((t) => t.kind !== "group" && (t.status === "pending" || t.status === "in_progress"));
 		ctxRef = ctx;
-		view = "minimal";
+		view = "preview";
 		collapsedGroups.clear();
 		if (pause) {
 			fading.clear();

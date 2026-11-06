@@ -41,12 +41,12 @@ groups. Dependencies (`blockedBy`) connect tasks independently of grouping.
 Move or delete all live children before deleting a group; deletion never
 silently cascades.
 
-The list above the editor starts in focus mode: up to two active tasks, or one
-next task when nothing is active. Click the heading or a task to cycle through
-focus, a five-task preview, and the full wrapped list with history. Ctrl+Shift+T
+The list above the editor starts with a five-task preview. Click the heading
+or a task to cycle through the full wrapped list with history, focus mode
+(up to two active tasks, or one next task when nothing is active), and preview. Ctrl+Shift+T
 cycles the same modes. The full view shows group counts and indented tasks;
 click a group header or use `/todos <group-id>` to collapse/expand it.
-`/todos` displays the full list without changing the focus view. Active work sorts first, then ready
+`/todos` displays the full list without changing the current view. Active work sorts first, then ready
 pending work, blocked work and completions. Groups follow their highest-priority
 child. Satisfied dependency edges disappear from the widget, not the records.
 The heading labels overall counts; overflow labels only the tasks outside the

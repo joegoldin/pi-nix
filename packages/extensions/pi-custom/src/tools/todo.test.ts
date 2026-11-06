@@ -97,7 +97,6 @@ test("group headers toggle independently by click and by command, including wrap
 	await h.act({ action: "create", acceptanceCriteria: "The named outcome is verified", subject: "Clipboard", parentId: 1 });
 	const widget = h.widget();
 	widget.handleMouse({ type: "click", button: "left", y: 0 });
-	widget.handleMouse({ type: "click", button: "left", y: 0 });
 	expect(widget.render(80).join("\n")).toContain("Clipboard");
 	widget.handleMouse({ type: "click", button: "left", y: 1 });
 	expect(widget.render(80).join("\n")).not.toContain("Clipboard");
@@ -178,7 +177,6 @@ test("completed rows expire during a long run without changing overall progress"
 	expect(text).toContain("1/2");
 	expect((await h.act({ action: "get", id: 1 })).details.tasks[0].status).toBe("completed");
 	expect(h.widget().render(80).join("\n")).not.toContain("Finished work");
-	h.widget().handleMouse({ type: "click", button: "left", y: 0 });
 	h.widget().handleMouse({ type: "click", button: "left", y: 0 });
 	expect(h.widget().render(80).join("\n")).toContain("Finished work");
 });
@@ -393,21 +391,22 @@ test("working lists stay bounded across completions and restoration while histor
 });
 
 
-test("todo clicks cycle minimal, five-task preview, full, then minimal", async () => {
+test("todo defaults to five-task preview and cycles full, minimal, then preview", async () => {
  const h = uiHarness();
  for (let i = 1; i <= 8; i++) await h.act({ action: "create", subject: `Work ${i}`, acceptanceCriteria: "Verified" });
  await h.act({ action: "update", id: 6, status: "in_progress" });
  const widget = h.widget();
  const text = () => widget.render(100).join("\n");
  expect(text()).toContain("Work 6");
- expect(text()).not.toContain("Work 1");
- expect(widget.render(100).length).toBeLessThanOrEqual(3);
- widget.handleMouse({ type: "click", button: "left", y: 0 });
  expect(text().match(/Work \d/g)).toHaveLength(5);
  widget.handleMouse({ type: "click", button: "left", y: 0 });
  expect(text().match(/Work \d/g)).toHaveLength(8);
  widget.handleMouse({ type: "click", button: "left", y: 0 });
  expect(text().match(/Work \d/g)).toHaveLength(1);
+ expect(text()).not.toContain("Work 1");
+ expect(widget.render(100).length).toBeLessThanOrEqual(3);
+ widget.handleMouse({ type: "click", button: "left", y: 0 });
+ expect(text().match(/Work \d/g)).toHaveLength(5);
 });
 
 
@@ -417,6 +416,8 @@ test("focus view retains completed dependency evidence outside the visible tasks
  await h.act({ action: "create", subject: "Dependent", acceptanceCriteria: "Verified", blockedBy: [1] });
  await h.act({ action: "update", id: 1, status: "completed", evidence: "Passed" });
  await h.act({ action: "update", id: 2, status: "in_progress" });
+ h.widget().handleMouse({ type: "click", button: "left", y: 0 });
+ h.widget().handleMouse({ type: "click", button: "left", y: 0 });
  const text = h.widget().render(100).join("\n");
  expect(text).toContain("Dependent");
  expect(text).not.toContain("Prerequisite");
@@ -462,3 +463,14 @@ test("overall todo counts stay 5/14 across focus, preview, full and Ctrl+O after
 	await h.act({ action: "list" });
 	expect(overall).toBe("5/14 tasks completed");
 });
+
+for (const event of ["session_start", "session_tree", "session_compact"]) {
+	test(`${event} restores the five-task preview default`, async () => {
+		const h = uiHarness();
+		for (let i = 1; i <= 8; i++) await h.act({ action: "create", subject: `Work ${i}`, acceptanceCriteria: "Verified" });
+		h.widget().handleMouse({ type: "click", button: "left", y: 0 });
+		expect(h.widget().render(100).join("\n").match(/Work \d/g)).toHaveLength(8);
+		h.emit(event);
+		expect(h.widget().render(100).join("\n").match(/Work \d/g)).toHaveLength(5);
+	});
+}
