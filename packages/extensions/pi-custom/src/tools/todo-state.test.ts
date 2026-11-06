@@ -398,10 +398,11 @@ describe("completed group headers", () => {
 });
 
 describe("work-focused compact view", () => {
-	it("excludes archived completions from counts and overflow after rows fade", () => {
+	it("keeps archived completions in overall counts but excludes them from overflow", () => {
 		const state: TodoState = { nextId: 9, tasks: Array.from({ length: 8 }, (_, i) => ({ id: i + 1, subject: `task ${i + 1}`, status: i < 3 ? "completed" : "pending" })) };
 		const lines = widgetLines(state, new Set([1, 2, 3]), 4, plain);
-		expect(lines[0]).toContain("0 complete");
+		expect(lines[0]).toContain("Todos (3/8)");
+		expect(lines[0]).toContain("3 complete");
 		expect(lines.at(-1)).toContain("3 more unfinished");
 		expect(lines.join("\n")).not.toContain("0 completed");
 	});
@@ -471,9 +472,9 @@ describe("completed history leaves the working list", () => {
 		expect(reduce({ ...state, tasks: state.tasks.slice(0, 1) }, { action: "list" }).text).toBe("No tasks");
 	});
 
-	it("excludes archived completions from compact counts, but retains expanded history", () => {
+	it("keeps compact and expanded counts identical while retaining expanded history", () => {
 		const compact = widgetLines(state, new Set([1]), 12, plain).join("\n");
-		expect(compact).toContain("Todos (0/1)");
+		expect(compact).toContain("Todos (1/2)");
 		expect(compact).not.toContain("Finished");
 		expect(compact).not.toContain("⛓");
 		const expanded = widgetLines(state, new Set([1]), 12, plain, true).join("\n");

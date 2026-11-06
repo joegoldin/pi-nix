@@ -14,7 +14,9 @@ model and starts a follow-up turn, so it never polls. `bg_status`, `bg_logs`
 `/kill <id>` do the same at the keyboard. Tasks live for the session.
 
 Tool results and completion notices use the shared custom cards and theme.
-The dock shows compact counts (`↻` running, `✗` failed, `■` stopped, `✓` done).
+The dock uses the todo list’s tree conventions: one compact Jobs summary,
+clickable to reveal up to five task names and their outcomes. Ctrl+O shows all
+jobs, including acknowledged history, and restores the local view when folded.
 Acknowledged results disappear from the dock and Rex metadata, not history.
 Automatic follow-up results remain working until consumed by the next turn. `/jobs` and `/logs <id>` open bordered views;
 Up/Down, Page Up/Down and Home/End scroll, and Escape or Enter closes them.
@@ -58,8 +60,9 @@ model calls. Reading the list or compacting the session does not renew the
 countdown; clearing, changing branches and shutdown cancel stale deadlines.
 This only archives rows: completed records, dependencies and evidence remain intact.
 The default `todo list` returns unfinished work; `list status=completed` and `get`
-provide completed history. Compact widget counts exclude completions once hidden,
-so they do not grow for the lifetime of a conversation.
+provide completed history. All todo headings retain the same overall
+completed/total count when rows fade, excluding deleted tasks and group headings.
+Focus and preview labels describe the visible subset without changing that count.
 Expanded views and `/todos` still expose completed history.
 
 Each new task requires `acceptanceCriteria`: a bounded, observable completion

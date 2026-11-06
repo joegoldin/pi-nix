@@ -1,4 +1,4 @@
-import { matchesKey, stripTerminalSequences, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { matchesKey, stripTerminalSequences, truncateToWidth, wrapTextWithAnsi, type TuiMouseEvent } from "@earendil-works/pi-tui";
 import { layoutCard, type CardModel, type UiTheme } from "../ui/card.ts";
 import { Framed } from "../ui/frame.ts";
 import type { TaskSnapshot, TaskStatus } from "./bg-format.ts";
@@ -29,6 +29,36 @@ export function taskNotification(task: TaskSnapshot, theme: UiTheme, expanded: b
 		body: [theme.fg("dim", `Output: ${clean(task.outputPath)}`), ...(task.error ? [theme.fg("error", clean(task.error))] : [])],
 	};
 	return { render: (width: number) => layoutCard(model, { mode: "on", expanded, collapsedLines: 3, expandedLines: 100, expandHint: "(ctrl+o)" }, theme, width), invalidate() {} };
+}
+
+/** Match the todo dock: one summary, with job names and outcomes on demand. */
+export function taskWidget(tasks: () => TaskSnapshot[], seen: ReadonlySet<string>, theme: UiTheme, expanded: () => boolean, repaint: () => void) {
+	let open = false;
+	return {
+		render(width: number): string[] {
+			const full = expanded();
+			const visible = tasks().filter(task => full || task.status === "running" || !seen.has(task.id));
+			if (!visible.length) return [];
+			const counts = (Object.keys(icons) as TaskStatus[]).map(status => {
+				const count = visible.filter(task => task.status === status).length;
+				return count ? theme.fg(colours[status], `${count} ${status}`) : "";
+			}).filter(Boolean).join(theme.fg("dim", " · "));
+			const rows = [theme.fg("dim", `${open || full ? "▾" : "▸"} Jobs · `) + counts];
+			if (open || full) {
+				const chosen = full ? visible : visible.slice(0, 5);
+				for (const [index, task] of chosen.entries()) rows.push(theme.fg("dim", index === chosen.length - 1 ? "└─ " : "├─ ") + taskLabel(task, theme));
+				if (chosen.length < visible.length) rows.push(theme.fg("dim", `   +${visible.length - chosen.length} more · /jobs`));
+			}
+			return rows.map(row => truncateToWidth(row, width, "…"));
+		},
+		handleMouse(event: TuiMouseEvent) {
+			if (event.type !== "click" || event.button !== "left") return;
+			open = !open;
+			repaint();
+			return { handled: true, render: true };
+		},
+		invalidate() {},
+	};
 }
 
 /** The same framed, keyboard-driven surface as /context and /ui. */

@@ -59,3 +59,16 @@ describe("voice Space gesture", () => {
 		expect(new VoiceGesture().feed(" ", "existing draft", true)).toBe("stop");
 	});
 });
+
+describe("dedicated dictation shortcut", () => {
+	it("starts in an existing draft using legacy or Kitty Ctrl+Alt+V", () => {
+		for (const key of ["\x1b\x16", "\x1b[118;7u", "\x1b[118;7:1u"]) {
+			expect(new VoiceGesture().feed(key, "existing draft", false)).toBe("start");
+			expect(new VoiceGesture().feed(key, "existing draft", true)).toBe("stop");
+		}
+	});
+	it("does not toggle on shortcut releases or repeats", () => {
+		expect(new VoiceGesture().feed("\x1b[118;7:3u", "draft", false)).toBeUndefined();
+		expect(new VoiceGesture().feed("\x1b[118;7:2u", "draft", true)).toBe("consume");
+	});
+});

@@ -18,7 +18,7 @@ import { stripTerminalSequences } from "@earendil-works/pi-tui";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { activityKey, reportActivity, type ActivityStatus } from "../program-status.ts";
-import { taskNotification, taskPanel, taskRows } from "./bg-ui.ts";
+import { taskNotification, taskPanel, taskRows, taskWidget } from "./bg-ui.ts";
 import {
 	formatLogs,
 	formatNotification,
@@ -28,7 +28,6 @@ import {
 	nameFromCommand,
 	resolveId,
 	sanitizeSegment,
-	statusLine,
 	type TaskSnapshot,
 } from "./bg-format.ts";
 
@@ -38,6 +37,7 @@ const KILL_GRACE_MS = 3000;
 const STOP_WAIT_MS = 4500;
 const MAX_RECENT_TASKS = 100;
 const STATUS_KEY = "background-tasks";
+const WIDGET_KEY = "pi-custom:background";
 
 type KillKind = "user" | "shutdown" | "timeout" | "output_cap";
 
@@ -75,6 +75,7 @@ export function registerBackgroundTasks(pi: ExtensionAPI): { running(): number }
 	let shuttingDown = false;
 	let ctxRef: ExtensionContext | undefined;
 	const reported = new Set<string>();
+	let repaint: (() => void) | undefined;
 
 	const list = () => [...tasks.values()];
 
@@ -95,12 +96,7 @@ export function registerBackgroundTasks(pi: ExtensionAPI): { running(): number }
 		reportActivity(ctxRef, "background", running || queued
 			? { state: "working", title: "Background tasks", message: running ? `${running} background task${running === 1 ? "" : "s"} running` : "Background results queued for agent" }
 			: visible.length ? { state: "idle", title: "Background tasks", message: "Background results available" } : undefined);
-		try {
-			const summary = statusLine(list().map(snapshot), seen);
-			ctxRef?.ui.setStatus(STATUS_KEY, summary ? ctxRef.ui.theme.fg("accent", "\uf085 ") + ctxRef.ui.theme.fg("muted", summary) : undefined);
-		} catch {
-			// A replaced session's context; the next one refreshes it.
-		}
+		repaint?.();
 	}
 
 	function directory(ctx: ExtensionContext): string {
@@ -460,6 +456,11 @@ export function registerBackgroundTasks(pi: ExtensionAPI): { running(): number }
 	pi.on("session_start", (_event, ctx) => {
 		ctxRef = ctx;
 		shuttingDown = false;
+		ctx.ui.setStatus(STATUS_KEY, undefined);
+		if (ctx.mode === "tui") ctx.ui.setWidget(WIDGET_KEY, (tui, theme) => {
+			repaint = () => tui.requestRender();
+			return taskWidget(() => list().map(snapshot), seen, theme as never, () => ctx.ui.getToolsExpanded(), repaint);
+		}, { placement: "belowEditor" });
 		refreshStatus();
 	});
 
@@ -473,6 +474,8 @@ export function registerBackgroundTasks(pi: ExtensionAPI): { running(): number }
 		await Promise.race([Promise.all(running.map((t) => t.done)), new Promise((r) => setTimeout(r, STOP_WAIT_MS))]);
 		reportActivity(ctxRef, "background", undefined);
 		reported.clear();
+		ctxRef?.ui.setWidget(WIDGET_KEY, undefined);
+		repaint = undefined;
 		runDir = undefined;
 		ctxRef = undefined;
 	});

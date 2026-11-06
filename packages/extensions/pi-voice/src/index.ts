@@ -33,15 +33,17 @@ export interface VoiceContext {
 /** Optional handshake with pi-custom's existing prompt editor. */
 export interface VoiceEditorRequest {
 	accept(handle: {
-		update(value: { committed: string; partial: string; level: number }): void;
+		update(value: { committed: string; partial: string; level: number; processing?: boolean }): void;
 		finish(text?: string): void;
 	}): void;
 	onInterrupt(): void;
+	onCancel(): void;
 }
 
 /** The slice of pi's ExtensionAPI this extension registers against. */
 export interface VoiceHost {
 	events?: { emit(channel: string, data: unknown): void };
+	registerShortcut?(key: string, options: { description: string; handler: (ctx: never) => Promise<void> }): void;
 	on(event: string, handler: (payload: never, ctx: never) => unknown): void;
 	registerCommand(
 		name: string,
@@ -88,7 +90,7 @@ export class VoiceSession {
 	private stopFallback: ReturnType<typeof setTimeout> | undefined;
 	private meter = new Meter();
 	private startedAt = 0;
-	private lastLevelAt = 0;
+	private lastLevelAt: number | undefined;
 	private tui: { requestRender(): void } | undefined;
 	private clock: ReturnType<typeof setInterval> | undefined;
 	private ended: (() => void) | undefined;
@@ -121,11 +123,12 @@ export class VoiceSession {
 		this.finalHandled = false;
 		Object.assign(this.state, emptyState(), { recording: true });
 		this.startedAt = Date.now();
-		this.lastLevelAt = this.startedAt;
+		this.lastLevelAt = undefined;
 
 		let child: RecordProcess;
 		try {
-			child = spawn(this.cfg.recordBin, this.cfg.recordArgs, { stdio: ["ignore", "pipe", "pipe"] });
+			// Own the process group so cancellation also stops ffmpeg/batch children.
+			child = spawn(this.cfg.recordBin, this.cfg.recordArgs, { stdio: ["ignore", "pipe", "pipe"], detached: true });
 		} catch (err) {
 			this.fail(err);
 			return;
@@ -135,6 +138,7 @@ export class VoiceSession {
 			this.beginInline?.({
 				accept: handle => { this.inline = handle; this.usedInline = true; },
 				onInterrupt: () => { void this.stop(); },
+				onCancel: () => { this.cancel(); },
 			});
 		}
 
@@ -186,6 +190,8 @@ export class VoiceSession {
 	stop(): Promise<void> {
 		if (!this.child) return Promise.resolve();
 		if (this.stopPromise) return this.stopPromise;
+		this.state.recording = false;
+		this.paint();
 		this.stopPromise = new Promise<void>((resolve) => {
 			this.ended = resolve;
 			this.stopRequested = true;
@@ -202,6 +208,22 @@ export class VoiceSession {
 			this.stopFallback.unref?.();
 		});
 		return this.stopPromise;
+	}
+
+	/** Escape hatch for a stuck batch pass: retain live words and ignore late finals. */
+	cancel(): void {
+		this.finalHandled = true;
+		this.finishInline();
+		this.state.recording = false;
+		this.clearStopFallback();
+		const pid = this.child?.pid;
+		if (pid !== undefined) {
+			try { process.kill(-pid, "SIGKILL"); }
+			catch (error) {
+				if ((error as NodeJS.ErrnoException).code !== "ESRCH") this.ctx.ui.notify(`voice: could not cancel recorder: ${String(error)}`, "error");
+			}
+		}
+		this.paint();
 	}
 
 	/** SIGINT, not SIGKILL: audiomemo's --stream handler stops ffmpeg the
@@ -237,7 +259,8 @@ export class VoiceSession {
 				break;
 			case "level": {
 				const now = Date.now();
-				this.meter.push(event.rms, now - this.lastLevelAt);
+				// No interval has been measured for the first sample yet.
+				this.meter.push(event.rms, this.lastLevelAt === undefined ? undefined : now - this.lastLevelAt);
 				this.lastLevelAt = now;
 				this.state.level = this.meter.level;
 				this.state.db = event.db;
@@ -333,7 +356,7 @@ export class VoiceSession {
 	}
 
 	private paint(): void {
-		this.inline?.update(this.state);
+		this.inline?.update({ ...this.state, processing: !this.state.recording });
 		// The custom editor owns both transcript and meter. Retain the widget
 		// only for hosts without that integration, never alongside it.
 		if (this.usedInline) {
@@ -367,6 +390,15 @@ export default function register(pi: VoiceHost): void {
 		if (context.mode !== "tui" || !ui.onEditorInput || !ui.getEditorText) return;
 		const gesture = new VoiceGesture();
 		unsubscribe = ui.onEditorInput((data) => {
+			// Editor input runs before shortcuts, so refinement also blocks
+			// submit, queue and extension bindings rather than only plain text.
+			if (session?.active) {
+				if (/;\d+:2u$/.test(data)) return { consume: true };
+				if (data === "" || data === "\x1b[I" || data === "\x1b[O" || /;\d+:3u$/.test(data)) return;
+				if (data === "\x03" || /^\x1b\[99;5(?::1)?u$/.test(data)) session.cancel();
+				else void session.stop();
+				return { consume: true };
+			}
 			const action = gesture.feed(data, ui.getEditorText!(), session?.active ?? false);
 			if (!action) return;
 			if (action === "start") {
@@ -385,8 +417,17 @@ export default function register(pi: VoiceHost): void {
 		clearVoiceState(voiceStatePath(env(), homedir()));
 	});
 
+	pi.registerShortcut?.("ctrl+alt+v", {
+		description: "Start dictation at the cursor, or finish recording",
+		handler: async (ctx: never) => {
+			session ??= new VoiceSession(ctx as VoiceContext, request => pi.events?.emit("pi-voice:begin", request));
+			if (session.active) await session.stop();
+			else session.start();
+		},
+	});
+
 	pi.registerCommand("voice", {
-		description: "Toggle dictation, or press Space in an empty prompt to start and Space to stop. Speech appears live in the editor; stopping never submits.",
+		description: "Dictate with Ctrl+Alt+V anywhere, or Space in an empty prompt. Any input finishes recording; wait for refinement, or Ctrl+C to keep live text. Stopping never submits.",
 		handler: async (_args: string, ctx: never) => {
 			session ??= new VoiceSession(ctx as VoiceContext, request => pi.events?.emit("pi-voice:begin", request));
 			if (session.active) {

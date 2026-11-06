@@ -161,7 +161,7 @@ function fakeTodoClock() {
 	return { clock, jobs, advance(ms: number) { now += ms; for (const [fn, at] of [...jobs]) if (at <= now) { jobs.delete(fn); fn(); } } };
 }
 
-test("completed rows expire during a long run, keeping records without inflating counts", async () => {
+test("completed rows expire during a long run without changing overall progress", async () => {
 	const timer = fakeTodoClock(); const h = uiHarness(timer.clock);
 	await h.act({ action: "create", acceptanceCriteria: "The named outcome is verified", subject: "Finished work" });
 	await h.act({ action: "create", acceptanceCriteria: "The named outcome is verified", subject: "Next work" });
@@ -175,7 +175,7 @@ test("completed rows expire during a long run, keeping records without inflating
 	const text = h.widget().render(80).join("\n");
 	expect(text).not.toContain("Finished work");
 	expect(text).toContain("Next work");
-	expect(text).toContain("0/1");
+	expect(text).toContain("1/2");
 	expect((await h.act({ action: "get", id: 1 })).details.tasks[0].status).toBe("completed");
 	expect(h.widget().render(80).join("\n")).not.toContain("Finished work");
 	h.widget().handleMouse({ type: "click", button: "left", y: 0 });
@@ -421,4 +421,44 @@ test("focus view retains completed dependency evidence outside the visible tasks
  expect(text).toContain("Dependent");
  expect(text).not.toContain("Prerequisite");
  expect(text).not.toContain("⛓");
+});
+
+test("Ctrl+O expands locally collapsed todo groups and restores the local view afterward", async () => {
+	const h = uiHarness();
+	let full = false;
+	h.ctx.ui.getToolsExpanded = () => full;
+	await h.act({ action: "create", subject: "Group", kind: "group" });
+	await h.act({ action: "create", subject: "Child task", parentId: 1, acceptanceCriteria: "Verified child outcome" });
+	await h.commands.get("todos").handler("1", h.ctx);
+	expect(h.widget().render(100).join("\n")).not.toContain("Child task");
+	full = true;
+	expect(h.widget().render(100).join("\n")).toContain("Child task");
+	full = false;
+	expect(h.widget().render(100).join("\n")).not.toContain("Child task");
+});
+
+test("overall todo counts stay 5/14 across focus, preview, full and Ctrl+O after completed rows fade", async () => {
+	let overall = "";
+	const timer = fakeTodoClock();
+	const h = uiHarness(timer.clock);
+	Object.assign(h.ctx.ui, { setProgramStatus: (_key: string, status?: { message?: string }) => { overall = status?.message ?? ""; } });
+	let expanded = false;
+	h.ctx.ui.getToolsExpanded = () => expanded;
+	for (let i = 1; i <= 14; i++) await h.act({ action: "create", subject: `Work ${i}`, acceptanceCriteria: "Verified" });
+	await h.act({ action: "create", subject: "Heading", kind: "group" });
+	await h.act({ action: "create", subject: "Discarded", acceptanceCriteria: "Verified" });
+	await h.act({ action: "delete", id: 16 });
+	for (let i = 1; i <= 5; i++) await h.act({ action: "update", id: i, status: "completed", evidence: "Passed" });
+	timer.advance(60_001);
+	const widget = h.widget();
+	for (let view = 0; view < 3; view++) {
+		for (const width of [40, 100]) expect(widget.render(width)[0]).toContain("5/14");
+		widget.handleMouse({ type: "click", button: "left", y: 0 });
+	}
+	expanded = true;
+	expect(widget.render(100)[0]).toContain("5/14");
+	expanded = false;
+	expect(widget.render(100)[0]).toContain("5/14");
+	await h.act({ action: "list" });
+	expect(overall).toBe("5/14 tasks completed");
 });

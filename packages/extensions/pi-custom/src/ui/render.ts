@@ -27,7 +27,7 @@ import {
 	type TuiMouseEventResult,
 	wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
-import { brightened, CardComponent, type CardLayout, ELBOW_PREFIX, opens, paint, type UiTheme } from "./card.ts";
+import { brightened, CardComponent, type CardLayout, opens, paint, type UiTheme } from "./card.ts";
 import type { UiConfig } from "./config.ts";
 import { mapRows, type CopyRow } from "./selection-content.ts";
 import {
@@ -41,7 +41,7 @@ import {
 	type ToolRun,
 } from "./group.ts";
 import type { HoverTracker } from "./hover.ts";
-import { BUILT_IN_TOOLS, buildCard, type CardDeps, callActivity, type ToolResultLike } from "./tools.ts";
+import { BUILT_IN_TOOLS, buildCard, type CardDeps, type ToolResultLike } from "./tools.ts";
 
 /** What renderResult leaves for the card. Lives in pi's per-row renderer state. */
 interface RowRecord {
@@ -219,13 +219,7 @@ class LiveCard {
 		if (plan.header) {
 			const hovered = this.deps.hover?.isHovered(`run:${plan.header.id}`) ?? false;
 			rows.push(truncateToWidth(runSummary(plan.header, this.theme, hovered, plan.live), w, "…"));
-			// While the run is open and folded, what its latest call is doing; an
-			// opened run's cards already say it.
-			const latest = plan.header.calls.at(-1);
-			if (plan.live && !plan.inPanel && latest) {
-				const shade = hovered ? "text" : "dim";
-				rows.push(truncateToWidth(this.theme.fg(shade, `${ELBOW_PREFIX}${callActivity(latest.toolName, latest.args, this.context.cwd)}`), w, "…"));
-			}
+
 			if (hovered && backgrounds.hover) {
 				for (let i = 0; i < rows.length; i++) rows[i] = paint(rows[i], w, backgrounds.hover);
 			}

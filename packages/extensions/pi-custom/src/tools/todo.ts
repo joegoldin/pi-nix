@@ -155,10 +155,12 @@ export function registerTodo(pi: ExtensionAPI, clock: TodoClock = CLOCK): void {
 				let rows: TodoWidgetRow[] = [];
 				return {
 					render: (width: number) => {
-						const full = view === "full" || (ctxRef?.ui.getToolsExpanded() ?? false);
-						if (full) rows = widgetRows(state, hidden, MAX_WIDGET_LINES, theme as never, true, width, collapsedGroups);
+						const global = ctxRef?.ui.getToolsExpanded() ?? false;
+						const full = view === "full" || global;
+						if (full) rows = widgetRows(state, hidden, MAX_WIDGET_LINES, theme as never, true, width, global ? undefined : collapsedGroups);
 						else {
-							const live = state.tasks.filter(t => t.kind !== "group" && t.status !== "deleted" && !hidden.has(t.id));
+							const all = state.tasks.filter(t => t.kind !== "group" && t.status !== "deleted");
+							const live = all.filter(t => !hidden.has(t.id));
 							const active = live.filter(t => t.status === "in_progress");
 							const ranked = [...live].sort((a, b) => Number(b.status === "in_progress") - Number(a.status === "in_progress") || Number(a.status === "completed") - Number(b.status === "completed"));
 							const chosen = view === "minimal" ? (active.length ? active.slice(0, 2) : ranked.slice(0, 1)) : ranked.slice(0, 5);
@@ -166,7 +168,7 @@ export function registerTodo(pi: ExtensionAPI, clock: TodoClock = CLOCK): void {
 							const ids = new Set(chosen.map(t => t.id));
 							const subset = { ...state, tasks: state.tasks.filter(t => t.kind !== "group").map(t => ({ ...t, parentId: undefined })) };
 							rows = widgetRows(subset, new Set(subset.tasks.filter(t => !ids.has(t.id)).map(t => t.id)), MAX_WIDGET_LINES, theme as never);
-							if (rows.length) rows[0].text = theme.fg("dim", `▸ Todos · ${live.filter(t => t.status === "completed").length}/${live.length} · ${view === "minimal" ? "focus" : `${chosen.length} shown`}`);
+							if (rows.length) rows[0].text = theme.fg("dim", `▸ Todos · ${all.filter(t => t.status === "completed").length}/${all.length} · ${view === "minimal" ? "focus" : `${chosen.length} shown`}`);
 						}
 						return rows.map(row => truncateToWidth(row.text, width, "…"));
 					},

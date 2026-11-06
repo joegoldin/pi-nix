@@ -20,14 +20,14 @@ async function until(check: () => boolean) {
 	}
 }
 
-for (const action of ["space", "enter", "typing", "shutdown"]) {
+for (const action of ["space", "enter", "typing", "shortcut", "cancel", "shutdown"]) {
 	test(`real recorder transport and editor: ${action} finishes without duplicate text or submission`, async () => {
 		const dir = mkdtempSync(join(tmpdir(), "pi-inline-voice-"));
 		const record = join(dir, "record");
 		writeFileSync(join(dir, "final"), JSON.stringify({ type: "final", t: 2, text: "Hello, world!", source: "batch" }) + "\n");
 		writeFileSync(record, [
 			"#!/bin/sh",
-			`trap 'cat "${dir}/final"; exit 0' INT`,
+			`trap 'sleep 0.12; cat "${dir}/final"; exit 0' INT`,
 			`printf '%s\\n' '{"type":"start","t":0,"mode":"live"}' '{"type":"commit","t":1,"text":"hello"}' '{"type":"partial","t":1,"text":"world"}' '{"type":"level","t":1,"rms":0.8,"db":-12}'`,
 			"while true; do sleep 0.02; done",
 		].join("\n"));
@@ -62,17 +62,24 @@ for (const action of ["space", "enter", "typing", "shutdown"]) {
 		}
 		try {
 			await handlers.get("session_start")!({}, ctx);
-			input(" ");
+			if (action === "shortcut") editor.setText("Draft: ");
+			input(action === "shortcut" ? "\x1b[118;7u" : " ");
 			input("\x1b[32;1:2u");
 			input("\x1b[32;1:3u");
-			await until(() => editor.getText() === "hello world");
+			await until(() => editor.getText() === (action === "shortcut" ? "Draft: hello world" : "hello world"));
 			expect(widgets).toEqual([]);
 			expect(editor.render(80).join("\n")).toMatch(/[▁▂▃▄▅▆▇█]/);
 			if (action === "space") input(" ");
 			else if (action === "enter") input("\r");
-			else if (action === "typing") input("!");
+			else if (action !== "shutdown") input("!");
+			if (action !== "shutdown") {
+				input("ignored");
+				input("\r");
+				input("\x1b[200~paste\x1b[201~");
+			}
+			if (action === "cancel") input("\x03");
 			await handlers.get("session_shutdown")!();
-			expect(editor.getText()).toBe(action === "typing" ? "hello world!" : action === "enter" ? "hello world" : "Hello, world!");
+			expect(editor.getText()).toBe(action === "cancel" ? "hello world" : action === "shortcut" ? "Draft: Hello, world!" : "Hello, world!");
 			expect(pastes).toEqual([]);
 			expect(notices).toEqual([]);
 			expect(submitted).toBe(0);

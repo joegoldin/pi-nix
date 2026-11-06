@@ -5,6 +5,6 @@ in
 pkgs.runCommand "pi-lens-grammars-tests" { nativeBuildInputs = [ pkgs.bun ]; } ''
   export HOME="$TMPDIR"
   bun ${./pi-lens-grammars.mjs} ${lens}
-  bun ${./pi-lens-widget.mjs} ${lens}
+  bun ${./pi-lens-widget.mjs} ${lens} ${self.inputs.agent-statusline}
   touch $out
 ''

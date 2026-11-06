@@ -3,7 +3,7 @@ import { CustomEditor } from "@earendil-works/pi-coding-agent";
 import { CURSOR_MARKER, renderFakeCursor, visibleWidth } from "@earendil-works/pi-tui";
 import { createPromptEditor } from "./editor.ts";
 
-const colours = { text: 37, dim: 90, success: 32, warning: 33, error: 31 };
+const colours = { text: 37, dim: 90, provisional: "38;2;190;164;126", shimmer: "38;2;242;218;176", success: 32, warning: 33, error: 31 };
 const colour = (slot: keyof typeof colours, text: string) => `\x1b[${colours[slot]}m${text}\x1b[39m`;
 function editor() {
 	let interrupted = 0;
@@ -13,14 +13,13 @@ function editor() {
 	return { target, start, interruptions: () => interrupted };
 }
 
-test("dictation is editable text with white commits, gray revisions and a height/colour VU cursor", () => {
+test("dictation uses warm provisional text and a height/colour VU cursor", () => {
 	const { target, start } = editor();
 	const voice = start();
 	voice.update({ committed: "Hello", partial: "wor", level: 0 });
 	expect(target.getText()).toBe("Hello wor");
 	let rows = target.render(80).join("\n");
-	expect(rows).toContain(colour("text", "Hello"));
-	expect(rows).toContain(colour("dim", "wor"));
+	expect(rows).toContain(colour("provisional", "Hello wor"));
 	expect(rows).toContain(colour("success", "▁"));
 	expect(rows).not.toContain(renderFakeCursor(" "));
 	expect(rows).not.toContain(CURSOR_MARKER);
@@ -60,29 +59,49 @@ test("Unicode and multiline provisional text wrap and scroll inside the existing
 		for (const row of rows) expect(visibleWidth(row)).toBeLessThanOrEqual(width);
 		expect(rows.join("\n")).not.toContain("\ufffd");
 	}
-	expect(target.render(40).join("\n")).toContain(colour("dim", "last words"));
+	expect(target.render(40).join("\n")).toContain(colour("provisional", "你好 👩🏽‍💻 é hello last words"));
 	expect(target.getText()).toBe(`${committed} last words`);
 });
 
-test("typing ends dictation ownership so a late final cannot overwrite user edits", () => {
-	const { target, start, interruptions } = editor();
+test("normal input stops recording once and cannot interrupt refinement", () => {
+	for (const key of ["!", " ", "\x7f", "\x1b[D", "\r", "\x1b[200~paste\x1b[201~"]) {
+		const { target, start, interruptions } = editor();
+		const voice = start();
+		voice.update({ committed: "hello", partial: "world", level: 0.5 });
+		target.handleInput(key);
+		target.handleInput("more typing");
+		target.handleInput("\r");
+		expect(interruptions()).toBe(1);
+		expect(target.getText()).toBe("hello world");
+		voice.finish("Hello, world!");
+		expect(target.getText()).toBe("Hello, world!");
+		target.handleInput("!");
+		expect(target.getText()).toBe("Hello, world!!");
+	}
+});
+
+test("Ctrl+C leaves the live transcript and rejects late refinement", () => {
+	const { target, start } = editor();
 	const voice = start();
 	voice.update({ committed: "hello", partial: "world", level: 0.5 });
-	target.handleInput("!");
-	expect(interruptions()).toBe(1);
+	target.handleInput(" ");
+	target.handleInput("\x03");
 	voice.finish("Different final text");
+	target.handleInput("!");
 	expect(target.getText()).toBe("hello world!");
 });
 
-test("Enter stops dictation without submitting, and resumes normal behavior afterward", () => {
+test("Enter stops dictation without submitting, even while refining", () => {
 	const { target, start, interruptions } = editor();
 	let submissions = 0;
 	(target as unknown as CustomEditor).onSubmit = () => { submissions++; };
-	start().update({ committed: "hello", partial: "", level: 0.5 });
+	const voice = start();
+	voice.update({ committed: "hello", partial: "", level: 0.5 });
+	target.handleInput("\r");
 	target.handleInput("\r");
 	expect(interruptions()).toBe(1);
 	expect(submissions).toBe(0);
-	expect(target.getText()).toBe("hello");
+	voice.finish("Hello!");
 	target.handleInput("\r");
 	expect(submissions).toBe(1);
 });
@@ -149,7 +168,7 @@ test("fullscreen rendering keeps the frame and excludes the VU cell from copied 
 	tui.stop();
 });
 
-test("clicking after the virtual meter places the caret on the displayed character", () => {
+test("clicking while dictating stops recording without moving the insertion", () => {
 	const { target, start, interruptions } = editor();
 	target.setText("before  after");
 	for (let i = 0; i < 6; i++) target.handleInput("\x1b[D");
@@ -159,7 +178,36 @@ test("clicking after the virtual meter places the caret on the displayed charact
 	const meter = target.dictationMeterColumn(1)!;
 	target.handleMouse({ type: "click", button: "left", x: meter + 2, y: 1, width: 80, height: 3 } as never);
 	target.handleInput("X");
-	voice.finish("late final");
-	expect(target.getText()).toBe("before hello world Xafter");
+	voice.finish("Hello, world!");
+	expect(target.getText()).toBe("before Hello, world! after");
 	expect(interruptions()).toBe(1);
+});
+
+
+test("refinement animates the temporary text and replaces the meter with a spinner", async () => {
+	const { target, start } = editor();
+	const voice = start();
+	voice.update({ committed: "A long enough temporary transcript to show the shimmer", partial: "", level: 0.5, processing: true });
+	const first = target.render(80).join("\n");
+	expect(first).toContain("38;2;242;218;176");
+	expect(first).toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/);
+	await new Promise(resolve => setTimeout(resolve, 110));
+	expect(target.render(80).join("\n")).not.toBe(first);
+	voice.finish("Refined transcript");
+	const finished = target.render(80).join("\n");
+	expect(finished).not.toContain("38;2;190;164;126");
+	expect(finished).not.toContain("38;2;242;218;176");
+	expect(finished).toContain(renderFakeCursor(" "));
+});
+
+test("a visual blank separates speech from the live or refining cursor without changing the draft", () => {
+	for (const processing of [false, true]) {
+		const { target, start } = editor();
+		const voice = start();
+		voice.update({ committed: "hello", partial: "world", level: 0.5, processing });
+		const rows = target.render(80).join("\n").replace(/\x1b\[[0-9;]*m/g, "");
+		expect(rows).toMatch(/hello world [▁▂▃▄▅▆▇█⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/);
+		expect(target.getText()).toBe("hello world");
+		voice.finish();
+	}
 });

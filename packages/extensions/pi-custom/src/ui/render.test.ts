@@ -127,11 +127,11 @@ describe("a minimized run", () => {
 });
 
 describe("an open run", () => {
-	it("is one live line, with what its latest call is doing under it", () => {
+	it("keeps a live run to one summary line without repeating the latest command", () => {
 		const { model, row } = setup();
 		model.agentStart();
 		model.addMessage(assistant("a", "b"));
-		expect(row("a", "ls a", "x").render(60).map(strip)).toEqual(["Running 2 shell commands…", "  ⎿  $ ls b"]);
+		expect(row("a", "ls a", "x").render(60).map(strip)).toEqual(["Running 2 shell commands…"]);
 		expect(row("b", "ls b", "y").render(60)).toEqual([]);
 	});
 
@@ -145,13 +145,13 @@ describe("an open run", () => {
 		expect(lines[1].trim()).toBe("● Bash(ls a)");
 	});
 
-	it("takes a click on its activity row as on its line", () => {
+	it("opens from the remaining live summary line", () => {
 		const { model, groups, row } = setup();
 		model.agentStart();
 		model.addMessage(assistant("a"));
 		const head = row("a", "ls a", "x");
 		head.render(60);
-		expect(head.handleMouse(mouse("click", 1))).toEqual({ handled: true });
+		expect(head.handleMouse(mouse("click", 0))).toEqual({ handled: true });
 		expect(groups.isShown(model.runOf("a")!, false)).toBe(true);
 	});
 

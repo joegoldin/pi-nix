@@ -377,9 +377,8 @@ export function widgetRows(
 	}
 	const visible = blocks.flat();
 	if (!visible.length) return [];
-	// Archived completions remain available for dependency resolution and history,
-	// but must not inflate the working list for the rest of the conversation.
-	const leaves = live.filter((t) => t.kind !== "group" && (showAll || !hidden.has(t.id)));
+	// Completion fading changes the visible rows, not overall progress.
+	const leaves = live.filter((t) => t.kind !== "group");
 	const done = leaves.filter((t) => t.status === "completed").length;
 	const open = visible.some(({ task }) => task.status !== "completed");
 	const lines: TodoWidgetRow[] = [{ text: `${theme.fg(open ? "accent" : "dim", open ? "●" : "○")} Todos (${done}/${leaves.length}) · ${done} complete · ${leaves.filter((t) => t.status === "in_progress").length} active · ${leaves.filter((t) => t.status === "pending").length} pending` }];

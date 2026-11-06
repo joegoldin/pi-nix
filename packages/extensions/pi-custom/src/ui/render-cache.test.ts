@@ -91,13 +91,18 @@ describe("tool card render caching", () => {
 		expect(f.card.render(60)).toBe(lines);
 	});
 
-	it("updates a cached live activity line when execution supplies new arguments", () => {
+	it("keeps live argument details behind expansion as calls update", () => {
 		const f = fixture();
 		f.config.groupRuns = true;
 		f.model.agentStart();
 		f.model.addPart({ type: "toolCall", id: "a", name: "read", arguments: { path: "old.ts" } });
-		expect(f.card.render(60).join("\n")).toContain("old.ts");
+		const collapsed = f.card.render(60);
+		expect(collapsed.join("\n")).not.toContain("old.ts");
 		f.model.started("a", { path: "new.ts" });
+		expect(f.card.render(60)).toEqual(collapsed);
+		expect(f.card.render(60).join("\n")).not.toContain("new.ts");
+		f.context.args = { path: "new.ts" };
+		f.groups.toggle(f.model.runOf("a")!, false);
 		expect(f.card.render(60).join("\n")).toContain("new.ts");
 	});
 
