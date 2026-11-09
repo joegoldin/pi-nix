@@ -6,24 +6,11 @@
 
     nixpkgs.url = "github:nixos/nixpkgs?ref=nixos-unstable";
 
-    # Nixpkgs 26.11 dropped Intel macOS. Keep it on the final supported branch,
-    # which receives security fixes through the end of 2026.
-    nixpkgs-x86_64-darwin.url = "github:nixos/nixpkgs?ref=nixpkgs-26.05-darwin";
-
     bun2nix = {
       url = "github:nix-community/bun2nix?ref=2.1.0";
       inputs = {
         flake-parts.follows = "flake-parts";
         nixpkgs.follows = "nixpkgs";
-      };
-    };
-
-    bun2nix-x86_64-darwin = {
-      url = "github:nix-community/bun2nix?ref=2.1.0";
-      inputs = {
-        flake-parts.follows = "flake-parts";
-        nixpkgs.follows = "nixpkgs-x86_64-darwin";
-        systems.follows = "bun2nix/systems";
       };
     };
 
@@ -49,9 +36,7 @@
     inputs@{
       flake-parts,
       nixpkgs,
-      nixpkgs-x86_64-darwin,
       bun2nix,
-      bun2nix-x86_64-darwin,
       jail-nix,
       ...
     }:
@@ -61,15 +46,11 @@
       inherit (current.projects.coding-agent) npmDepsHash;
       version = nixpkgs.lib.removePrefix "v" rev;
 
-      nixpkgsFor = system: if system == "x86_64-darwin" then nixpkgs-x86_64-darwin else nixpkgs;
-      pkgsFor = system: import (nixpkgsFor system) { inherit system; };
-
-      bun2nixFor = system: if system == "x86_64-darwin" then bun2nix-x86_64-darwin else bun2nix;
+      pkgsFor = system: import nixpkgs { inherit system; };
 
       systems = [
         "aarch64-darwin"
         "aarch64-linux"
-        "x86_64-darwin"
         "x86_64-linux"
       ];
     in
@@ -80,9 +61,9 @@
         { system, ... }:
         let
           pkgs = pkgsFor system;
-          bunPkgs = import (nixpkgsFor system) {
+          bunPkgs = import nixpkgs {
             inherit system;
-            overlays = [ (bun2nixFor system).overlays.default ];
+            overlays = [ bun2nix.overlays.default ];
           };
 
           src = pkgs.applyPatches {
@@ -109,7 +90,7 @@
 
           patch = import ./patch.nix { inherit pkgs; };
 
-          bun2nixCompat = (bun2nixFor system).packages.${system}.bun2nix.overrideAttrs (old: {
+          bun2nixCompat = bun2nix.packages.${system}.bun2nix.overrideAttrs (old: {
             patches = (old.patches or [ ]) ++ [ ./bun2nix-lock-v3.patch ];
             postBuild = (old.postBuild or "") + ''
               cargo test --offline --locked -p bun2nix --lib lock_version_tests

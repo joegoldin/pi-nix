@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import { realpathSync } from "node:fs";
 import { DENIAL_LIMIT, approvalLabel, grantKey, PermissionLedger } from "./denials.ts";
 
 const blocked = (command: string, toolCallId = "c1") => ({ toolCallId, toolName: "bash", input: { command }, reason: "no" });
@@ -242,7 +243,7 @@ it("explicit rejection survives resume and extensions but a new instruction or m
 
 it("saved grants retain their approval time and do not replace independent session grants", () => {
   const ledger = new PermissionLedger(() => 100);
-  const directory = { path: "/tmp/project", access: "write-execute" as const };
+  const directory = { path: `${realpathSync("/tmp")}/project`, access: "write-execute" as const };
   ledger.approveDirectory(directory);
   ledger.refreshSaved("/launch", [{ directory, at: 5 }]);
   expect(ledger.grantList()).toHaveLength(2);
@@ -250,6 +251,6 @@ it("saved grants retain their approval time and do not replace independent sessi
   expect(ledger.directoryApprovals(undefined, { toolName: "write", cwd: "/launch", input: { path: "/tmp/project/new.ts" } })).toHaveLength(2);
   ledger.refreshSaved("/launch", []);
   expect(ledger.grantList()).toHaveLength(1);
-  ledger.approveDirectory({ path: "/tmp/run-only", access: "execute" });
+  ledger.approveDirectory({ path: `${realpathSync("/tmp")}/run-only`, access: "execute" });
   expect(ledger.directoryApprovals(undefined, { toolName: "read", cwd: "/launch", input: { path: "/tmp/run-only/source.ts" } })).toEqual([]);
 });
