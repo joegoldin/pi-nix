@@ -811,6 +811,17 @@ pkgs.runCommand "pi-nix-options-tests" { nativeBuildInputs = [ pkgs.jq ]; } ''
   grep -qF '(deny file-read*' "$profile"
   grep -qF '(subpath "/Users/joe/.ssh")' "$profile"
 
+  # Negated commands do not trigger Bash's errexit. Require grep's no-match
+  # status explicitly, so both a forbidden string and a read error fail.
+  assert_absent() {
+    local status=0
+    grep -qF "$1" "$2" || status=$?
+    if [ "$status" -ne 1 ]; then
+      echo "Expected '$1' to be absent from $2 (grep exited $status)" >&2
+      exit 1
+    fi
+  }
+
   # Independent sessions load their own permission package, without a
   # managed-child resolver link. Only extension config belongs in the prelude.
   for launcher in ${
@@ -824,9 +835,9 @@ pkgs.runCommand "pi-nix-options-tests" { nativeBuildInputs = [ pkgs.jq ]; } ''
     )
   }; do
     test -r "$launcher"
-    ! grep -qF 'npm/node_modules' "$launcher"
+    assert_absent 'npm/node_modules' "$launcher"
   done
-  ! grep -qF 'extensions/pi-permission-system/package.json' \
+  assert_absent 'extensions/pi-permission-system/package.json' \
     ${lib.getExe autoWithPermissionSystem.package}
 
   # The written prompt must be the literal text, with no wrapper or frontmatter.
