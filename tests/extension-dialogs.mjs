@@ -13,6 +13,15 @@ const mode = Object.assign(Object.create(InteractiveMode.prototype), {
   programStatus: { setBlocked() {} },
 });
 const api = mode.createExtensionUIContext();
+// The measurement includes the live editor-slot dialog, below-editor widgets,
+// and footer, so side panels never cover input as it grows.
+mode.ui.terminal = { columns: 100, rows: 40 };
+mode.editorContainer.render = () => ["editor", "editor", "editor"];
+mode.widgetContainerBelow = { render: () => ["widget"] };
+mode.footerContainer = { render: () => ["footer", "footer"] };
+assert.equal(api.getInputDockHeight(), 6);
+mode.editorContainer.render = () => Array(9).fill("multiline editor");
+assert.equal(api.getInputDockHeight(), 12);
 const flush = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); };
 let finishQuestion;
 const question = { render: () => ["QUESTION"], invalidate() {}, dispose() {} };
@@ -121,3 +130,42 @@ for (const Host of [TuiMainScreen, TuiAltScreen]) {
   ui.stop();
 }
 console.log("Both TUI modes defer hidden permission input until the inspector closes");
+
+// Non-modal side panels release input on a click in the main conversation,
+// but clicks on a nested capturing dialog must not bypass that dialog.
+{
+  const ui = new TuiAltScreen({ columns: 100, rows: 30, start() {}, stop() {}, write() {}, hideCursor() {}, showCursor() {} });
+  ui.requestRender = () => {};
+  const mainKeys = [], sideKeys = [];
+  const main = { render: () => ["MAIN"], invalidate() {}, handleInput: key => mainKeys.push(key) };
+  const side = { render: () => ["SIDE", "SIDE INPUT"], invalidate() {}, handleInput: key => sideKeys.push(key),
+    handleMouse: event => event.button === "left" ? { handled: true, focus: true } : undefined };
+  ui.setFocus(main);
+  const handle = ui.showOverlay(side, { width: "50%", anchor: "top-right", nonCapturing: true, unfocusOnOutsideClick: true });
+  const paint = () => ui.compositeOverlays(Array(30).fill("MAIN"), 100, 30);
+  const click = (x, y) => {
+    ui.handleTerminalInput(`\x1b[<0;${x + 1};${y + 1}M`);
+    ui.handleTerminalInput(`\x1b[<0;${x + 1};${y + 1}m`);
+  };
+  handle.focus(); paint();
+  click(5, 5); // Main transcript, not just its editor.
+  assert.equal(handle.isFocused(), false, "clicking the main panel must return input to main");
+  ui.handleTerminalInput("m");
+  assert.deepEqual(mainKeys, ["m"]);
+  for (const y of [0, 1]) {
+    click(75, y);
+    assert.equal(handle.isFocused(), true, "both side history and side input can take focus");
+    ui.handleTerminalInput("s");
+    click(5, 28); // Main input dock.
+    assert.equal(handle.isFocused(), false);
+  }
+  assert.deepEqual(sideKeys, ["s", "s"]);
+  handle.focus();
+  const nested = { render: () => ["PERMISSION"], invalidate() {} };
+  const modal = ui.showOverlay(nested, { width: 20, anchor: "center" });
+  paint(); click(5, 5);
+  assert.equal(ui.getFocusedComponent(), nested, "outside clicks cannot escape a permission dialog");
+  modal.hide(); handle.hide();
+  assert.equal(ui.getFocusedComponent(), main);
+}
+console.log("Side-panel mouse focus, independent keyboard routing and nested modal protection passed");

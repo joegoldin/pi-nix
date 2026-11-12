@@ -1,0 +1,28 @@
+--- a/packages/tui/src/tui.ts
++++ b/packages/tui/src/tui.ts
+@@ -287,6 +287,8 @@
+ 	visible?: (termWidth: number, termHeight: number) => boolean;
+ 	/** If true, don't capture keyboard focus when shown */
+ 	nonCapturing?: boolean;
++	/** Release this panel to its previous input target on a left click outside all overlays. */
++	unfocusOnOutsideClick?: boolean;
+ }
+ 
+ /** Options for {@link OverlayHandle.unfocus}. */
+@@ -927,6 +929,16 @@
+ 					}
+ 				: { hit: true };
+ 		}
++		if (event.type === "press" && event.button === "left") {
++			const panel = this.overlayStack.find((entry) =>
++				entry.component === this.focusedComponent && entry.options?.unfocusOnOutsideClick
++				&& this.isOverlayVisible(entry));
++			if (panel) {
++				this.clearOverlayFocusRestoreFor(panel);
++				this.setFocus(panel.preFocus);
++				this.requestRender();
++			}
++		}
+ 		return { hit: false };
+ 	}
+ 

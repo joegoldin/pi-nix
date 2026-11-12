@@ -85,6 +85,8 @@
               ./coding-agent/custom-message-expansion.patch
               ./coding-agent/picker-shortcut-conflicts.patch
               ./coding-agent/program-status.patch
+              ./coding-agent/input-dock-height.patch
+              ./coding-agent/panel-mouse-focus.patch
             ];
           };
 

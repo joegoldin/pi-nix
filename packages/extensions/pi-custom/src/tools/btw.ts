@@ -31,7 +31,7 @@ import {
 	type SideMode,
 } from "./btw-runtime.ts";
 import { forkSideSession } from "./btw-session.ts";
-import { truncateToWidth } from "@earendil-works/pi-tui";
+import { matchesKey, truncateToWidth, type OverlayHandle } from "@earendil-works/pi-tui";
 export { BtwView, bringBackDraft, bringBackThreadDraft } from "./btw-view.ts";
 
 const ENTRY = "pi-custom:btw-session";
@@ -114,6 +114,7 @@ export function registerBtw(
 ): { running(): number } {
 	const threads = new Map<string, LiveThread>();
 	let shuttingDown = false;
+	let closePanel: (() => void) | undefined;
 	const directory = (ctx: ExtensionContext) => {
 		const file = ctx.sessionManager.getSessionFile();
 		if (!file)
@@ -353,11 +354,25 @@ export function registerBtw(
 		while (thread) {
 			const current = thread;
 			let draft: string | undefined;
+			let handle: OverlayHandle | undefined;
+			let closeCurrent: (() => void) | undefined;
+			let renderCurrent: (() => void) | undefined;
+			let removeInputListener: (() => void) | undefined;
+			let screenRows = () => 0;
+			const availableHeight = () => Math.max(0, screenRows() - ctx.ui.getInputDockHeight());
 			const action = await ctx.ui.custom<
 				"close" | "fork" | "fresh" | "switch" | "mode"
 			>(
 				(tui, theme, _keys, done) => {
-					current.render = () => tui.requestRender();
+					screenRows = () => tui.terminal.rows;
+					closePanel = closeCurrent = () => done("close");
+					current.render = renderCurrent = () => tui.requestRender();
+					removeInputListener = tui.addInputListener((data) => {
+						if (!matchesKey(data, "alt+b") || !handle) return;
+						if (handle.isFocused()) handle.unfocus();
+						else handle.focus();
+						return { consume: true };
+					});
 					const view = new BtwView(
 						current,
 						theme,
@@ -374,7 +389,7 @@ export function registerBtw(
 						},
 						() => done("close"),
 						current.render,
-						() => Math.max(5, Math.floor(tui.terminal.rows * 0.8) - 3),
+						() => Math.max(1, availableHeight() - 2),
 						{
 							fork: () => done("fork"),
 							fresh: () => done("fresh"),
@@ -395,12 +410,15 @@ export function registerBtw(
 						question = undefined;
 					}
 					return {
+						get focused() { return view.focused; },
+						set focused(value: boolean) { view.focused = value; },
 						render: (width) => new Framed(
 							view,
 							truncateToWidth(`btw · ${current.saved.mode} · ${current.saved.name.replace(/[\p{C}\p{Zl}\p{Zp}]/gu, " ")}`, Math.max(1, width - 5)),
 							theme,
 						).render(width),
 						invalidate: () => view.invalidate(),
+						dispose: () => removeInputListener?.(),
 						handleInput: (data) => {
 							view.handleInput(data);
 							tui.requestRender();
@@ -410,10 +428,22 @@ export function registerBtw(
 				},
 				{
 					overlay: true,
-					overlayOptions: { width: "90%", maxHeight: "90%", anchor: "center" },
+					overlayOptions: {
+						width: "50%",
+						anchor: "top-right",
+						nonCapturing: true,
+						unfocusOnOutsideClick: true,
+						get maxHeight() { return availableHeight(); },
+						get margin() { return { bottom: ctx.ui.getInputDockHeight() }; },
+						visible: (width) => width >= 16 && availableHeight() >= 5,
+					},
+					onHandle: (overlay) => { handle = overlay; overlay.focus(); },
 				},
-			);
-			current.render = undefined;
+			).finally(() => {
+				removeInputListener?.();
+				if (current.render === renderCurrent) current.render = undefined;
+				if (closePanel === closeCurrent) closePanel = undefined;
+			});
 			save(current);
 			if (draft) {
 				const previous = ctx.ui.getEditorText();
@@ -464,6 +494,10 @@ export function registerBtw(
 				ctx.ui.notify("/btw requires interactive TUI mode", "error");
 				return;
 			}
+			if (closePanel) {
+				ctx.ui.notify("/btw is already open. Click its panel or press Alt+b to focus it.", "info");
+				return;
+			}
 			try {
 				restore(ctx);
 				const question = args.trim();
@@ -488,6 +522,7 @@ export function registerBtw(
 	});
 	pi.on("session_shutdown", async () => {
 		shuttingDown = true;
+		closePanel?.();
 		const errors: unknown[] = [];
 		for (const thread of threads.values()) {
 			thread.busy?.abort();

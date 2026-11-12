@@ -1,0 +1,50 @@
+--- a/packages/coding-agent/src/core/extensions/types.ts
++++ b/packages/coding-agent/src/core/extensions/types.ts
+@@ -254,6 +254,9 @@
+ 	/** Get the current text from the core input editor. */
+ 	getEditorText(): string;
+ 
++	/** Intrinsic height of the live input dock (editor/dialog, lower widgets and footer). */
++	getInputDockHeight(): number;
++
+ 	/** Show a multi-line editor for text editing. */
+ 	editor(title: string, prefill?: string): Promise<string | undefined>;
+ 
+--- a/packages/coding-agent/src/core/extensions/runner.ts
++++ b/packages/coding-agent/src/core/extensions/runner.ts
+@@ -352,6 +352,7 @@
+ 	pasteToEditor: () => {},
+ 	setEditorText: () => {},
+ 	getEditorText: () => "",
++	getInputDockHeight: () => 0,
+ 	editor: async () => undefined,
+ 	addAutocompleteProvider: () => {},
+ 	setEditorComponent: () => {},
+--- a/packages/coding-agent/src/modes/interactive/interactive-mode.ts
++++ b/packages/coding-agent/src/modes/interactive/interactive-mode.ts
+@@ -2733,6 +2733,14 @@
+ 			pasteToEditor: (text) => this.editor.handleInput(`\x1b[200~${text}\x1b[201~`),
+ 			setEditorText: (text) => this.editor.setText(text),
+ 			getEditorText: () => this.editor.getExpandedText?.() ?? this.editor.getText(),
++			getInputDockHeight: () => {
++				const width = this.ui.terminal.columns;
++				// Use intrinsic heights: a compressed fullscreen dock may be smaller,
++				// but reserving extra space is safer than covering an active input.
++				return this.editorContainer.render(width).length
++					+ this.widgetContainerBelow.render(width).length
++					+ this.footerContainer.render(width).length;
++			},
+ 			editor: (title, prefill) => this.showExtensionEditor(title, prefill),
+ 			addAutocompleteProvider: (factory) => {
+ 				this.autocompleteProviderWrappers.push(factory);
+--- a/packages/coding-agent/src/modes/rpc/rpc-mode.ts
++++ b/packages/coding-agent/src/modes/rpc/rpc-mode.ts
+@@ -252,6 +252,8 @@
+ 				text,
+ 			} as RpcExtensionUIRequest);
+ 		},
++
++		getInputDockHeight: () => 0,
+ 
+ 		getEditorText(): string {
+ 			// Synchronous method can't wait for RPC response

@@ -188,7 +188,13 @@ Use `/btw` or `/btw list` to select and continue a side conversation. Inside it:
   These actions cancel a pending side turn, preserve the main draft, and never
   submit it. Ctrl+Shift+r requires distinct terminal reporting, such as Kitty keys.
 
-The overlay has a bounded viewport and a separate composer. Mouse wheel and
+The panel occupies only the right half of the terminal, above the live main
+input dock. Click either conversation or its input to focus it; Alt+b also
+switches between main and side input without closing the panel. Both drafts
+remain independent. Escape/Ctrl+c closes the panel instead. A second `/btw`
+command is rejected while the panel is open; use its controls to switch threads.
+
+The panel has a bounded viewport and a separate composer. Mouse wheel and
 Page Up/Down scroll; Ctrl+Home/End jump to the beginning/latest messages. New
 answers follow the tail unless you have scrolled up. The main editor and footer
 remain full-width. Child status and editor writes cannot replace them.
