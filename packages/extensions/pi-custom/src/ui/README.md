@@ -24,12 +24,11 @@ completer.
   or that the classifier cannot read (a file redirection, `$(…)`, an unknown
   program), keeps its card and ends the run, as edits, writes and tools with
   their own renderers do; so do prose, your message and the agent stopping.
-  While the agent works, the run is one line in the present tense with the
-  latest call under it, counting up in place:
+  While the agent works, the run is one line in the present tense,
+  counting up in place:
 
   ```
   Thinking for 12s, running 3 shell commands, reading 1 file…
-    ⎿  $ rg -n foo src
   ```
 
   When it closes the same line reads `Thought for 19s, ran 3 shell commands,
@@ -56,12 +55,17 @@ completer.
 - **Prompt editing.** Paste the same large block again to expand its collapsed
   marker in place; further identical repeats leave one copy. Editing or moving
   to another insertion point resumes normal pasting. Expansion is one undo step.
-- **Inline dictation.** pi-voice streams into the prompt at the insertion point:
-  confirmed words use the normal text colour and provisional words are gray.
-  A green/yellow/red height-changing VU bar replaces the cursor. Revisions and
-  the final pass update one undoable insertion, without collapsed paste markers.
-  Typing or moving the caret stops dictation; late results cannot overwrite edits.
-  Enter stops without submitting. Fullscreen copying excludes the meter cell.
+- **Inline dictation.** Ctrl+Alt+V starts pi-voice at the insertion point, including
+  inside an existing draft; Space also starts in an empty prompt. All live words
+  use a warm sepia tint, with a green/yellow/red VU bar replacing the cursor.
+  One visual space separates the transcript from that bar or the refining spinner;
+  neither virtual cell enters the draft or copied text.
+  Any normal input or a click ends recording without editing or submitting.
+  During the final pass, a pale highlight flows through the temporary words and
+  a spinner replaces the VU bar. Input stays blocked until the refined text
+  replaces the insertion; Ctrl+C cancels and keeps the live words. Revisions
+  and the final pass are one undo step, without collapsed paste markers.
+  Fullscreen copying excludes the meter/spinner cell.
 - **Clean copying.** Pi-owned fullscreen selections rejoin soft wraps in the
   prompt, assistant prose, and tool cards while preserving real newlines and
   indentation. Prompt frames, card gutters, and the dictation meter stay out of

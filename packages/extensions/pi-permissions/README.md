@@ -28,15 +28,16 @@ Each tool call passes through, in order:
    call; `ask` goes on.
 3. **The authorizer chain**: auto mode's classifier is a link on it, so an
    `ask` reaches the classifier before it reaches you. With `askOnBlock` on,
-   a classifier block asks you first, in the terminal UI only, with a
+   a classifier block asks you first in the terminal UI, with a
    countdown and a notification. `y` approves the displayed reusable scope;
    `Y` approves just this attempt. Reusable approval is offered only for a
    soft denial with a supported scope. `n` or Esc refuses; no answer in time
    keeps the block. Any key interaction, including arrow navigation, removes
    and permanently stops the countdown without choosing an answer. `e` shows
    the full reason, exact command and tool input without executing anything.
-   ↑/↓ scroll; `e` or Esc returns, with no countdown. A headless session
-   (print, JSON, RPC, a subagent) never asks; the block stands at once.
+   ↑/↓ scroll; `e` or Esc returns, with no countdown. Unattended sessions
+   (print, JSON, RPC without a registered review transport, subagents) never
+   ask; the block stands at once.
 4. **You**, at the permission prompt, for whatever the chain defers.
 
 Whatever either half blocks is recorded with the call's full input. In
@@ -62,6 +63,14 @@ Hard restrictions, classifier failures, explicit rejections, stale or changed
 requests, and child-owned or historical denials without review metadata are not
 eligible. Cancellation and timeout grant nothing; a denial cannot open repeated
 linked questions. The existing menu remains available for direct user review.
+
+RPC sessions may register a native review transport through the extension-only
+`permissions:remote-review:v1:register` event. It must match the live session
+and controller attempt. The transport receives the complete original action,
+reason and scope with fixed choices; it cannot offer future-session grants.
+Only eligible soft denials can be reviewed remotely. Timeout, cancellation,
+changed input, controller disposal and session replacement grant nothing.
+This is not a model tool or an override for hard rules or classifier failures.
 
 A Bash analysis failure is uncertainty, not proof that a deny rule matched.
 Concrete policy matches and known hard restrictions still block first. Otherwise,

@@ -65,6 +65,8 @@ export interface PermissionOwner {
 }
 
 export interface ApprovalReview {
+	/** A restored conversation is not the same live remote-controller attempt. */
+	remoteScopeId?: string;
 	eligible: boolean;
 	response: "denied" | "timeout" | "unasked";
 	directories?: DirectoryAccess[];

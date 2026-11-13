@@ -1,8 +1,9 @@
 import { expect, it } from "bun:test";
 import { registerApprovalRequest, denialGuidance } from "./approval-request.ts";
 import { PermissionLedger } from "./denials.ts";
+import type { RemotePermissionReview } from "./remote-review.ts";
 
-function setup(answer = "allow-session") {
+function setup(answer = "allow-session", remote?: Pick<RemotePermissionReview, "available" | "ask" | "scopeId">) {
 	const ledger = new PermissionLedger();
 	const input = { command: "cd /tmp/worktree && python3 update.py" };
 	const denial = ledger.record({ toolCallId: "blocked", toolName: "bash", input, reason: "Needs authorization", cwd: "/tmp/main", sessionId: "session", review: { eligible: true, response: "timeout" }, directories: [{ path: "/tmp/worktree", access: "read" }] });
@@ -14,10 +15,28 @@ function setup(answer = "allow-session") {
 	const pi = { registerTool(t: any) { tool = t; }, events: { emit(channel: string, data: unknown) { events.push({ channel, data }); if (channel === "pi-user-decision:submitted") ledger.clearSimilar(); } } };
 	const ctx = { hasUI: true, mode: "tui", cwd: "/tmp/main", sessionManager: { getSessionId: () => "session" } };
 	let respond = async () => answer;
-	registerApprovalRequest(pi as never, ledger, () => saveCount++, async (_ctx, ask) => { asked++; prompt = ask; return await respond() as never; });
+	registerApprovalRequest(pi as never, ledger, () => saveCount++, async (_ctx, ask) => { asked++; prompt = ask; return await respond() as never; }, remote);
 	const call = (id = denial.id, signal = new AbortController().signal) => tool.execute("review", { denialId: id }, signal, undefined, ctx);
 	return { ledger, denial, input, ctx, call, events, setResponse(fn: () => Promise<string>) { respond = fn; }, asked: () => asked, saves: () => saveCount, prompt: () => prompt };
 }
+
+it("RPC linked approval needs a registered native transport and keeps hard/rejected denials ineligible", async () => {
+	let requests = 0;
+	const remote = { available: () => true, scopeId: () => "attempt-one", ask: async (_ctx: unknown, ask: any) => {requests++; expect(ask.scopeOnly).toBe(true); return "allow-session" as const;} };
+	const h = setup("allow-session", remote); h.ctx.mode = "rpc";
+	expect((await h.call()).details.status).toBe("unavailable"); expect(requests).toBe(0);
+	h.denial.review!.remoteScopeId = "prior-attempt";
+	expect((await h.call()).details.status).toBe("unavailable"); expect(requests).toBe(0);
+	h.denial.review!.remoteScopeId = "attempt-one";
+	expect((await h.call()).details.status).toBe("approved"); expect(requests).toBe(1);
+	expect(h.asked()).toBe(0); expect(h.ledger.isSimilarlyGranted("bash", h.input, "/tmp/main")).toBe(true);
+	for (const change of [(v: ReturnType<typeof setup>) => {v.denial.policyDenied = true;}, (v: ReturnType<typeof setup>) => {v.denial.review!.eligible = false;}, (v: ReturnType<typeof setup>) => {v.denial.review!.response = "denied";}]) {
+		const blocked = setup("allow-session", remote); blocked.ctx.mode = "rpc"; blocked.denial.review!.remoteScopeId = "attempt-one"; change(blocked);
+		expect((await blocked.call()).details.status).not.toBe("approved"); expect(requests).toBe(1);
+	}
+	const missing = setup(); missing.ctx.mode = "rpc";
+	expect((await missing.call()).details.status).toBe("unavailable"); expect(missing.asked()).toBe(0);
+});
 
 it("links a real user answer to the displayed denial without a second menu approval", async () => {
 	const h = setup();

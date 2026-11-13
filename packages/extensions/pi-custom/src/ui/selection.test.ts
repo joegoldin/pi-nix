@@ -183,3 +183,19 @@ test("native assistant and self-rendered tool shells retain selection metadata t
 	expect(copied.text).not.toContain("⎿");
 	expect(copied.text).not.toContain("● Bash");
 });
+
+test("voice cursor spacing stays out of copied text across wrap boundaries", async () => {
+	for (const width of [13, 14, 15, 16, 24, 40]) {
+		for (const processing of [false, true]) {
+			const p = prompt("before AFTER", width);
+			const editor = p.target as any;
+			editor.setCursorCol(7);
+			const speech = editor.beginDictation(() => {});
+			speech.update({ committed: "hello world", partial: "", level: 0.5, processing });
+			p.native.doRender();
+			expect(await p.copy()).toBe("before hello worldAFTER");
+			expect(p.target.getText()).toBe("before hello worldAFTER");
+			speech.finish();
+		}
+	}
+});

@@ -130,7 +130,7 @@ describe("small helpers", () => {
 
 	it("summarises the footer, and is silent when there is nothing to say", () => {
 		const t = [task({ status: "running" }), task({ id: "b2", status: "failed" })];
-		expect(statusLine(t, new Set())).toBe("bg 1 running · 1 failed");
+		expect(statusLine(t, new Set())).toBe("bg 1↻ · 1✗");
 		expect(statusLine([task()], new Set(["b1a2b3c4"]))).toBeUndefined();
 	});
 });

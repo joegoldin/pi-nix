@@ -144,7 +144,7 @@
 +			this.activities.set(source, { ...status });
 +		}
 +		this.getTerminal().setProgramStatus(status ? { ...status, id, app: APP_NAME } : { state: "clear", id });
-+		if (!this.runActive && !this.compacting && (status?.state === "done" || status?.state === "error" || (status?.state === "idle" && (previous?.state === "working" || previous?.state === "blocked")))) this.restingStatus = { state: status.state, message: status.message };
++		// Child results belong to their own records, never to the agent outcome.
 +		this.report();
 +	}
 +

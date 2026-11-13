@@ -9,12 +9,17 @@ function harness(goal?: object) {
 	const handlers = new Map<string, Function>();
 	const tools = new Map<string, any>();
 	const reports: { key: string; status: any }[] = [];
+	const records = new Map<string, any>();
 	const ctx = { hasUI: true, mode: "tui", cwd: "/tmp", isIdle: () => true, hasPendingMessages: () => false,
-		ui: { setStatus() {}, notify() {}, setProgramStatus: (key: string, status: unknown) => reports.push({ key, status }) },
+		ui: { setStatus() {}, setWidget() {}, getToolsExpanded: () => false, notify() {}, setProgramStatus: (key: string, status: unknown) => {
+			reports.push({ key, status });
+			if (status) records.set(key, status);
+			else for (const owned of records.keys()) if (owned === key || owned.startsWith(`${key}/`)) records.delete(owned);
+		} },
 		sessionManager: { getSessionId: () => "test", getBranch: () => goal ? [{ type: "custom", customType: "goal-state", data: { goal } }] : [] },
 	};
 	const pi = { on: (name: string, handler: Function) => handlers.set(name, handler), registerTool: (tool: any) => tools.set(tool.name, tool), registerCommand() {}, registerMessageRenderer() {}, appendEntry() {}, sendMessage() {}, sendUserMessage() {} };
-	return { pi, ctx, tools, reports, emit: (name: string, event = {}) => handlers.get(name)?.(event, ctx) };
+	return { pi, ctx, tools, reports, records, emit: (name: string, event = {}) => handlers.get(name)?.(event, ctx) };
 }
 for (const waitingFor of ["background", "external", "user"] as const) {
 	test(`goal ${waitingFor} wait reports the right native activity without exposing the objective`, async () => {
@@ -99,7 +104,7 @@ for (const outcome of ["failed", "cancelled"] as const) {
 			const result = await h.tools.get("bg_run").execute("test", { name: "Check", command: outcome === "failed" ? "exit 7" : "sleep 10", triggerOnCompletion: false }, undefined, undefined, h.ctx);
 			if (outcome === "cancelled") await h.tools.get("bg_kill").execute("kill", { taskId: result.details.task.id }, undefined, undefined, h.ctx);
 			await Promise.race([done, new Promise((_, reject) => setTimeout(() => reject(new Error("task did not finish")), 3000))]);
-			expect(h.reports.at(-1)?.status.state).toBe(outcome === "failed" ? "error" : "idle");
+			expect(h.reports.some(row => row.status?.state === (outcome === "failed" ? "error" : "idle"))).toBe(true);
 		} finally { await h.emit("session_shutdown"); rmSync(cwd, { recursive: true, force: true }); }
 	});
 }
@@ -135,4 +140,38 @@ test("subagent workflows share one bounded record budget", async () => {
 		expect(h.reports.filter(row => row.key !== "subagents" && row.status?.state === "working").length).toBeLessThanOrEqual(128);
 		expect(h.reports.at(-1)?.status.state).toBe("working");
 	} finally { h.emit("session_shutdown"); }
+});
+
+
+test("automatic background completion stays working until its follow-up consumes it, then clears", async () => {
+ const h = harness(); const cwd = mkdtempSync(join(tmpdir(), "pi-bg-followup-")); h.ctx.cwd = cwd;
+ registerBackgroundTasks(h.pi as never); h.emit("session_start");
+ let complete!: () => void; const done = new Promise<void>(resolve => { complete = resolve; }); h.pi.sendMessage = () => complete();
+ try {
+  await h.tools.get("bg_run").execute("run", { name: "Check", command: "exit 7" }, undefined, undefined, h.ctx);
+  await done;
+  expect([...h.records.values()].filter(Boolean).every(status => status.state === "working")).toBe(true);
+  h.emit("agent_start");
+  expect([...h.records.values()].filter(Boolean)).toHaveLength(0);
+  const result = await h.tools.get("bg_status").execute("status", {});
+  expect(result.details.tasks[0]).toMatchObject({ status: "failed", exitCode: 7 });
+ } finally { await h.emit("session_shutdown"); rmSync(cwd, { recursive: true, force: true }); }
+});
+
+
+test("manual background results clear on inspection or real input, without losing history", async () => {
+ const h = harness(); const cwd = mkdtempSync(join(tmpdir(), "pi-bg-seen-")); h.ctx.cwd = cwd;
+ registerBackgroundTasks(h.pi as never); h.emit("session_start");
+ let complete!: () => void; let done = new Promise<void>(resolve => { complete = resolve; }); h.pi.sendMessage = () => complete();
+ try {
+  const launch = () => h.tools.get("bg_run").execute("run", { name: "Check", command: "exit 7", triggerOnCompletion: false }, undefined, undefined, h.ctx);
+  const first = await launch(); await done;
+  expect([...h.records.values()].some(status => status.state === "error")).toBe(true);
+  await h.tools.get("bg_status").execute("status", { taskId: first.details.task.id });
+  expect([...h.records.values()].filter(Boolean)).toHaveLength(0);
+  done = new Promise<void>(resolve => { complete = resolve; }); await launch(); await done;
+  h.emit("input", { source: "interactive", text: "continue" });
+  expect([...h.records.values()].filter(Boolean)).toHaveLength(0);
+  expect((await h.tools.get("bg_status").execute("status", {})).details.tasks).toHaveLength(2);
+ } finally { await h.emit("session_shutdown"); rmSync(cwd, { recursive: true, force: true }); }
 });

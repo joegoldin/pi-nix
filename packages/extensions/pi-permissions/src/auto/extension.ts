@@ -2,6 +2,7 @@ import { AUTHORITY_CANCELLED } from "../engine/authority/pending-authority.ts";
 import { coordinationKind } from "./coordination.ts";
 import { canonicalJson } from "../ui/call-label.ts";
 import type { ApprovalReview } from "../denials.ts";
+import type { RemotePermissionReview } from "../remote-review.ts";
 import { realpathSync, statSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -126,6 +127,8 @@ function projectIsTrusted(
 }
 
 export type PiAutomodeOptions = {
+  /** Explicitly registered native transport; absent leaves RPC approval unavailable. */
+  remoteReview?: Pick<RemotePermissionReview, "available" | "ask">;
   /** Integrated host cancels pending analysis review when mode/session changes. */
   reviewAnalysis?: (ctx: ExtensionContext, ask: (signal?: AbortSignal) => Promise<boolean>) => Promise<"user" | "yolo" | undefined>;
   /** Trusted block provenance for a later native approval request; never model-supplied. */
@@ -465,9 +468,8 @@ export function createPiAutomode(options: PiAutomodeOptions = {}) {
     // the reason says no one answered, so a later go-ahead from the user can
     // clear it. Raised on the permission prompt channel so a notifier sees it.
     // pi-permissions: the prompt is ../ui/block-prompt.ts, drawn as this
-    // setup's other dialogs are. Only in the interactive terminal UI: a
-    // headless session (print, JSON, RPC, a subagent) has no one watching to
-    // answer, so the block stands at once, as it did before asking existed.
+    // setup's other dialogs are. RPC needs an explicitly registered live review
+    // transport; ordinary headless sessions still block without asking.
     async function askBeforeBlock(
       ctx: ExtensionContext,
       cfg: EffectiveConfig,
@@ -479,17 +481,11 @@ export function createPiAutomode(options: PiAutomodeOptions = {}) {
       futureScope?: string,
     ): Promise<"allow-session" | "allow-future" | "allow" | "deny" | "timeout" | undefined> {
       const ask = cfg.askOnBlock;
-      if (!ask?.enabled || !ctx.hasUI || ctx.mode !== "tui" || logCtx.deterministicOnly || ctx.signal?.aborted) return undefined;
+      if (!ask?.enabled || !ctx.hasUI || (ctx.mode !== "tui" && (ctx.mode !== "rpc" || !options.remoteReview?.available(ctx))) || logCtx.deterministicOnly || ctx.signal?.aborted) return undefined;
       const requestId = `pi-automode-${logCtx.decisionId}`;
       emitPermissionEvent("permissions:ui_prompt", { requestId, toolName, surface: toolName });
-      const answer = await askUserBeforeBlock(ctx, {
-        toolName,
-        input,
-        reason,
-        timeoutSeconds: ask.timeoutSeconds,
-        scope,
-        futureScope,
-      });
+      const question = { toolName, input, reason, timeoutSeconds: ask.timeoutSeconds, scope, futureScope };
+      const answer = ctx.mode === "rpc" ? await options.remoteReview?.ask(ctx, question) : await askUserBeforeBlock(ctx, question);
       emitPermissionEvent("permissions:decision", {
         requestId,
         surface: toolName,
@@ -1080,7 +1076,7 @@ export function createPiAutomode(options: PiAutomodeOptions = {}) {
         return interrupted(ctx, "classifier", event.toolName, summary, logCtx);
       }
       const sessionAtAsk = ctx.sessionManager?.getSessionId?.();
-      const prepared = canReuseApproval && decision.tier === "soft_deny" && cfg.askOnBlock?.enabled && ctx.hasUI && ctx.mode === "tui"
+      const prepared = canReuseApproval && decision.tier === "soft_deny" && cfg.askOnBlock?.enabled && ctx.hasUI && (ctx.mode === "tui" || (ctx.mode === "rpc" && options.remoteReview?.available(ctx)))
         ? await options.approvals?.prepare?.(ctx, cfg, event.toolName, input, loadedContext)
         : undefined;
       if (steering(ctx)) return interrupted(ctx, "classifier", event.toolName, summary, logCtx);
@@ -1090,7 +1086,7 @@ export function createPiAutomode(options: PiAutomodeOptions = {}) {
       const scope = prepared?.scope ?? (canReuseApproval && decision.tier === "soft_deny"
         ? options.approvals?.scope(event.toolName, input, ctx.cwd)
         : undefined);
-      const answer = decision.tier === "hard_deny" ? undefined
+      const answer = decision.tier === "hard_deny" || (ctx.mode === "rpc" && decision.tier !== "soft_deny") ? undefined
         : await askBeforeBlock(ctx, cfg, event.toolName, input, decision.reason, logCtx, scope, prepared?.futureScope);
       if (steering(ctx)) {
         return interrupted(ctx, "classifier", event.toolName, summary, logCtx);

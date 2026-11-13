@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { stripTerminalSequences, visibleWidth } from "@earendil-works/pi-tui";
-import { taskNotification, taskPanel, taskRows } from "./bg-ui.ts";
+import { taskNotification, taskPanel, taskRows, taskWidget } from "./bg-ui.ts";
 import { buildCard } from "../ui/tools.ts";
 import { DEFAULTS } from "../ui/config.ts";
 import type { TaskSnapshot } from "./bg-format.ts";
@@ -42,4 +42,35 @@ test("job and log panels are framed, scrollable, resize-safe and dismissible", (
   panel.handleInput("\x1b");
   expect(closed).toBe(true);
   expect(stripTerminalSequences(taskRows([task], theme).join("\n"))).toContain("assertion failed");
+});
+
+
+test("collapsed background notifications show actual exit outcomes", () => {
+ const failed = taskNotification({ ...task, exitCode: 7 }, theme, false).render(100).join("\n");
+ expect(failed).toContain("failed (7)");
+ const stopped = taskNotification({ ...task, status: "killed", error: undefined, signal: "SIGTERM" }, theme, false).render(100).join("\n");
+ expect(stopped).toContain("killed (SIGTERM)");
+});
+
+
+test("jobs widget is compact, click-expandable and follows Ctrl+O without reviving old failures", () => {
+  let full = false;
+  let redraws = 0;
+  const tasks = [task, { ...task, id: "b456", name: "Build", status: "running" as const, error: undefined }];
+  const seen = new Set([task.id]);
+  const widget = taskWidget(() => tasks, seen, theme, () => full, () => { redraws++; });
+  expect(widget.render(80)).toHaveLength(1);
+  expect(widget.render(80).join("\n")).toContain("1 running");
+  expect(widget.render(80).join("\n")).not.toContain("failed");
+  widget.handleMouse({ type: "click", button: "left" } as never);
+  expect(widget.render(80).join("\n")).toContain("Build");
+  widget.handleMouse({ type: "click", button: "left" } as never);
+  expect(widget.render(80)).toHaveLength(1);
+  full = true;
+  expect(widget.render(80).join("\n")).toContain("Run tests");
+  expect(widget.render(80).join("\n")).toContain("failed");
+  for (const width of [8, 24, 80]) expect(widget.render(width).every(row => visibleWidth(row) <= width)).toBe(true);
+  full = false;
+  expect(widget.render(80)).toHaveLength(1);
+  expect(redraws).toBe(2);
 });

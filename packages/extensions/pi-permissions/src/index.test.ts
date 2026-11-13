@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { EventEmitter } from "node:events";
 import piPermissions from "./index.ts";
 import { PermissionLedger, type PermissionRecord } from "./denials.ts";
+import { REMOTE_REVIEW_REGISTER, type RemoteReviewRegistration } from "./remote-review.ts";
 
 /** A session's event bus as pi builds it, and a pi that records what is registered. */
 function session() {
@@ -52,6 +53,46 @@ function session() {
 	};
 	return { api, tools, definitions, handlers, commands, shortcuts, sent, entries, toolCall, bus };
 }
+
+it("registered RPC review passes soft native gates but never hard rules or classifier failures", async () => {
+	if (process.env.PI_REMOTE_REVIEW_TEST_CHILD !== "1") {
+		const home = mkdtempSync(join(tmpdir(), "pi-remote-review-test-"));
+		try {
+			const directory = join(home, "extensions", "pi-permission-system"); mkdirSync(directory, {recursive: true});
+			writeFileSync(join(directory, "config.json"), JSON.stringify({authorizerChain: ["pi-automode"]}));
+			const child = Bun.spawn([process.execPath, "test", import.meta.path, "--test-name-pattern", "registered RPC review"], {env: {...process.env, HOME: home, PI_CODING_AGENT_DIR: home, PI_REMOTE_REVIEW_TEST_CHILD: "1"}, stdout: "pipe", stderr: "pipe"});
+			const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
+			expect({code, output: code === 0 ? "passed" : stdout+stderr}).toEqual({code: 0, output: "passed"});
+		} finally {rmSync(home, {recursive: true, force: true});}
+		return;
+	}
+	const s = session(); let tier = "soft_deny", questions = 0;
+	const api = s.api() as any; api.getAllTools = () => [{name: "bash", description: "Shell"}, ...s.definitions.values()]; api.getActiveTools = () => ["bash", ...s.tools];
+	piPermissions(api, {
+		loadConfig: () => ({enabled: true, classifyReadOnlyTools: false, allowInsideWorkingDirectory: false, deniedPaths: [], protectedPaths: [], permissionDeny: [], permissionAsk: [], permissionAllow: [], environment: [], allow: [], softDeny: [], hardDeny: [], log: {enabled: false, classifierIo: false}, askOnBlock: {enabled: true, timeoutSeconds: 1}}) as never,
+		classifyAction: async () => ({decision: "block", tier, reason: "Original remote review reason"}) as never,
+		proposeDirectories: async () => undefined,
+	});
+	const ctx = {cwd: homedir(), hasUI: true, mode: "rpc", isIdle: () => true, isProjectTrusted: () => true,
+		ui: {notify() {}, setStatus() {}, theme: {fg: (_slot: string, text: string) => text}, custom: async () => {throw new Error("RPC must not use terminal dialogs");}},
+		sessionManager: {getEntries: () => s.entries, getSessionId: () => "rpc-native", getSessionName: () => "RPC native", getSessionFile: () => undefined, getSessionDir: () => homedir(), getBranch: () => s.entries},
+	};
+	for (const handler of s.handlers.get("session_start") ?? []) await handler({}, ctx);
+	const call = {toolName: "bash", toolCallId: "unregistered", input: {command: "echo remote-native-review"}};
+	expect((await s.toolCall(call, ctx))?.block).toBe(true); expect(questions).toBe(0);
+	const registration: RemoteReviewRegistration = {version: 1, sessionId: "rpc-native", scopeId: "attempt-one", isLive: () => true, select: async request => {
+		questions++; expect(request.title).toContain(call.input.command); expect(request.title).toContain("Original remote review reason");
+		return request.options.at(-1);
+	}};
+	s.bus.emit(REMOTE_REVIEW_REGISTER, registration); expect(registration.accepted).toBe(true);
+	expect(await s.toolCall({...call, toolCallId: "registered"}, ctx)).toBeUndefined(); expect(questions).toBe(1);
+	tier = "hard_deny";
+	expect((await s.toolCall({...call, toolCallId: "hard"}, ctx))?.block).toBe(true); expect(questions).toBe(1);
+	tier = "error";
+	expect((await s.toolCall({...call, toolCallId: "parse-failure"}, ctx))?.block).toBe(true); expect(questions).toBe(1);
+	expect((await s.toolCall({toolName: "bash", toolCallId: "system-delete", input: {command: "rm -rf /etc"}}, ctx))?.block).toBe(true); expect(questions).toBe(1);
+	for (const handler of s.handlers.get("session_shutdown") ?? []) await handler({}, ctx);
+});
 
 describe("loading", () => {
 	it("registers once per session however many times it is loaded", () => {

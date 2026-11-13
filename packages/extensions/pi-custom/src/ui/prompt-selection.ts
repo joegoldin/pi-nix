@@ -1,7 +1,7 @@
 import { sliceByColumn, stripTerminalSequences } from "@earendil-works/pi-tui";
 import { contentRows, copyContentRows } from "./selection-content.ts";
 
-export type SelectionRow = { line: string; start: number; end: number; skip?: boolean; excludeColumn?: number; source?: { id: number; text: string } };
+export type SelectionRow = { line: string; start: number; end: number; skip?: boolean; excludeColumns?: number[]; source?: { id: number; text: string } };
 type Point = { row: number; col: number; boundary?: boolean; scrollView?: unknown };
 type Bounds = { start: Point; end: Point };
 type Rect = { x: number; y: number; width: number; height: number };
@@ -18,6 +18,17 @@ type SelectionTui = {
 	currentLayout?: { root: Box };
 	previousScreen: string[];
 };
+
+/** Remove virtual editor cells, even when wrapping splits them across rows. */
+function selectedText(text: string, start: number, end: number, excluded: number[]): string {
+	let result = "", at = start;
+	for (const col of excluded) {
+		if (col < at || col >= end) continue;
+		result += sliceByColumn(text, at, col - at, true);
+		at = col + 1;
+	}
+	return result + sliceByColumn(text, at, Math.max(0, end - at), true);
+}
 
 function findBox(box: Box, component: unknown): Box | undefined {
 	if (box.component === component) return box;
@@ -52,7 +63,7 @@ export function installPromptSelection(value: unknown, owner: Owner): boolean {
 			const line = this.previousScreen[row] ?? "";
 			const columns = this.getSelectionColumns(line, row, bounds);
 			const source = rows.get(row - box.rect.y + (box.lineOffset ?? 0));
-			let excludeColumn: number | undefined;
+			let excludeColumns: number[] = [];
 			let sourceText: string | undefined;
 			// Check the displayed row too: an overlay may cover the editor without
 			// removing its underlying layout box. Never strip another component.
@@ -61,23 +72,18 @@ export function installPromptSelection(value: unknown, owner: Owner): boolean {
 				if (source.skip) continue;
 				columns.start = Math.max(columns.start, box.rect.x + source.start);
 				columns.end = Math.min(columns.end, box.rect.x + source.end);
-				if (source.excludeColumn !== undefined) excludeColumn = box.rect.x + source.excludeColumn;
+				excludeColumns = (source.excludeColumns ?? []).map(col => box.rect.x + col);
 				if (source.source) {
 					const start = columns.start - box.rect.x - source.start;
 					const end = columns.end - box.rect.x - source.start;
-					const excluded = excludeColumn === undefined ? undefined : excludeColumn - box.rect.x - source.start;
-					sourceText = excluded !== undefined && excluded >= start && excluded < end
-						? sliceByColumn(source.source.text, start, excluded - start, true) + sliceByColumn(source.source.text, excluded + 1, end - excluded - 1, true)
-						: sliceByColumn(source.source.text, start, Math.max(0, end - start), true);
+					sourceText = selectedText(source.source.text, start, end, excludeColumns.map(col => col - box.rect.x - source.start));
 					if (previousSource === source.source.id && result.length) result[result.length - 1] += sourceText;
 					else result.push(sourceText);
 					previousSource = source.source.id;
 					continue;
 				}
 			}
-			const selected = excludeColumn !== undefined && excludeColumn >= columns.start && excludeColumn < columns.end
-				? sliceByColumn(line, columns.start, excludeColumn - columns.start, true) + sliceByColumn(line, excludeColumn + 1, columns.end - excludeColumn - 1, true)
-				: sliceByColumn(line, columns.start, Math.max(0, columns.end - columns.start), true);
+			const selected = selectedText(line, columns.start, columns.end, excludeColumns);
 			result.push(stripTerminalSequences(selected).trimEnd());
 			previousSource = undefined;
 		}

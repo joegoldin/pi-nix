@@ -43,7 +43,7 @@ export function createPromptEditor(Base: EditorBase, promptColour: () => Colour,
 		private topBorder = "";
 		private bottomBorder = "";
 		private selectionRows = new Map<number, SelectionRow>();
-		private selectionSource: { id: number; text: string }[] = [];
+		private selectionSource: { id: number; text: string; excludeColumns: number[] }[] = [];
 		private boxed = false;
 
 		constructor(...args: any[]) {
@@ -90,7 +90,8 @@ export function createPromptEditor(Base: EditorBase, promptColour: () => Colour,
 			// columns match the actual native layout rather than the restored draft.
 			const native = this as unknown as { buildVisualLineMap(width: number): { logicalLine: number; startCol: number; length: number }[] };
 			this.selectionSource = native.buildVisualLineMap(width).map(chunk => ({ id: chunk.logicalLine,
-				text: this.state.lines[chunk.logicalLine]!.slice(chunk.startCol, chunk.startCol + chunk.length) }));
+				text: this.state.lines[chunk.logicalLine]!.slice(chunk.startCol, chunk.startCol + chunk.length),
+				excludeColumns: this.dictationExcludedColumns(chunk.logicalLine, chunk.startCol, chunk.length) }));
 			return super.layoutText(width);
 		}
 
@@ -129,7 +130,7 @@ export function createPromptEditor(Base: EditorBase, promptColour: () => Colour,
 			const visual = this.selectionSource.slice(native.scrollOffset);
 			for (let i = first; i < bottom; i++) {
 				const chunk = visual[i - first];
-				this.selectionRows.set(i, { line: lines[i]!, start: inset, end: width - inset, excludeColumn: this.dictationMeterColumn(i),
+				this.selectionRows.set(i, { line: lines[i]!, start: inset, end: width - inset, excludeColumns: chunk?.excludeColumns.map(col => col + inset),
 					...(chunk ? { source: chunk } : {}) });
 			}
 			return lines;

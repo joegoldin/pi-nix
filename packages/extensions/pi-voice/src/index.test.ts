@@ -1,4 +1,4 @@
-import { describe, expect, it, setDefaultTimeout } from "bun:test";
+import { describe, expect, it, setDefaultTimeout, spyOn } from "bun:test";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -560,4 +560,48 @@ describe("inline editor transport", () => {
 			delete process.env.CLAUDE_CONFIG_DIR;
 		}
 	});
+});
+
+describe("cancellation", () => {
+	it("terminates recorder descendants so a stuck batch child cannot hold the session open", async () => {
+		const dir = tmp();
+		const record = join(dir, "record");
+		const pidFile = join(dir, "child-pid");
+		writeFileSync(record, `#!/bin/sh\nsleep 30 &\necho $! > '${pidFile}'\nprintf '%s\\n' '{"type":"start","t":0,"mode":"live"}'\nwait\n`);
+		chmodSync(record, 0o755);
+		process.env.PI_VOICE_RECORD_BIN = record;
+		process.env.CLAUDE_CONFIG_DIR = dir;
+		const session = new VoiceSession(fakeCtx(dir).ctx);
+		try {
+			session.start();
+			await waitFor(() => expect(existsSync(pidFile)).toBe(true));
+			session.cancel();
+			await waitFor(() => expect(session.active).toBe(false), 300);
+		} finally {
+			if (existsSync(pidFile)) {
+				try { process.kill(Number(readFileSync(pidFile, "utf8")), "SIGKILL"); } catch {}
+			}
+			await session.stop();
+			delete process.env.PI_VOICE_RECORD_BIN;
+			delete process.env.CLAUDE_CONFIG_DIR;
+		}
+	});
+});
+
+
+it("the first level sample moves the meter even when it arrives in the startup clock tick", async () => {
+	process.env.PI_VOICE_RECORD_BIN = fakeRecordBin();
+	process.env.CLAUDE_CONFIG_DIR = tmp();
+	const session = new VoiceSession(fakeCtx(tmp()).ctx);
+	const clock = spyOn(Date, "now").mockReturnValue(1000);
+	try {
+		session.start();
+		session.handleEvent({ type: "level", t: 50, rms: 0.8, db: -12 });
+		expect(session.state.level).toBeGreaterThan(0);
+	} finally {
+		clock.mockRestore();
+		await session.stop();
+		delete process.env.PI_VOICE_RECORD_BIN;
+		delete process.env.CLAUDE_CONFIG_DIR;
+	}
 });

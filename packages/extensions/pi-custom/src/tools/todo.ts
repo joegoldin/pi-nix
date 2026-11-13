@@ -6,7 +6,7 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
-import { Text, type TuiMouseEvent, type TuiMouseEventResult, truncateToWidth } from "@earendil-works/pi-tui";
+import { Text, truncateToWidth } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { reportActivity } from "../program-status.ts";
 import {
@@ -19,6 +19,8 @@ const WIDGET_KEY = "pi-custom:todos";
 const MAX_WIDGET_LINES = 12;
 const COMPLETED_GRACE_MS = 60_000;
 const MAINTENANCE_MESSAGE = "pi-custom:todo-maintenance";
+const REVIEW_TURNS = 6;
+const REVIEW_MS = 120_000;
 
 export interface TodoClock {
 	now(): number;
@@ -36,7 +38,8 @@ const CLOCK: TodoClock = {
 
 const GUIDELINES = [
 	"New tasks require acceptanceCriteria: a bounded, observable completion check. Keep that contract stable; discovery adds a separate task rather than expanding an existing outcome. Use description for changing progress, blockers and next actions. Completion requires evidence naming the check and observed result; populated text is not itself proof. Do not invent criteria or evidence merely to satisfy validation.",
-	"Task bookkeeping is not a new user request. Preserve completed history; do not prune tasks merely to shorten the display. Reconcile statuses while continuing authorized work, never start another run solely for bookkeeping.",
+	"Task bookkeeping is not a new user request. Completed tasks automatically leave the default list and fade from the compact widget; retain their evidence and dependencies as history, accessible with list status=completed or get. Do not delete tasks merely to shorten the display. Reconcile statuses while continuing authorized work, never start another run solely for bookkeeping.",
+	"When a Todo review due checkpoint appears (after 6 model turns or 2 minutes without a full-list review, or on resume/compaction), call todo list without a status filter before further substantive work. Reconcile the whole unfinished list against observed results: complete verified outcomes with evidence, correct stale activity, and record blockers/next actions. Do not delete older tasks just because they are old, resume unrelated work, or treat the reminder as permission to expand scope. A list read acknowledges the checkpoint; it does not itself verify any outcome.",
 	"Use `todo` proactively for substantial multi-step work: multiple deliverables, platforms, implementation stages, or verification gates. Do not wait to be asked. After enough initial inspection to identify the work, populate the list before substantive implementation. Skip single-step edits, quick lookups, and conversation; respect an explicit request not to use todos.",
 	"Each task must describe one independently verifiable outcome, not the whole request. Split implementation, distinct platform/feature acceptance checks, and authorized release work when they can succeed or fail separately. For example, use 'Verify Linux packaging' and 'Verify Mac clipboard' rather than 'Implement everything and verify Linux and Mac'. When an umbrella goal helps organize the work, convert it to a group (kind: group) and attach concrete child tasks with parentId. Otherwise replace it with the milestones; never keep a duplicate whole-goal task active alongside them. Avoid one task per shell command.",
 	"Grouping is optional and limited to one level: top-level groups contain tasks, never other groups or grandchildren. Keep small lists flat. Group progress is derived from live children and groups are excluded from task totals; do not mark a group in_progress/completed yourself. Put any final audit in a child task. Hierarchy does not imply blockedBy dependencies, which must reference tasks, not groups. Set parentId to null to detach a task; move or delete children before deleting a group.",
@@ -65,12 +68,20 @@ export function registerTodo(pi: ExtensionAPI, clock: TodoClock = CLOCK): void {
 	const fading = new Map<number, number>();
 	let cancelCleanup: (() => void) | undefined;
 	const hidden = new Set<number>();
-	let collapsed = false;
+	let view: "minimal" | "preview" | "full" = "minimal";
 	const collapsedGroups = new Set<number>();
-	// A click on the list shows every task in full, wrapped; another puts it back.
-	let wrapped = false;
+	const cycleView = () => { view = view === "minimal" ? "preview" : view === "preview" ? "full" : "minimal"; };
 	let ctxRef: ExtensionContext | undefined;
 	let requestRender: (() => void) | undefined;
+	let turnsSinceReview = 0;
+	let lastReviewAt = clock.now();
+	let restoredReview = false;
+
+	function acknowledgeReview(): void {
+		turnsSinceReview = 0;
+		lastReviewAt = clock.now();
+		restoredReview = false;
+	}
 
 	function cleanCompleted(): void {
 		cancelCleanup?.();
@@ -102,7 +113,10 @@ export function registerTodo(pi: ExtensionAPI, clock: TodoClock = CLOCK): void {
 
 	function load(ctx: ExtensionContext, pause = false): void {
 		state = replay(ctx.sessionManager.getBranch() as never);
+		acknowledgeReview();
+		restoredReview = state.tasks.some((t) => t.kind !== "group" && (t.status === "pending" || t.status === "in_progress"));
 		ctxRef = ctx;
+		view = "minimal";
 		collapsedGroups.clear();
 		if (pause) {
 			fading.clear();
@@ -123,7 +137,7 @@ export function registerTodo(pi: ExtensionAPI, clock: TodoClock = CLOCK): void {
 			title: "Tasks", message: `${completed}/${tasks.length} tasks completed`,
 			...(active ? { progress: Math.floor(completed * 100 / tasks.length) } : {}),
 		} : undefined);
-		const expanded = wrapped || ctx.ui.getToolsExpanded();
+		const expanded = view === "full" || ctx.ui.getToolsExpanded();
 		const anything = state.tasks.some((t) => t.status !== "deleted" && (expanded || !hidden.has(t.id)));
 		if (!anything) {
 			ctx.ui.setWidget(WIDGET_KEY, undefined);
@@ -141,24 +155,22 @@ export function registerTodo(pi: ExtensionAPI, clock: TodoClock = CLOCK): void {
 				let rows: TodoWidgetRow[] = [];
 				return {
 					render: (width: number) => {
-						rows = widgetRows(
-							state, hidden, MAX_WIDGET_LINES, theme as never,
-							wrapped || (ctxRef?.ui.getToolsExpanded() ?? false), wrapped ? width : undefined, collapsedGroups,
-						);
-						if (collapsed) rows = rows.length ? [rows[0], { text: theme.fg("dim", "└─ ctrl+shift+t to expand") }] : [];
-						return [...rows.map((row) => row.text), ""].map((line) => truncateToWidth(line, width, "…"));
-					},
-					handleMouse: (event: TuiMouseEvent): TuiMouseEventResult | undefined => {
-						if (event.type !== "click" || event.button !== "left") return undefined;
-						if (collapsed) collapsed = false;
+						const global = ctxRef?.ui.getToolsExpanded() ?? false;
+						const full = view === "full" || global;
+						if (full) rows = widgetRows(state, hidden, MAX_WIDGET_LINES, theme as never, true, width, global ? undefined : collapsedGroups);
 						else {
-							const groupId = rows[event.y]?.groupId;
-							if (groupId !== undefined) {
-								if (collapsedGroups.has(groupId)) collapsedGroups.delete(groupId);
-								else collapsedGroups.add(groupId);
-							} else wrapped = !wrapped;
+							const all = state.tasks.filter(t => t.kind !== "group" && t.status !== "deleted");
+							const live = all.filter(t => !hidden.has(t.id));
+							const active = live.filter(t => t.status === "in_progress");
+							const ranked = [...live].sort((a, b) => Number(b.status === "in_progress") - Number(a.status === "in_progress") || Number(a.status === "completed") - Number(b.status === "completed"));
+							const chosen = view === "minimal" ? (active.length ? active.slice(0, 2) : ranked.slice(0, 1)) : ranked.slice(0, 5);
+							// Keep dependency evidence outside the displayed subset available.
+							const ids = new Set(chosen.map(t => t.id));
+							const subset = { ...state, tasks: state.tasks.filter(t => t.kind !== "group").map(t => ({ ...t, parentId: undefined })) };
+							rows = widgetRows(subset, new Set(subset.tasks.filter(t => !ids.has(t.id)).map(t => t.id)), MAX_WIDGET_LINES, theme as never);
+							if (rows.length) rows[0].text = theme.fg("dim", `▸ Todos · ${all.filter(t => t.status === "completed").length}/${all.length} · ${view === "minimal" ? "focus" : `${chosen.length} shown`}`);
 						}
-						return { handled: true, render: true };
+						return rows.map(row => truncateToWidth(row.text, width, "…"));
 					},
 					invalidate() {},
 				};
@@ -171,7 +183,7 @@ export function registerTodo(pi: ExtensionAPI, clock: TodoClock = CLOCK): void {
 		name: "todo",
 		label: "Todo",
 		description:
-			"Track substantial multi-step work proactively as separate, verifiable tasks, optionally under one level of groups with derived progress. Actions: create (new task), update (change status/fields/dependencies), list (all tasks, optionally filtered by status), get (single task details), delete (tombstone), clear (reset all). Task status: pending → in_progress → completed, plus deleted tombstone. Starting work pauses conflicting active tasks; session settlement pauses unfinished work. Keep progress, verification evidence, and blockers current; skip trivial single-step work.",
+			"Track substantial multi-step work proactively as separate, verifiable tasks, optionally under one level of groups with derived progress. Actions: create (new task), update (change status/fields/dependencies), list (unfinished tasks by default; use status=completed for history), get (single task details), delete (tombstone), clear (reset all). Task status: pending → in_progress → completed, plus deleted tombstone. Starting work pauses conflicting active tasks; session settlement pauses unfinished work. Keep progress, verification evidence, and blockers current; skip trivial single-step work.",
 		promptSnippet: "Track separate verifiable milestones and keep multi-step progress current",
 		promptGuidelines: GUIDELINES,
 		parameters: Type.Object({
@@ -188,7 +200,7 @@ export function registerTodo(pi: ExtensionAPI, clock: TodoClock = CLOCK): void {
 			status: Type.Optional(
 				StringEnum(["pending", "in_progress", "completed", "deleted"] as const, {
 					description:
-						"Set this task's status (update): one of pending, in_progress, completed, deleted. When action is list, filters returned tasks by this status.",
+						"Set this task's status (update): one of pending, in_progress, completed, deleted. When action is list, filters returned tasks by this status; default lists omit completed tasks.",
 				}),
 			),
 			blockedBy: Type.Optional(Type.Array(Type.Number(), { description: "Initial blockedBy ids (create only)" })),
@@ -210,6 +222,8 @@ export function registerTodo(pi: ExtensionAPI, clock: TodoClock = CLOCK): void {
 		async execute(_id, params) {
 			const outcome = reduce(state, params as TodoParams);
 			state = outcome.state;
+			// Updating one task must not suppress a review of the rest of the backlog.
+			if (!outcome.error && (params.action === "clear" || (params.action === "list" && !params.status))) acknowledgeReview();
 			if (params.action === "clear") {
 				cancelCleanup?.();
 				cancelCleanup = undefined;
@@ -265,7 +279,7 @@ export function registerTodo(pi: ExtensionAPI, clock: TodoClock = CLOCK): void {
 			}
 			if (collapsedGroups.has(id)) collapsedGroups.delete(id);
 			else collapsedGroups.add(id);
-			collapsed = false;
+			view = "full";
 			for (const t of live) if (t.id === id || t.parentId === id) hidden.delete(t.id);
 			cleanCompleted();
 			show(ctx);
@@ -323,11 +337,11 @@ export function registerTodo(pi: ExtensionAPI, clock: TodoClock = CLOCK): void {
 		},
 	});
 
-	pi.registerShortcut("ctrl+shift+t", {
-		description: "Collapse or expand the todo list",
+	pi.registerShortcut("ctrl+alt+t", {
+		description: "Cycle todo focus, preview and full views",
 		handler: async () => {
-			collapsed = !collapsed;
-			requestRender?.();
+			cycleView();
+			show(ctxRef);
 		},
 	});
 
@@ -344,9 +358,14 @@ export function registerTodo(pi: ExtensionAPI, clock: TodoClock = CLOCK): void {
 				description: t.description?.slice(0, 500),
 				blockedBy: (t.blockedBy ?? []).filter((id) => state.tasks.find((dep) => dep.id === id)?.status !== "completed"),
 			}));
+			const reviewDue = restoredReview || turnsSinceReview >= REVIEW_TURNS || clock.now() - lastReviewAt >= REVIEW_MS;
+			// Check elapsed time only at model boundaries; never wake an idle agent.
+			const review = reviewDue
+				? "Todo review due: call todo list without a status filter before further substantive work, then reconcile the whole unfinished list against observed results. Complete only verified outcomes with evidence; correct stale activity and record blockers/next actions. Do not delete older tasks or resume unrelated work. Reading the list acknowledges this checkpoint, not completion. "
+				: "";
 			// Request-local state survives compaction without queued reminders or extra turns.
 			messages.push({ role: "system", timestamp: clock.now(), content:
-				"Task checkpoint (bookkeeping, not a new request): " +
+				"Task checkpoint (bookkeeping, not a new request): " + review +
 				(active.length ? "Reconcile the active outcome against the latest results. " : "No task is in progress. Before substantive work, mark the task you are actually resuming in_progress. ") +
 				"At a verified milestone, complete that task with evidence before starting another; before yielding, record blockers and next actions for unfinished work. " +
 				"Do not infer completion from tool success alone, change acceptance criteria, or create a bookkeeping-only turn. Continue only the authorized work. " +
@@ -355,6 +374,10 @@ export function registerTodo(pi: ExtensionAPI, clock: TodoClock = CLOCK): void {
 			});
 		}
 		if (messages.length !== event.messages.length || messages.some((message, i) => message !== event.messages[i])) return { messages };
+	});
+
+	pi.on("turn_end", () => {
+		turnsSinceReview++;
 	});
 
 	pi.on("before_agent_start", (event) => {

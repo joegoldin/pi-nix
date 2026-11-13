@@ -18,4 +18,8 @@ assert(keys.matches("\x10", "app.session.togglePath"), "Session picker retains C
 const reserved = { ...bindings, "app.model.select": "ctrl+p" };
 assert(!runner.getShortcuts(reserved).has("ctrl+p"), "A real editor-global conflict must still block the extension");
 assert(runner.getShortcutDiagnostics().length > 0);
-console.log("Picker-only Ctrl+P coexistence and editor-global conflict protection passed");
+const todoShortcut = { description: "Cycle todo views", extensionPath: "pi-custom", handler() {} };
+runner.extensions = [{ shortcuts: new Map([["ctrl+alt+t", todoShortcut]]) }];
+assert.equal(runner.getShortcuts(bindings).get("ctrl+alt+t"), todoShortcut);
+assert.deepEqual(runner.getShortcutDiagnostics(), [], "Todo Ctrl+Alt+T must not conflict with Pi defaults");
+console.log("Picker-only Ctrl+P coexistence, todo Ctrl+Alt+T, and editor-global conflict protection passed");

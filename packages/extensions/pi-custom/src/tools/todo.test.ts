@@ -7,6 +7,7 @@ const { buildSystemPrompt } = await import(new URL("./core/system-prompt.js", im
 function harness(active = true, clock?: TodoClock) {
 	const handlers = new Map<string, Function>();
 	const commands = new Map<string, any>();
+	const shortcuts = new Map<string, any>();
 	const entries: any[] = [];
 	const messages: { message: any; options: any }[] = [];
 	const userMessages: {message: string; options: any}[] = [];
@@ -14,7 +15,7 @@ function harness(active = true, clock?: TodoClock) {
 	registerTodo({
 		on: (name: string, handler: Function) => handlers.set(name, handler),
 		registerTool: (definition: unknown) => { tool = definition; },
-		registerCommand: (name: string, command: unknown) => commands.set(name, command), registerShortcut() {},
+		registerCommand: (name: string, command: unknown) => commands.set(name, command), registerShortcut: (key: string, shortcut: unknown) => shortcuts.set(key, shortcut),
 		sendUserMessage: (message: string, options: any) => userMessages.push({ message, options }),
 		sendMessage: (message: unknown, options: unknown) => messages.push({ message, options }),
 		appendEntry: (customType: string, data: unknown) => entries.push({ type: "custom", customType, data }),
@@ -25,7 +26,7 @@ function harness(active = true, clock?: TodoClock) {
 		toolSnippets: { todo: tool.promptSnippet }, toolGuidelines: { todo: tool.promptGuidelines },
 	});
 	const apply = (systemPrompt: string) => handlers.get("before_agent_start")?.({ systemPrompt })?.systemPrompt ?? systemPrompt;
-	return { tool, base, apply, handlers, commands, entries, messages, userMessages };
+	return { tool, base, apply, handlers, commands, shortcuts, entries, messages, userMessages };
 }
 
 test("custom system prompts retain proactive milestone-level task guidance", () => {
@@ -91,23 +92,28 @@ test("group prompts and schemas describe one level, derived progress and stale-w
 	expect(prompt).not.toContain("Replace an umbrella task with its concrete milestones");
 });
 
-test("group headers toggle independently by click and by command, including wrapped rows", async () => {
+test("todo clicks leave focus, preview, full and group scoping unchanged", async () => {
 	const h = uiHarness();
-	await h.act({ action: "create", acceptanceCriteria: "The named outcome is verified", subject: "Mac acceptance with a long heading", kind: "group" });
-	await h.act({ action: "create", acceptanceCriteria: "The named outcome is verified", subject: "Clipboard", parentId: 1 });
+	await h.act({ action: "create", subject: "Group", kind: "group" });
+	await h.act({ action: "create", acceptanceCriteria: "Verified", subject: "Child", parentId: 1 });
+	await h.act({ action: "create", acceptanceCriteria: "Verified", subject: "Other" });
 	const widget = h.widget();
-	expect(widget.render(80).join("\n")).toContain("Clipboard");
-	widget.handleMouse({ type: "click", button: "left", y: 1 });
-	expect(widget.render(80).join("\n")).not.toContain("Clipboard");
+	for (let view = 0; view < 3; view++) {
+		for (const width of [22, 80]) {
+			const before = widget.render(width);
+			for (let y = 0; y < before.length; y++) {
+				widget.handleMouse?.({ type: "click", button: "left", y });
+				expect(widget.render(width)).toEqual(before);
+			}
+		}
+		await h.shortcuts.get("ctrl+alt+t").handler();
+	}
 	await h.commands.get("todos").handler("1", h.ctx);
-	expect(widget.render(80).join("\n")).toContain("Clipboard");
+	expect(widget.render(80).join("\n")).not.toContain("Child");
+	await h.commands.get("todos").handler("1", h.ctx);
+	expect(widget.render(80).join("\n")).toContain("Child");
 	await h.commands.get("todos").handler("", h.ctx);
-	expect(h.notices.at(-1)).toContain("0/1");
-	// Clicking a child enables wrapping; a wrapped group continuation is still its header.
-	widget.handleMouse({ type: "click", button: "left", y: 2 });
-	widget.render(22);
-	widget.handleMouse({ type: "click", button: "left", y: 2 });
-	expect(widget.render(80).join("\n")).not.toContain("Clipboard");
+	expect(h.notices.at(-1)).toContain("0/2");
 });
 
 test("settling pauses unfinished work durably without claiming completion", async () => {
@@ -160,11 +166,12 @@ function fakeTodoClock() {
 	return { clock, jobs, advance(ms: number) { now += ms; for (const [fn, at] of [...jobs]) if (at <= now) { jobs.delete(fn); fn(); } } };
 }
 
-test("completed rows expire during a long run, but the records and counts survive", async () => {
+test("completed rows expire during a long run without changing overall progress", async () => {
 	const timer = fakeTodoClock(); const h = uiHarness(timer.clock);
 	await h.act({ action: "create", acceptanceCriteria: "The named outcome is verified", subject: "Finished work" });
 	await h.act({ action: "create", acceptanceCriteria: "The named outcome is verified", subject: "Next work" });
 	await h.act({ action: "update", id: 1, evidence: "Verified the named outcome", status: "completed" });
+	await h.shortcuts.get("ctrl+alt+t").handler();
 	expect(h.widget().render(80).join("\n")).toContain("Finished work");
 	timer.advance(30_000);
 	await h.act({ action: "list" });
@@ -176,7 +183,8 @@ test("completed rows expire during a long run, but the records and counts surviv
 	expect(text).toContain("1/2");
 	expect((await h.act({ action: "get", id: 1 })).details.tasks[0].status).toBe("completed");
 	expect(h.widget().render(80).join("\n")).not.toContain("Finished work");
-	h.widget().handleMouse({ type: "click", button: "left", y: 0 });
+	await h.shortcuts.get("ctrl+alt+t").handler();
+	await h.shortcuts.get("ctrl+alt+t").handler();
 	expect(h.widget().render(80).join("\n")).toContain("Finished work");
 });
 
@@ -194,6 +202,20 @@ test("all-complete and restored lists clean up without a new run; shutdown cance
 	expect(h.widget()).toBeUndefined();
 	h.emit("session_tree"); h.emit("session_shutdown");
 	expect(timer.jobs.size).toBe(0);
+});
+
+test("Ctrl+Alt+T restores archived completed history after the widget disappears", async () => {
+	const timer = fakeTodoClock();
+	const h = uiHarness(timer.clock);
+	await h.act({ action: "create", subject: "Done", acceptanceCriteria: "Verified" });
+	await h.act({ action: "update", id: 1, status: "completed", evidence: "Passed" });
+	timer.advance(60_001);
+	expect(h.widget()).toBeUndefined();
+	await h.shortcuts.get("ctrl+alt+t").handler();
+	await h.shortcuts.get("ctrl+alt+t").handler();
+	expect(h.widget()?.render(80).join("\n")).toContain("Done");
+	await h.shortcuts.get("ctrl+alt+t").handler();
+	expect(h.widget()).toBeUndefined();
 });
 
 test("old deadlines do not hide reused task IDs after clearing", async () => {
@@ -312,4 +334,150 @@ test("disabled todo tools do not inject checkpoints for restored tasks", async (
 	await h.tool.execute("call", { action: "create", subject: "Task", acceptanceCriteria: "Check passes" });
 	const messages = [{ role: "user", content: "Continue", timestamp: 1 }];
 	expect(h.handlers.get("context_with_system")?.({ messages })?.messages ?? messages).toEqual(messages);
+});
+
+function checkpoint(h: ReturnType<typeof uiHarness>): string {
+	return h.emit("context_with_system", { messages: [] })?.messages.at(-1)?.content ?? "";
+}
+
+test("six model turns require a full-list review, not just another task update", async () => {
+	const timer = fakeTodoClock(); const h = uiHarness(timer.clock);
+	await h.act({ action: "create", subject: "Work", acceptanceCriteria: "Tests pass" });
+	await h.act({ action: "list" });
+	for (let i = 0; i < 5; i++) h.emit("turn_end");
+	expect(checkpoint(h)).not.toContain("Todo review due");
+	h.emit("turn_end");
+	expect(checkpoint(h)).toContain("Todo review due");
+	await h.act({ action: "update", id: 1, description: "Still working" });
+	await h.act({ action: "get", id: 1 });
+	await h.act({ action: "list", status: "in_progress" });
+	expect(checkpoint(h)).toContain("Todo review due");
+	await h.act({ action: "list" });
+	expect(checkpoint(h)).not.toContain("Todo review due");
+});
+
+test("two minutes require review at the next request without timers or idle wakeups", async () => {
+	const timer = fakeTodoClock(); const h = uiHarness(timer.clock);
+	await h.act({ action: "create", subject: "Work", acceptanceCriteria: "Tests pass" });
+	await h.act({ action: "list" });
+	timer.advance(119_999);
+	expect(checkpoint(h)).not.toContain("Todo review due");
+	timer.advance(1);
+	expect(checkpoint(h)).toContain("Todo review due");
+	expect(timer.jobs.size).toBe(0);
+	expect(h.messages).toHaveLength(0);
+	expect(h.userMessages).toHaveLength(0);
+	await h.act({ action: "list" });
+	expect(checkpoint(h)).not.toContain("Todo review due");
+});
+
+for (const event of ["session_start", "session_compact", "session_tree"]) test(`${event} requires fresh reconciliation of restored tasks`, async () => {
+	const h = uiHarness(fakeTodoClock().clock);
+	await h.act({ action: "create", subject: "Work", acceptanceCriteria: "Tests pass" });
+	await h.act({ action: "list" });
+	h.emit(event);
+	expect(checkpoint(h)).toContain("Todo review due");
+	expect(checkpoint(h)).toContain("todo list");
+	expect(checkpoint(h)).toContain("Do not delete");
+	await h.act({ action: "list" });
+	expect(checkpoint(h)).not.toContain("Todo review due");
+});
+
+test("clearing a batch resets cadence and completed-only batches do not demand review", async () => {
+	const timer = fakeTodoClock(); const h = uiHarness(timer.clock);
+	await h.act({ action: "create", subject: "Old", acceptanceCriteria: "Tests pass" });
+	timer.advance(120_000);
+	expect(checkpoint(h)).toContain("Todo review due");
+	await h.act({ action: "clear" });
+	await h.act({ action: "create", subject: "New", acceptanceCriteria: "Tests pass" });
+	expect(checkpoint(h)).not.toContain("Todo review due");
+	await h.act({ action: "update", id: 1, status: "completed", evidence: "Tests passed" });
+	timer.advance(120_000);
+	expect(checkpoint(h)).toBe("");
+});
+
+test("working lists stay bounded across completions and restoration while history survives", async () => {
+	const h = uiHarness(fakeTodoClock().clock);
+	for (let i = 0; i < 20; i++) {
+		await h.act({ action: "create", subject: `Finished ${i}`, acceptanceCriteria: "Check passes" });
+		await h.act({ action: "update", id: i + 1, status: "completed", evidence: "Check passed" });
+	}
+	await h.act({ action: "create", subject: "Remaining", acceptanceCriteria: "Acceptance passes", blockedBy: [20] });
+	h.emit("session_tree");
+	expect((await h.act({ action: "list" })).content[0].text).toBe("[pending] #21 Remaining ⛓ #20");
+	expect((await h.act({ action: "list", status: "completed" })).content[0].text.split("\n")).toHaveLength(20);
+	expect((await h.act({ action: "get", id: 20 })).content[0].text).toContain("evidence: Check passed");
+	expect(h.tool.description).toContain("unfinished tasks by default");
+	expect(h.apply(h.base("Custom instructions"))).toContain("automatically leave the default list");
+});
+
+
+test("Ctrl+Alt+T cycles minimal, five-task preview, full, then minimal", async () => {
+ const h = uiHarness();
+ for (let i = 1; i <= 8; i++) await h.act({ action: "create", subject: `Work ${i}`, acceptanceCriteria: "Verified" });
+ await h.act({ action: "update", id: 6, status: "in_progress" });
+ const widget = h.widget();
+ const text = () => widget.render(100).join("\n");
+ expect(text()).toContain("Work 6");
+ expect(text()).not.toContain("Work 1");
+ expect(widget.render(100).length).toBeLessThanOrEqual(3);
+ await h.shortcuts.get("ctrl+alt+t").handler();
+ expect(text().match(/Work \d/g)).toHaveLength(5);
+ await h.shortcuts.get("ctrl+alt+t").handler();
+ expect(text().match(/Work \d/g)).toHaveLength(8);
+ await h.shortcuts.get("ctrl+alt+t").handler();
+ expect(text().match(/Work \d/g)).toHaveLength(1);
+});
+
+
+test("focus view retains completed dependency evidence outside the visible tasks", async () => {
+ const h = uiHarness();
+ await h.act({ action: "create", subject: "Prerequisite", acceptanceCriteria: "Verified" });
+ await h.act({ action: "create", subject: "Dependent", acceptanceCriteria: "Verified", blockedBy: [1] });
+ await h.act({ action: "update", id: 1, status: "completed", evidence: "Passed" });
+ await h.act({ action: "update", id: 2, status: "in_progress" });
+ const text = h.widget().render(100).join("\n");
+ expect(text).toContain("Dependent");
+ expect(text).not.toContain("Prerequisite");
+ expect(text).not.toContain("⛓");
+});
+
+test("Ctrl+O expands locally collapsed todo groups and restores the local view afterward", async () => {
+	const h = uiHarness();
+	let full = false;
+	h.ctx.ui.getToolsExpanded = () => full;
+	await h.act({ action: "create", subject: "Group", kind: "group" });
+	await h.act({ action: "create", subject: "Child task", parentId: 1, acceptanceCriteria: "Verified child outcome" });
+	await h.commands.get("todos").handler("1", h.ctx);
+	expect(h.widget().render(100).join("\n")).not.toContain("Child task");
+	full = true;
+	expect(h.widget().render(100).join("\n")).toContain("Child task");
+	full = false;
+	expect(h.widget().render(100).join("\n")).not.toContain("Child task");
+});
+
+test("overall todo counts stay 5/14 across focus, preview, full and Ctrl+O after completed rows fade", async () => {
+	let overall = "";
+	const timer = fakeTodoClock();
+	const h = uiHarness(timer.clock);
+	Object.assign(h.ctx.ui, { setProgramStatus: (_key: string, status?: { message?: string }) => { overall = status?.message ?? ""; } });
+	let expanded = false;
+	h.ctx.ui.getToolsExpanded = () => expanded;
+	for (let i = 1; i <= 14; i++) await h.act({ action: "create", subject: `Work ${i}`, acceptanceCriteria: "Verified" });
+	await h.act({ action: "create", subject: "Heading", kind: "group" });
+	await h.act({ action: "create", subject: "Discarded", acceptanceCriteria: "Verified" });
+	await h.act({ action: "delete", id: 16 });
+	for (let i = 1; i <= 5; i++) await h.act({ action: "update", id: i, status: "completed", evidence: "Passed" });
+	timer.advance(60_001);
+	const widget = h.widget();
+	for (let view = 0; view < 3; view++) {
+		for (const width of [40, 100]) expect(widget.render(width)[0]).toContain("5/14");
+		await h.shortcuts.get("ctrl+alt+t").handler();
+	}
+	expanded = true;
+	expect(widget.render(100)[0]).toContain("5/14");
+	expanded = false;
+	expect(widget.render(100)[0]).toContain("5/14");
+	await h.act({ action: "list" });
+	expect(overall).toBe("5/14 tasks completed");
 });

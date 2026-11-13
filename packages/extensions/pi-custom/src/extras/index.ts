@@ -28,6 +28,7 @@ import { legacyStashPath, type StashIO, StashStore, stashPath } from "./stash.ts
 import { type HintStage, renderHint } from "./hint.ts";
 import { renderShortcuts } from "./shortcuts.ts";
 import { registerSteeringGuard } from "./steer.ts";
+import { registerUsage } from "./usage.ts";
 import { TitleSpinner, baseTitle } from "./title.ts";
 
 /** The slice of pi's ExtensionContext this extension touches. Every member the
@@ -549,6 +550,7 @@ function fileIO(path: string, legacy: string): StashIO {
 
 export default function (pi: ExtrasHost) {
 	registerSteeringGuard(pi as never);
+	registerUsage(pi as never);
 	const env = process.env as Record<string, string | undefined>;
 	registerHandlers(pi, {
 		env,

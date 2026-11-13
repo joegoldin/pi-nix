@@ -3,6 +3,7 @@ import { Type } from "typebox";
 import { approvalLabel, type Denial, PermissionLedger } from "./denials.ts";
 import { askBeforeBlock } from "./ui/block-prompt.ts";
 import { canonicalJson } from "./ui/call-label.ts";
+import type { RemotePermissionReview } from "./remote-review.ts";
 
 export function denialGuidance(denial: Denial): string {
 	const reference = ` Denial reference: ${denial.id}.`;
@@ -10,7 +11,7 @@ export function denialGuidance(denial: Denial): string {
 	return `${reference} ${denial.review?.response === "timeout" ? "The automatic approval popup timed out. " : ""}Do not routinely ask again after a denial. Independent work can continue. If Goal mode is active, use goal_wait(waiting_for="user") only if this approval actually blocks the goal and no independent work remains. The user can review /permissions.${denial.review?.eligible ? " ask_for_approval can explicitly review this denial when a separate request is genuinely necessary; it is not the default next step." : " Linked approval cannot override hard restrictions."}`;
 }
 
-export function registerApprovalRequest(pi: ExtensionAPI, ledger: PermissionLedger, persist: () => void, ask = askBeforeBlock): void {
+export function registerApprovalRequest(pi: ExtensionAPI, ledger: PermissionLedger, persist: () => void, ask = askBeforeBlock, remote?: Pick<RemotePermissionReview, "available" | "ask" | "scopeId">): void {
 	pi.registerTool({
 		name: "ask_for_approval",
 		label: "Review denied action",
@@ -26,8 +27,9 @@ export function registerApprovalRequest(pi: ExtensionAPI, ledger: PermissionLedg
 				return { content: [{ type: "text" as const, text }], details: { denialId, status } };
 			};
 			const denial = ledger.open().find((d) => d.id === denialId);
-			const eligible = () => denial && denial.state === "open" && denial.review?.eligible === true && denial.review.response !== "denied" && !denial.owner && !denial.incomplete && !denial.policyDenied && denial.cwd === ctx.cwd && denial.sessionId === ctx.sessionManager.getSessionId();
-			if (!ctx.hasUI || ctx.mode !== "tui" || signal?.aborted || !eligible() || !denial || denial.reviewRequested)
+			const remoteScopeId = ctx.mode === "rpc" ? remote?.scopeId(ctx) : undefined;
+			const eligible = () => denial && denial.state === "open" && denial.review?.eligible === true && denial.review.response !== "denied" && !denial.owner && !denial.incomplete && !denial.policyDenied && denial.cwd === ctx.cwd && denial.sessionId === ctx.sessionManager.getSessionId() && (ctx.mode !== "rpc" || (remoteScopeId !== undefined && denial.review.remoteScopeId === remoteScopeId));
+			if (!ctx.hasUI || (ctx.mode !== "tui" && (ctx.mode !== "rpc" || !remote?.available(ctx))) || signal?.aborted || !eligible() || !denial || denial.reviewRequested)
 				return result("unavailable", "No new approval question was opened. This denial is unavailable, already reviewed, explicitly rejected, or not eligible for linked approval. The action remains blocked; do not repeatedly ask. You can review /permissions directly.");
 			const scope = approvalLabel(denial.toolName, denial.input, ctx.cwd, denial.directories);
 			if (!scope) return result("unavailable", "This denial has no supported bounded approval scope. No approval was granted.");
@@ -41,7 +43,9 @@ export function registerApprovalRequest(pi: ExtensionAPI, ledger: PermissionLedg
 			publish("permissions:ui_prompt", { requestId, toolName: denial.toolName, surface: denial.toolName });
 			let answer;
 			try {
-				answer = await ask({ ...ctx, signal }, { title: `Review denial ${denial.id}`, toolName: denial.toolName, input: denial.input, reason: denial.reason, scope, scopeOnly: true, timeoutSeconds: 30 });
+				const reviewContext = { ...ctx, signal: signal && ctx.signal ? AbortSignal.any([signal, ctx.signal]) : signal ?? ctx.signal };
+				const question = { title: `Review denial ${denial.id}`, toolName: denial.toolName, input: denial.input, reason: denial.reason, scope, scopeOnly: true, timeoutSeconds: 30 };
+				answer = ctx.mode === "rpc" ? await remote?.ask(reviewContext, question) : await ask(reviewContext, question);
 			} catch {
 				return result("blocked", "The approval UI could not finish. No approval was granted; the action remains blocked.");
 			}

@@ -261,7 +261,7 @@ function reduceAction(state: TodoState, p: TodoParams): Outcome {
 		case "list": {
 			const shown = state.tasks
 				.filter((t) => p.includeDeleted === true || t.status !== "deleted")
-				.filter((t) => !p.status || t.status === p.status);
+				.filter((t) => p.status ? t.status === p.status : t.status !== "completed");
 			if (shown.length === 0) return { state, text: "No tasks" };
 			return {
 				state,
@@ -377,6 +377,7 @@ export function widgetRows(
 	}
 	const visible = blocks.flat();
 	if (!visible.length) return [];
+	// Completion fading changes the visible rows, not overall progress.
 	const leaves = live.filter((t) => t.kind !== "group");
 	const done = leaves.filter((t) => t.status === "completed").length;
 	const open = visible.some(({ task }) => task.status !== "completed");

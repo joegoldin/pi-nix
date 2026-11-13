@@ -1,9 +1,12 @@
 import { CURSOR_MARKER, isKeyRelease, matchesKey, renderFakeCursor, visibleWidth, type TuiMouseEvent, type TuiMouseEventResult } from "@earendil-works/pi-tui";
 import type { PasteEditorBase } from "./repeat-paste.ts";
 
+const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+const ANIMATION_MS = 80;
+
 type LayoutLine = { text: string; hasCursor: boolean; cursorPos?: number };
-export type DictationColour = (slot: "text" | "dim" | "success" | "warning" | "error", text: string) => string;
-export interface DictationUpdate { committed: string; partial: string; level: number }
+export type DictationColour = (slot: "text" | "dim" | "success" | "warning" | "error" | "provisional" | "shimmer", text: string) => string;
+export interface DictationUpdate { committed: string; partial: string; level: number; processing?: boolean }
 export interface DictationHandle {
 	update(value: DictationUpdate): void;
 	finish(text?: string): void;
@@ -11,19 +14,20 @@ export interface DictationHandle {
 export interface DictationRequest {
 	accept(handle: DictationHandle): void;
 	onInterrupt(): void;
+	onCancel?(): void;
 }
 
 /** The event bus keeps voice optional and avoids replacing another extension's editor. */
 export function registerDictationBridge(
 	events: { on(channel: string, handler: (data: unknown) => void): () => void },
-	editor: () => { beginDictation(onInterrupt: () => void): DictationHandle } | undefined,
+	editor: () => { beginDictation(onInterrupt: () => void, onCancel?: () => void): DictationHandle } | undefined,
 ): void {
 	events.on("pi-voice:begin", data => {
 		if (!data || typeof data !== "object") return;
 		const request = data as Partial<DictationRequest>;
 		if (typeof request.accept !== "function" || typeof request.onInterrupt !== "function") return;
 		const target = editor();
-		if (target) request.accept(target.beginDictation(request.onInterrupt));
+		if (target) request.accept(target.beginDictation(request.onInterrupt, request.onCancel));
 	});
 }
 
@@ -43,34 +47,47 @@ export function createDictationEditor(Base: DictationBase, colour: DictationColo
 	return class DictationEditor extends Base {
 		private dictation?: DictationUpdate & {
 			prefix: string; suffix: string; lastText: string; line: number; col: number;
-			undoSaved: boolean; onInterrupt(): void;
+			undoSaved: boolean; onInterrupt(): void; onCancel?(): void;
 		};
 		private drawingDictation = false;
 		private meterColumns = new Map<number, number>();
 		private redraw: () => void;
+		private animation?: ReturnType<typeof setInterval>;
+		private phase = 0;
 
 		dictationMeterColumn(row: number): number | undefined { return this.meterColumns.get(row); }
+
+		dictationExcludedColumns(line: number, start: number, length: number): number[] {
+			if (!this.drawingDictation || line !== this.state.cursorLine) return [];
+			const text = this.state.lines[line]!;
+			return [this.state.cursorCol - 1, this.state.cursorCol]
+				.filter(col => col >= start && col < start + length)
+				.map(col => visibleWidth(text.slice(start, col)));
+		}
 
 		constructor(...args: any[]) {
 			super(...args);
 			this.redraw = () => args[0].requestRender();
 		}
 
-		beginDictation(onInterrupt: () => void): DictationHandle {
+		beginDictation(onInterrupt: () => void, onCancel?: () => void): DictationHandle {
 			this.interruptDictation();
 			this.cancelAutocomplete();
 			this.exitHistoryBrowsing();
 			const { line, col } = this.getCursor();
 			const text = this.getText();
 			const at = this.state.lines.slice(0, line).reduce((n, row) => n + row.length + 1, 0) + col;
-			const state = { committed: "", partial: "", level: 0, prefix: text.slice(0, at), suffix: text.slice(at), lastText: text, line, col, undoSaved: false, onInterrupt };
+			const state = { committed: "", partial: "", level: 0, prefix: text.slice(0, at), suffix: text.slice(at), lastText: text, line, col, undoSaved: false, onInterrupt, onCancel, processing: false };
 			this.dictation = state;
+			this.phase = 0;
 			this.redraw();
 			const update = (value: DictationUpdate) => {
 				if (this.dictation !== state) return;
 				if (!this.ownsInsertion()) { this.interruptDictation(); return; }
 				state.committed = clean(value.committed);
 				state.partial = clean(value.partial);
+				state.processing ||= value.processing ?? false;
+				if (state.processing) this.startAnimation();
 				state.level = Number.isFinite(value.level) ? Math.max(0, Math.min(1, value.level)) : 0;
 				const speech = [state.committed, state.partial].filter(Boolean).join(" ");
 				const beforeCursor = state.prefix + speech;
@@ -92,7 +109,7 @@ export function createDictationEditor(Base: DictationBase, colour: DictationColo
 				finish: (text) => {
 					if (this.dictation !== state) return;
 					if (text !== undefined) update({ committed: text, partial: "", level: state.level });
-					if (this.dictation === state) this.dictation = undefined;
+					if (this.dictation === state) { this.dictation = undefined; this.stopAnimation(); }
 					this.redraw();
 				},
 			};
@@ -104,10 +121,22 @@ export function createDictationEditor(Base: DictationBase, colour: DictationColo
 			return !!state && state.lastText === this.getText() && state.line === cursor.line && state.col === cursor.col;
 		}
 
+		private startAnimation(): void {
+			if (this.animation) return;
+			this.animation = setInterval(() => { this.phase++; this.redraw(); }, ANIMATION_MS);
+			this.animation.unref?.();
+		}
+
+		private stopAnimation(): void {
+			if (this.animation) clearInterval(this.animation);
+			this.animation = undefined;
+		}
+
 		interruptDictation(): void {
 			const state = this.dictation;
 			this.dictation = undefined;
-			if (state) { state.onInterrupt(); this.redraw(); }
+			this.stopAnimation();
+			if (state) { (state.onCancel ?? state.onInterrupt)(); this.redraw(); }
 		}
 
 		override setText(text: string): void {
@@ -115,40 +144,39 @@ export function createDictationEditor(Base: DictationBase, colour: DictationColo
 			super.setText(text);
 		}
 
+		private stopDictation(): void {
+			const state = this.dictation;
+			if (!state || state.processing) return;
+			state.processing = true;
+			this.startAnimation();
+			state.onInterrupt();
+			this.redraw();
+		}
+
 		override handleInput(data: string): void {
 			if (this.dictation) {
 				if (isKeyRelease(data) || data === "\x1b[I" || data === "\x1b[O" || data === "") return;
-				this.interruptDictation();
-				// Ending a recording must not also submit or queue its unfinished text.
-				if (data === "\n" || (["enter", "shift+enter", "alt+enter", "ctrl+enter"] as const).some(key => matchesKey(data, key))) return;
+				if (matchesKey(data, "ctrl+c")) this.interruptDictation();
+				else this.stopDictation();
+				// Keep ownership until the batch result arrives; no edit or submit
+				// may race the replacement. Ctrl+C alone abandons that replacement.
+				return;
 			}
 			super.handleInput(data);
 		}
 
 		override handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
 			if (!this.dictation || event.type !== "click" || event.button !== "left") return super.handleMouse(event);
-			const before = this.getCursor();
-			let after = before;
-			const result = this.withMeterCell(() => {
-				const result = super.handleMouse(event);
-				after = this.getCursor();
-				return result;
-			});
-			if (after.line === before.line && after.col > before.col) after.col--;
-			if (after.line !== before.line || after.col !== before.col) {
-				this.state.cursorLine = after.line;
-				this.setCursorCol(after.col);
-				this.interruptDictation();
-			}
-			return result;
+			this.stopDictation();
+			return { handled: true };
 		}
 
 		private withMeterCell<T>(run: () => T): T {
 			const saved = this.state;
 			const lines = [...saved.lines];
 			const line = lines[saved.cursorLine]!;
-			lines[saved.cursorLine] = line.slice(0, saved.cursorCol) + " " + line.slice(saved.cursorCol);
-			this.state = { ...saved, lines };
+			lines[saved.cursorLine] = line.slice(0, saved.cursorCol) + "  " + line.slice(saved.cursorCol);
+			this.state = { ...saved, lines, cursorCol: saved.cursorCol + 1 };
 			try { return run(); } finally { this.state = saved; }
 		}
 
@@ -157,20 +185,22 @@ export function createDictationEditor(Base: DictationBase, colour: DictationColo
 			const state = this.dictation;
 			if (!this.drawingDictation || !state) return rows;
 			const start = state.prefix.length;
-			const partial = start + state.committed.length + (state.committed && state.partial ? 1 : 0);
-			const ranges = [
-				{ start, end: start + state.committed.length, slot: "text" as const },
-				{ start: partial, end: partial + state.partial.length, slot: "dim" as const },
-			];
+			const end = start + state.committed.length + state.partial.length + (state.committed && state.partial ? 1 : 0);
 			const paint = (text: string, offset: number) => {
-				let result = "", cursor = 0;
-				for (const range of ranges) {
-					const from = Math.max(0, range.start - offset), to = Math.min(text.length, range.end - offset);
-					if (to <= from) continue;
-					result += text.slice(cursor, from) + colour(range.slot, text.slice(from, to));
-					cursor = to;
+				let result = "", run = "", previous: "provisional" | "shimmer" | undefined;
+				// Colour whole graphemes, never split emoji or combining sequences.
+				for (const { segment, index } of graphemes.segment(text)) {
+					const at = offset + index;
+					const slot = at < start || at >= end ? undefined
+						: state.processing && ((at - start - this.phase) % 28 + 28) % 28 < 5 ? "shimmer" : "provisional";
+					if (slot !== previous) {
+						result += previous ? colour(previous, run) : run;
+						run = "";
+						previous = slot;
+					}
+					run += segment;
 				}
-				return result + text.slice(cursor);
+				return result + (previous ? colour(previous, run) : run);
 			};
 			const text = this.getText();
 			let offset = 0;
@@ -193,12 +223,12 @@ export function createDictationEditor(Base: DictationBase, colour: DictationColo
 			if (!state) return super.render(width);
 			const bar = "▁▂▃▄▅▆▇█"[Math.max(0, Math.ceil(state.level * 8) - 1)]!;
 			const slot = state.level >= 0.85 ? "error" : state.level >= 0.6 ? "warning" : "success";
-			const meter = colour(slot, bar);
+			const meter = state.processing ? colour("shimmer", "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"[this.phase % 10]!) : colour(slot, bar);
 			const padding = Math.min(super.getPaddingX(), Math.max(0, Math.floor((width - 1) / 2)));
 			// Native word-wrap cannot split a wide grapheme into a single cell.
 			// At such tiny widths keep only the meter, without touching the draft.
 			if (width - padding * 2 - (padding ? 0 : 1) < 2) return width > 0 ? [meter] : [];
-			// Give the meter its own cell, including when dictating into the middle
+			// Give the gap and meter their own cells, including in the middle
 			// of a draft. Native wrapping/scrolling still owns all layout decisions.
 			this.drawingDictation = true;
 			try {

@@ -321,7 +321,9 @@ export default function piUi(pi: ExtensionAPI): void {
 			CustomEditor as unknown as EditorBase,
 			() => ctx.ui.theme.getThinkingBorderColor(pi.getThinkingLevel()),
 			config.promptIcon,
-			(slot, text) => ctx.ui.theme.fg(slot, text),
+			(slot, text) => slot === "provisional" ? `\x1b[38;2;190;164;126m${text}\x1b[39m`
+				: slot === "shimmer" ? `\x1b[38;2;242;218;176m${text}\x1b[39m`
+				: ctx.ui.theme.fg(slot, text),
 		);
 		editor?.interruptDictation();
 		ctx.ui.setEditorComponent((tui, theme, keybindings) => (editor = new Editor(tui, theme, keybindings)) as never);

@@ -1,4 +1,5 @@
 import { PendingAuthority } from "./engine/authority/pending-authority.ts";
+import { RemotePermissionReview } from "./remote-review.ts";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { coversDirectoryRequest, requestedDirectories } from "./directory-access.ts";
 import { asForwardedToolCall } from "./engine/authority/forwarded-tool-call.ts";
@@ -122,6 +123,10 @@ export default function piPermissions(pi: ExtensionAPI, autoOverrides: Pick<PiAu
 	});
 
 	const ledger = new PermissionLedger();
+	const remoteReview = new RemotePermissionReview(pi.events);
+	pi.on("session_start", (_event, ctx) => remoteReview.begin(ctx));
+	pi.on("session_tree", (_event, ctx) => remoteReview.begin(ctx));
+	pi.on("session_shutdown", () => remoteReview.close());
 	const persist = () => pi.appendEntry(LEDGER_ENTRY, ledger.snapshot());
 	const forwarded = createForwardedGate(ledger, persist);
 	const requestDetails = new AsyncLocalStorage<Record<string, unknown>>();
@@ -167,7 +172,8 @@ export default function piPermissions(pi: ExtensionAPI, autoOverrides: Pick<PiAu
 			if (event.toolName && ledger.wasRejected(event.toolName, event.input, ctx.cwd, forwarded.owner()))
 				return { block: true, reason: "The user declined this action. No repeated approval question was opened. Wait for a new instruction or an explicit approval in /permissions; independent work can continue." };
 			if (event.toolName && ledger.isGranted(event.toolName, event.input)) return undefined;
-			const review: ApprovalReview = { eligible: false, response: "unasked" };
+			const remoteScopeId = remoteReview.scopeId(ctx);
+			const review: ApprovalReview = { eligible: false, response: "unasked", ...(remoteScopeId ? { remoteScopeId } : {}) };
 			const result = await reviewContext.run(review, () => handler(event, ctx));
 			if (!result?.block || !event.toolName) return result;
 			const reason = result.reason ?? "";
@@ -177,7 +183,7 @@ export default function piPermissions(pi: ExtensionAPI, autoOverrides: Pick<PiAu
 			persist();
 			// Only where someone can open the menu; a headless session's agent
 			// would be told of a way out it cannot use.
-			return ctx.hasUI && ctx.mode === "tui" ? { ...result, reason: reason + denialGuidance(denial) } : result;
+			return ctx.hasUI && (ctx.mode === "tui" || remoteReview.available(ctx)) ? { ...result, reason: reason + denialGuidance(denial) } : result;
 		};
 	const menuCommands = new Map<MenuTab, MenuCommand>();
 	const gated = new Proxy(pi, {
@@ -211,6 +217,7 @@ export default function piPermissions(pi: ExtensionAPI, autoOverrides: Pick<PiAu
 	pi.on("session_shutdown", () => pendingAnalysis.cancel());
 	withPermissionChain(createPiAutomode({
 		...autoOverrides,
+		remoteReview,
 		reviewAnalysis: async (ctx, ask) => {
 			const decision = await pendingAnalysis.run(ctx.signal, !forwarded.owner(), async signal => {
 				const approved = await ask(signal);
@@ -307,7 +314,7 @@ export default function piPermissions(pi: ExtensionAPI, autoOverrides: Pick<PiAu
 			return approved?.() ?? false;
 		},
 	});
-	registerApprovalRequest(pi, ledger, persist);
+	registerApprovalRequest(pi, ledger, persist, undefined, remoteReview);
 
 	function restoreLedger(ctx: ExtensionContext): void {
 		const entries = ctx.sessionManager.getBranch() as { type?: string; customType?: string; data?: unknown }[];
@@ -393,7 +400,7 @@ export default function piPermissions(pi: ExtensionAPI, autoOverrides: Pick<PiAu
 				id: "ask",
 				label: "Ask before a block",
 				value: ask,
-				description: "Set by pi-nix's autoMode.askOnBlock. Asked only in the terminal UI, never in a headless session.",
+				description: "Set by pi-nix's autoMode.askOnBlock. Uses the terminal UI or an explicitly registered remote review transport; unattended sessions remain blocked.",
 				actionable: false,
 			},
 			{

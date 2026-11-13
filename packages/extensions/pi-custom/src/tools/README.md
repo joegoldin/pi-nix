@@ -14,7 +14,11 @@ model and starts a follow-up turn, so it never polls. `bg_status`, `bg_logs`
 `/kill <id>` do the same at the keyboard. Tasks live for the session.
 
 Tool results and completion notices use the shared custom cards and theme.
-The dock has a compact task icon. `/jobs` and `/logs <id>` open bordered views;
+The dock uses the todo list’s tree conventions: one compact Jobs summary,
+clickable to reveal up to five task names and their outcomes. Ctrl+O shows all
+jobs, including acknowledged history, and restores the local view when folded.
+Acknowledged results disappear from the dock and Rex metadata, not history.
+Automatic follow-up results remain working until consumed by the next turn. `/jobs` and `/logs <id>` open bordered views;
 Up/Down, Page Up/Down and Home/End scroll, and Escape or Enter closes them.
 Log views are bounded snapshots, not a live tail. Model-facing output and
 completion delivery are unchanged.
@@ -38,10 +42,12 @@ groups. Dependencies (`blockedBy`) connect tasks independently of grouping.
 Move or delete all live children before deleting a group; deletion never
 silently cascades.
 
-The list above the editor shows group counts and indented tasks. Click a
-group header or use `/todos <group-id>` to collapse/expand it; groups start
-expanded. Click a task to toggle wrapped text. Ctrl+Shift+T folds the whole
-list; `/todos` displays the full list. Active work sorts first, then ready
+The list above the editor starts in focus mode: up to two active tasks, or one
+next task when nothing is active. Ctrl+Alt+T cycles through focus, a five-task
+preview, and the full wrapped list with history. Clicking the todo widget does
+not change its view or group scoping. The full view shows group counts and
+indented tasks; use `/todos <group-id>` to collapse/expand a group.
+`/todos` displays the full list without changing the focus view. Active work sorts first, then ready
 pending work, blocked work and completions. Groups follow their highest-priority
 child. Satisfied dependency edges disappear from the widget, not the records.
 The heading labels overall counts; overflow labels only the tasks outside the
@@ -53,7 +59,11 @@ Completed rows fade at the next agent run or after 60 seconds, whichever comes
 first. A single deadline timer handles long-running and idle sessions without
 model calls. Reading the list or compacting the session does not renew the
 countdown; clearing, changing branches and shutdown cancel stale deadlines.
-This only hides rows: completed records, dependencies and evidence remain intact.
+This only archives rows: completed records, dependencies and evidence remain intact.
+The default `todo list` returns unfinished work; `list status=completed` and `get`
+provide completed history. All todo headings retain the same overall
+completed/total count when rows fade, excluding deleted tasks and group headings.
+Focus and preview labels describe the visible subset without changing that count.
 Expanded views and `/todos` still expose completed history.
 
 Each new task requires `acceptanceCriteria`: a bounded, observable completion
@@ -71,6 +81,21 @@ milestones before switching work, and record blockers before yielding. It does
 not queue messages, start turns, or infer completion. Completed history stays
 available without pruning; legacy pruning notices are excluded from model
 context while remaining in recorded history.
+
+A stronger **Todo review due** checkpoint appears after 6 model turns or
+120 seconds without an unfiltered `todo list` read, whichever comes first.
+Session start, branch restoration and compaction also require a fresh review
+when unfinished tasks exist. The checkpoint asks for the full list before
+further substantive work, then reconciliation against observed results:
+verified completions with evidence, stale activity, blockers and next actions.
+Reading one task, listing a status subset, or updating one row does not dismiss
+a backlog review. An unfiltered list read acknowledges the checkpoint; it is
+not proof that reconciliation or verification happened. Clearing a batch also
+resets the cadence. The reminder remains due until acknowledged. Elapsed time
+is checked at the next model request, not by a timer: idle sessions and long
+running tools are never interrupted or woken for bookkeeping. Empty and
+completed-only lists produce no checkpoint. Older tasks are not deleted or
+resumed merely because a review is due.
 
 Starting a task returns conflicting active tasks to pending. Simultaneous
 work requires distinct explicit owners, not several unowned in-progress

@@ -27,6 +27,11 @@ keys.
 - `/clear`: start a new session.
 - `/clone-session`: copy this session into a new one, leaving the original.
 - `/stash`: open the stash list.
+- `/usage`: refresh read-only OpenAI subscription usage. Interactive sessions
+  also refresh every five minutes. Codex uses its account quota windows; native
+  ChatGPT login requires a Codex companion with a matching app registration.
+  API keys and custom origins are not eligible. Missing or failed reports clear
+  stale percentages; shorter windows are never presented as monthly totals.
 
 ## Also
 
@@ -54,6 +59,7 @@ keys.
 | `gitenv.ts` | Git editor overrides |
 | `title.ts` | The working tab title |
 | `steer.ts` | Preserve the goal when Escape restores queued guidance; native Pi owns queue display and send-now |
+| `usage.ts` | Bounded, cancellable, GET-only account quota reporting |
 
 Ctrl+Enter promotes already queued input to the next safe turn boundary, after
 running tools finish. Ctrl+Shift+Enter aborts first, waits for the run to settle,
