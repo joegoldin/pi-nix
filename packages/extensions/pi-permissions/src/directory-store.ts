@@ -6,9 +6,9 @@ import { resolvePathForPolicy } from "./auto/paths.ts";
 import type { DirectoryAccess } from "./directory-access.ts";
 import { DIRECTORY_ACCESS } from "./directory-proposal.ts";
 
-const hash = (value: string) => createHash("sha256").update(value).digest("hex");
+export const hash = (value: string) => createHash("sha256").update(value).digest("hex");
 
-function safeDirectory(path: string): boolean {
+export function safeDirectory(path: string): boolean {
 	const stat = lstatSync(path);
 	return stat.isDirectory() && (stat.mode & 0o022) === 0 && (!process.getuid || stat.uid === process.getuid());
 }

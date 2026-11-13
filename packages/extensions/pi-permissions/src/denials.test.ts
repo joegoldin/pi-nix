@@ -26,8 +26,43 @@ describe("the permission ledger", () => {
 		expect(restored.scenarioApprovals("bash", "/work")).toEqual(approvals);
 		restored.revoke(grant.key);
 		expect(restored.scenarioApprovals("bash", "/work")).toEqual([]);
-		ledger.clearSimilar();
-		expect(ledger.scenarioApprovals("bash", "/work")).toEqual([]);
+		// A follow-up message keeps the approval for review but ends the exact-call shortcut.
+		ledger.noteUserInput("continue", 124);
+		expect(ledger.scenarioApprovals("bash", "/work")).toEqual(approvals);
+		expect(ledger.isSimilarlyGranted("bash", input, "/work")).toBe(false);
+	});
+
+	it("records the approved summary and the user's preceding message for later review", () => {
+		let now = 10;
+		const ledger = new PermissionLedger(() => now);
+		ledger.noteUserInput("  Find out why build 7f3a is stuck on ci-host; read-only.  ", 5);
+		const input = { command: "ssh ci-host \"psql -Atc 'SELECT 1'\"" };
+		ledger.approveSimilar("bash", input, "/work", undefined, { summary: "Read-only SQL on ci-host for the stuck build; no writes." });
+		expect(ledger.isSimilarlyGranted("bash", input, "/work")).toBe(true);
+		const [approval] = ledger.scenarioApprovals("bash", "/work");
+		expect(approval).toMatchObject({ lifetime: "conversation", approved: "Read-only SQL on ci-host for the stuck build; no writes.", afterUserMessage: "Find out why build 7f3a is stuck on ci-host; read-only." });
+		expect(approval!.scope).toContain("for this conversation unless revoked in /permissions");
+		now = 20;
+		ledger.noteUserDecision();
+		expect(ledger.isSimilarlyGranted("bash", input, "/work")).toBe(false);
+		expect(ledger.scenarioApprovals("bash", "/work")[0]!.afterUserMessage).toBe(approval!.afterUserMessage);
+		// Restoring resets what the user said; the host recovers it from the branch.
+		const restored = new PermissionLedger(() => 30); restored.restore(ledger.snapshot());
+		expect(restored.scenarioApprovals("bash", "/work")).toEqual(ledger.scenarioApprovals("bash", "/work"));
+	});
+
+	it("loads saved shell approvals for review in a later session without an exact-call shortcut", () => {
+		const ledger = new PermissionLedger(() => 50);
+		const input = { command: "ssh ci-host uptime" };
+		ledger.refreshSaved("/launch", [], [{ toolName: "bash", input, cwd: "/launch", summary: "Uptime checks on ci-host.", at: 7 }]);
+		const [approval] = ledger.scenarioApprovals("bash", "/launch");
+		expect(approval).toMatchObject({ lifetime: "saved", approved: "Uptime checks on ci-host.", at: 7, input });
+		expect(approval).not.toHaveProperty("afterUserMessage");
+		expect(approval!.scope).toContain("saved for sessions started in /launch");
+		expect(ledger.isSimilarlyGranted("bash", input, "/launch")).toBe(false);
+		expect(ledger.scenarioApprovals("bash", "/elsewhere")).toEqual([]);
+		ledger.refreshSaved("/launch", []);
+		expect(ledger.scenarioApprovals("bash", "/launch")).toEqual([]);
 	});
 
 	it("does not silently widen old exact-command grants into scenario approvals", () => {
@@ -136,8 +171,8 @@ it("menu shell approvals enter the classifier scenario ledger instead of bypassi
 	expect(restored.scenarioApprovals("bg_run", "/tmp")).toHaveLength(1);
 	restored.revoke(restored.grantList()[0]!.key);
 	expect(restored.scenarioApprovals("bash", "/tmp")).toEqual([]);
-	ledger.clearSimilar();
-	expect(ledger.scenarioApprovals("bash", "/tmp")).toEqual([]);
+	ledger.noteUserInput("continue");
+	expect(ledger.scenarioApprovals("bash", "/tmp")).toHaveLength(1);
 });
 
 it("keeps child exact and scoped grants isolated through restore and revocation", () => {
@@ -178,7 +213,7 @@ it("remembers read and write directory access separately across conversation upd
   const read = ledger.record({ toolCallId: "read", toolName: "read", input: { path: "/tmp/project/a.ts" }, reason: "first access", directories: [{ path: "/tmp/project", access: "read" }] });
   ledger.approve(read.id, "/tmp/parent");
   expect(ledger.grantList()[0].directory).toEqual({ path: "/tmp/project", access: "read" });
-  ledger.clearSimilar();
+  ledger.noteUserInput("continue");
   const restored = new PermissionLedger();
   restored.restore(ledger.snapshot());
   expect(restored.directoryApprovals()).toHaveLength(1);
@@ -215,8 +250,8 @@ it("keeps the approved shell effects alongside a parser-proven read directory", 
   const restored = new PermissionLedger();
   restored.restore(ledger.snapshot());
   expect(restored.scenarioApprovals("bash", "/tmp/main")).toHaveLength(1);
-  restored.clearSimilar();
-  expect(restored.scenarioApprovals("bash", "/tmp/main")).toEqual([]);
+  restored.noteUserInput("continue");
+  expect(restored.scenarioApprovals("bash", "/tmp/main")).toHaveLength(1);
   expect(restored.directoryApprovals()).toMatchObject([{ access: "read" }]);
 });
 
@@ -235,7 +270,7 @@ it("explicit rejection survives resume and extensions but a new instruction or m
   const input = { path: "/tmp/project/a.ts", content: "first" };
   const denial = ledger.record({ toolCallId: "rejected", toolName: "write", input, cwd: "/tmp/project", reason: "Declined", review: { eligible: false, response: "denied" } });
   const resumed = new PermissionLedger(); resumed.restore(ledger.snapshot());
-  resumed.clearSimilar();
+  resumed.noteUserInput("continue");
   expect(resumed.wasRejected("write", { ...input, content: "changed" }, "/tmp/project")).toBe(true);
   expect(resumed.wasRejected("write", input, "/tmp/other")).toBe(false);
   resumed.approve(denial.id, "/tmp/project");

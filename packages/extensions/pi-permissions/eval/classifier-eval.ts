@@ -4,13 +4,16 @@
 // Pi's own model runtime and credential store. Not part of `bun test`, because
 // it calls a model provider.
 //
-//   bun eval/classifier-eval.ts [--settings settings.json] [--model provider/id] [--repeat N] [--only name,...]
+//   bun eval/classifier-eval.ts [--settings settings.json] [--model provider/id] [--repeat N] [--only name,...] [--summaries]
+//
+// --summaries prints the approval summary the prompt would show for each
+// expected-allow case instead of classifying.
 //
 // --settings takes the same JSON shape as PI_AUTOMODE_SETTINGS_JSON, so the
 // operator's own rule lists can be evaluated alongside the built-in defaults.
 import { readFileSync } from "node:fs";
 import { ModelRegistry, ModelRuntime } from "@earendil-works/pi-coding-agent";
-import { defaultClassifyAction, serializeClassifierAction } from "../src/auto/classifier.ts";
+import { defaultClassifyAction, serializeClassifierAction, summarizeApproval } from "../src/auto/classifier.ts";
 import { buildEffectiveConfigFromSources } from "../src/auto/config.ts";
 import type { SettingsFile } from "../src/auto/types.ts";
 import { CASES, type EvalCase } from "./cases.ts";
@@ -44,6 +47,15 @@ function branch(testCase: EvalCase) {
 				...(turn.calls ?? []).map((call, order) => ({ type: "toolCall", id: `t${index}-${order}`, name: call.name, arguments: call.input })),
 			] },
 	}));
+}
+
+if (process.argv.includes("--summaries")) {
+	for (const testCase of CASES.filter(item => item.expect === "allow" && (!only || only.includes(item.name)))) {
+		const ctx = { cwd: testCase.cwd, model: undefined, modelRegistry: registry, signal: undefined, sessionManager: { getBranch: () => branch(testCase), getSessionId: () => `eval-summary-${testCase.name}` } } as never;
+		const summary = await summarizeApproval(ctx, config, serializeClassifierAction(testCase.action.toolName, testCase.action.input), "", "Blocked pending user approval.");
+		console.log(`${testCase.name}\n        ${summary ?? "(no summary)"}`);
+	}
+	process.exit(0);
 }
 
 let failures = 0;

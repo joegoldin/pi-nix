@@ -81,3 +81,12 @@ test("task scratch, preparation, wrapper effects and credential use keep their p
   // The new examples must not end up after the closing tier note.
   expect(prompt.trimEnd().endsWith("The tier is the listed rule's: an example above never makes an action hard_deny on its own.")).toBe(true);
 });
+
+test("remembered approvals last across follow-ups but later refusals still control", () => {
+  const prompt = buildClassifierPrompt(buildEffectiveConfigFromSources());
+  expect(prompt).not.toContain("already filtered for expiry and revocation");
+  expect(prompt).toContain("lifetime=saved records were approved in an earlier session");
+  expect(prompt).toContain("the one- or two-line statement of what the user approved, shown to them before they answered");
+  expect(prompt).toContain("Routine follow-ups (\"continue\", \"try again\", a new related step) do not revoke an approval");
+  expect(prompt).toContain("A later direct user instruction that refuses, narrows, pauses or ends that work controls over the record");
+});

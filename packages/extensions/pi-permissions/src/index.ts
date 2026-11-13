@@ -4,8 +4,9 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { coversDirectoryRequest, requestedDirectories } from "./directory-access.ts";
 import { asForwardedToolCall } from "./engine/authority/forwarded-tool-call.ts";
 import { DirectoryGrantStore } from "./directory-store.ts";
+import { CommandApprovalStore } from "./approval-store.ts";
 import { directoryCandidates, validateDirectoryProposal } from "./directory-proposal.ts";
-import { proposeDirectoryAccess, serializeClassifierAction } from "./auto/classifier.ts";
+import { proposeDirectoryAccess, serializeClassifierAction, summarizeApproval } from "./auto/classifier.ts";
 import { resolvePathForPolicy } from "./auto/paths.ts";
 import { join } from "node:path";
 import { createForwardedGate } from "./forwarded-gate.ts";
@@ -21,8 +22,11 @@ import { createForwardedGate } from "./forwarded-gate.ts";
 //
 // Around both, this file keeps a ledger (denials.ts): every call either half
 // blocks is recorded with its input, and /permissions lets you approve one
-// afterwards. Shell approvals inform the classifier through bounded scopes;
-// non-shell calls retain exact session overrides. The agent is told to retry.
+// afterwards. Shell approvals inform the classifier through bounded scopes,
+// each with a one- or two-line summary of what the user approved, for the
+// conversation or, when the user chose so, for later sessions in the launch
+// folder. Non-shell calls retain exact session overrides. The agent is told to
+// retry.
 
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -104,7 +108,7 @@ function wasInterruption(reason: string): boolean {
 	return /interrupted the turn/i.test(reason);
 }
 
-export default function piPermissions(pi: ExtensionAPI, autoOverrides: Pick<PiAutomodeOptions, "loadConfig" | "classifyAction"> & { directoryStore?: DirectoryGrantStore; proposeDirectories?: typeof proposeDirectoryAccess } = {}): void {
+export default function piPermissions(pi: ExtensionAPI, autoOverrides: Pick<PiAutomodeOptions, "loadConfig" | "classifyAction"> & { directoryStore?: DirectoryGrantStore; commandStore?: CommandApprovalStore; proposeDirectories?: typeof proposeDirectoryAccess; summarize?: typeof summarizeApproval } = {}): void {
 	const probe = { loaded: false };
 	pi.events.emit(PROBE, probe);
 	if (probe.loaded) return;
@@ -132,26 +136,26 @@ export default function piPermissions(pi: ExtensionAPI, autoOverrides: Pick<PiAu
 	const directories = (cwd: string, toolName?: string, input?: unknown) => requestedDirectories(requestDetails.getStore(), cwd,
 		toolName && input && typeof input === "object" && !Array.isArray(input) ? { toolName, input: input as Record<string, unknown> } : undefined);
 	const directoryStore = autoOverrides.directoryStore ?? new DirectoryGrantStore(join(getAgentDir(), "permissions", "directory-grants"));
+	const commandStore = autoOverrides.commandStore ?? new CommandApprovalStore(join(getAgentDir(), "permissions", "command-approvals"));
+	const summarize = autoOverrides.summarize ?? summarizeApproval;
 	let launchFolder: string | undefined;
 	const workspace = (cwd: string) => launchFolder ??= resolvePathForPolicy(cwd) ?? cwd;
 	function refreshSaved(cwd: string): void {
 		const folder = workspace(cwd);
 		ledger.refreshSaved(folder, []);
-		try { ledger.refreshSaved(folder, directoryStore.load(folder)); }
+		try { ledger.refreshSaved(folder, directoryStore.load(folder), commandStore.load(folder)); }
 		catch { /* Unreadable saved approvals grant nothing; session approvals remain available. */ }
 	}
-	const clearSimilar = () => {
-		if (ledger.clearSimilar()) persist();
-	};
-	// New operator intent can narrow earlier approval. Do not let a cached scope
-	// outrun a later instruction; exact overrides remain individually revocable.
+	// Approvals last for the conversation. New operator intent only ends the
+	// exact-call shortcut: from then on the classifier weighs each remembered
+	// approval against what the user has said since, so a later "stop" wins.
 	pi.on("input", (event) => {
 		if (event.source !== "extension") {
 			if (ledger.clearRejected()) persist();
-			clearSimilar();
+			ledger.noteUserInput(event.text);
 		}
 	});
-	pi.events.on("pi-user-decision:submitted", clearSimilar);
+	pi.events.on("pi-user-decision:submitted", () => ledger.noteUserDecision());
 
 	// Each half's tool_call handler runs only for calls not already approved,
 	// and every block it returns is recorded.
@@ -221,32 +225,42 @@ export default function piPermissions(pi: ExtensionAPI, autoOverrides: Pick<PiAu
 			if (current) Object.assign(current, review);
 		},
 		approvals: {
-			prepare: async (ctx, config, toolName, input, loadedContext) => {
-				const candidates = directoryCandidates(directories(ctx.cwd, toolName, input), toolName, input, ctx.cwd);
-				if (!candidates.length || candidates.length > 8) return;
+			prepare: async (ctx, config, toolName, input, loadedContext, reason) => {
+				const all = directoryCandidates(directories(ctx.cwd, toolName, input), toolName, input, ctx.cwd);
+				const candidates = all.length > 8 ? [] : all;
 				const owner = forwarded.owner();
 				const folder = workspace(ctx.cwd);
 				const sessionId = ctx.sessionManager.getSessionId();
+				const shell = toolName === "bash" || toolName === "bg_run";
+				const action = serializeClassifierAction(toolName, input);
 				const suggest = autoOverrides.proposeDirectories ?? proposeDirectoryAccess;
-				const proposal = await suggest(ctx, config, serializeClassifierAction(toolName, input), loadedContext, candidates);
-				const selected = validateDirectoryProposal(proposal, candidates) ?? candidates.map(({ path, access }) => ({ path, access }));
+				const [proposal, summary] = await Promise.all([
+					candidates.length ? suggest(ctx, config, action, loadedContext, candidates) : undefined,
+					summarize(ctx, config, action, loadedContext, reason),
+				]);
+				const selected = candidates.length ? validateDirectoryProposal(proposal, candidates) ?? candidates.map(({ path, access }) => ({ path, access })) : [];
 				const review = reviewContext.getStore();
-				if (review) review.directories = selected;
-				const scope = approvalLabel(toolName, input, ctx.cwd, selected);
-				if (!scope) return;
+				if (review && selected.length) review.directories = selected;
+				const label = approvalLabel(toolName, input, ctx.cwd, selected);
+				if (!label) return;
+				// The user approves the summary they read; the same words bound later review.
+				const scope = summary ? `Approves: ${summary}\n${label}` : label;
+				// Only shell scopes and folder grants can be reviewed in a later session.
+				const savable = !owner && (shell || selected.length > 0);
 				return {
 					scope,
-					...(!owner ? { futureScope: `Save only these folder permissions for sessions started in ${folder}. Command-specific approvals do not persist. Revoke later in /permissions.` } : {}),
+					...(savable ? { futureScope: `Remember for sessions started in ${folder}${summary ? `: ${summary}` : ""}. Each later use is still reviewed against what you say then. Revoke in /permissions.` } : {}),
 					remember: (future: boolean) => {
-						if (ctx.signal?.aborted || ctx.sessionManager.getSessionId() !== sessionId || (future && owner) || selected.some(directory => resolvePathForPolicy(directory.path) !== directory.path)) return false;
+						if (ctx.signal?.aborted || ctx.sessionManager.getSessionId() !== sessionId || (future && !savable) || selected.some(directory => resolvePathForPolicy(directory.path) !== directory.path)) return false;
 						try {
-							if (future) for (const directory of selected) directoryStore.save(folder, directory);
-							// Expire previous command intent before recording this answer.
-							pi.events.emit("pi-user-decision:submitted", { source: "permission-approval" });
 							if (future) {
+								for (const directory of selected) directoryStore.save(folder, directory);
+								if (shell) commandStore.save(folder, { toolName, input, cwd: ctx.cwd, ...(summary ? { summary } : {}) });
 								refreshSaved(ctx.cwd);
-								if (toolName === "bash" || toolName === "bg_run") ledger.approveSimilar(toolName, input, ctx.cwd);
-							} else ledger.rememberScope(toolName, input, ctx.cwd, selected, owner);
+							}
+							// A saved approval also keeps its conversation scope here; its
+							// folder grants come from storage rather than a session copy.
+							ledger.rememberScope(toolName, input, ctx.cwd, future ? [] : selected, owner, { summary });
 							persist();
 							return true;
 						} catch {
@@ -307,9 +321,18 @@ export default function piPermissions(pi: ExtensionAPI, autoOverrides: Pick<PiAu
 	registerApprovalRequest(pi, ledger, persist, undefined, remoteReview);
 
 	function restoreLedger(ctx: ExtensionContext): void {
-		const entries = ctx.sessionManager.getBranch() as { type?: string; customType?: string; data?: unknown }[];
+		const entries = ctx.sessionManager.getBranch() as { type?: string; customType?: string; data?: unknown; timestamp?: string; message?: { role?: string; content?: unknown; timestamp?: unknown } }[];
 		const last = [...entries].reverse().find((e) => e.type === "custom" && e.customType === LEDGER_ENTRY);
 		ledger.restore(last?.data as PermissionRecord | undefined);
+		// The branch is the record of what the user said last.
+		const user = [...entries].reverse().find((e) => e.type === "message" && e.message?.role === "user");
+		if (user?.message) {
+			const content = user.message.content;
+			const text = typeof content === "string" ? content : Array.isArray(content)
+				? content.filter((part): part is { type: "text"; text: string } => part?.type === "text" && typeof part.text === "string").map(part => part.text).join("\n") : "";
+			const at = typeof user.message.timestamp === "number" ? user.message.timestamp : Date.parse(user.timestamp ?? "");
+			ledger.noteUserInput(text, Number.isFinite(at) ? at : Date.now());
+		}
 		refreshSaved(ctx.cwd);
 	}
 
@@ -440,9 +463,16 @@ export default function piPermissions(pi: ExtensionAPI, autoOverrides: Pick<PiAu
 				persist();
 				return undefined;
 			case "revoke":
-				if (effect.grant.savedFor && effect.grant.directory) {
-					try { directoryStore.revoke(effect.grant.savedFor, effect.grant.directory); }
+				if (effect.grant.savedFor) {
+					const { savedFor, directory, scope, toolName } = effect.grant;
+					try {
+						if (directory) directoryStore.revoke(savedFor, directory);
+						else if (scope?.scenario && (toolName === "bash" || toolName === "bg_run"))
+							commandStore.revoke(savedFor, { toolName, input: effect.grant.input as Record<string, unknown>, cwd: scope.scenario.cwd });
+					}
 					catch { ctx.ui.notify("Could not revoke the saved permission; no change was made.", "error"); return undefined; }
+					// Revoking a saved command also ends this conversation's copy of it.
+					for (const grant of ledger.grantList()) if (!grant.savedFor && !grant.directory && grant.scope?.scenario && grant.scope.key === scope?.key) ledger.revoke(grant.key);
 				}
 				ledger.revoke(effect.grant.key);
 				persist();

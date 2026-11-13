@@ -4,6 +4,9 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { EventEmitter } from "node:events";
 import piPermissions from "./index.ts";
+import { realpathSync } from "node:fs";
+import { CommandApprovalStore } from "./approval-store.ts";
+import { DirectoryGrantStore } from "./directory-store.ts";
 import { PermissionLedger, type PermissionRecord } from "./denials.ts";
 import { REMOTE_REVIEW_REGISTER, type RemoteReviewRegistration } from "./remote-review.ts";
 
@@ -158,25 +161,12 @@ describe("scoped approval lifetime", () => {
 		return { s, ctx, branch };
 	}
 
-	it("new operator input expires scopes, extension continuations do not", () => {
+	it("operator input and questionnaire answers leave conversation scopes in place", () => {
 		const { s } = restoredSession();
-		s.handlers.get("input")![0]!({ source: "extension" }, {});
-		expect(s.entries).toHaveLength(0);
-		s.handlers.get("input")![0]!({ source: "interactive" }, {});
-		expect((s.entries.at(-1)!.data as PermissionRecord).grants).toEqual([]);
-	});
-
-	it("submitted questionnaire answers expire scopes through the shared event bus", () => {
-		const { s } = restoredSession();
+		s.handlers.get("input")![0]!({ source: "extension", text: "queued" }, {});
+		s.handlers.get("input")![0]!({ source: "interactive", text: "continue" }, {});
 		s.bus.emit("pi-user-decision:submitted", { toolCallId: "q1" });
-		expect((s.entries.at(-1)!.data as PermissionRecord).grants).toEqual([]);
-	});
-
-	it("tree navigation cannot carry a scope to a branch without that approval", () => {
-		const { s, ctx, branch } = restoredSession();
-		branch.length = 0;
-		for (const handler of s.handlers.get("session_tree") ?? []) handler({}, ctx);
-		s.handlers.get("input")![0]!({ source: "interactive" }, {});
+		// Nothing is rewritten: the persisted record still holds the approval.
 		expect(s.entries).toHaveLength(0);
 	});
 });
@@ -290,9 +280,9 @@ describe("menu approval reaches classifier context", () => {
 		expect(approvals).toHaveLength(1);
 		expect(buildClassifierContext("", "", approvals)).toContain("ssh host 'diagnose /tmp/a'");
 		expect(s.sent[0]!.message.content).toContain("variants are reviewed by the auto classifier");
-		s.handlers.get("input")![0]!({ source: "interactive" }, ctx);
-		const expired = new PermissionLedger(); expired.restore(s.entries.at(-1)!.data as PermissionRecord);
-		expect(expired.scenarioApprovals("bash", "/tmp")).toEqual([]);
+		const persisted = s.entries.length;
+		s.handlers.get("input")![0]!({ source: "interactive", text: "continue" }, ctx);
+		expect(s.entries).toHaveLength(persisted);
 	});
 });
 
@@ -322,7 +312,7 @@ for (const expanded of [false, true]) it(`capital A grants exact session access 
 	expect(restored.scenarioApprovals("bg_run", "/tmp")).toEqual([]);
 	expect(s.sent[0]!.message.content).toContain("for the rest of this session, exactly as written");
 	for (const toolCallId of ["retry1", "retry2"]) expect(await s.toolCall({ toolName: "bash", toolCallId, input }, ctx)).toBeUndefined();
-	s.handlers.get("input")![0]!({ source: "interactive" }, ctx);
+	s.handlers.get("input")![0]!({ source: "interactive", text: "continue" }, ctx);
 	expect(await s.toolCall({ toolName: "bash", toolCallId: "after-input", input }, ctx)).toBeUndefined();
 	restored.revoke(restored.grantList()[0]!.key);
 	expect(restored.isGranted("bash", input)).toBe(false);
@@ -371,7 +361,7 @@ it("menu directory approvals survive new user input and session restoration with
   await s.commands.get("permissions")!.handler("", ctx);
   expect(rendered).toContain("Read/write access under /tmp/directory-fixture");
   expect(rendered.replaceAll("│", "")).toMatch(/for this conversation, until\s+revoked/);
-  s.handlers.get("input")![0]!({ source: "interactive" }, ctx);
+  s.handlers.get("input")![0]!({ source: "interactive", text: "continue" }, ctx);
   const restored = new PermissionLedger();
   restored.restore(s.entries.at(-1)!.data as PermissionRecord);
   expect(restored.directoryApprovals()).toHaveLength(1);
@@ -589,4 +579,108 @@ it("automatic folder approvals separate session, future, once and denial through
 	await revoker.menu();
 	expect(store.load(launch)).toEqual([]);
 	await revoker.stop();
+});
+
+describe("remembered approvals with summaries", () => {
+	// Like the RPC review test: a child with its own HOME, so the permission
+	// system runs auto mode as its chain link rather than the user's own config.
+	const isolated = (name: string, body: () => Promise<void>) => it(name, async () => {
+		if (process.env.PI_REMEMBERED_APPROVALS_CHILD === "1") return body();
+		const home = mkdtempSync(join(tmpdir(), "pi-remembered-approvals-home-"));
+		try {
+			const directory = join(home, "extensions", "pi-permission-system"); mkdirSync(directory, { recursive: true });
+			writeFileSync(join(directory, "config.json"), JSON.stringify({ authorizerChain: ["pi-automode"] }));
+			const child = Bun.spawn([process.execPath, "test", import.meta.path, "--test-name-pattern", name], { env: { ...process.env, HOME: home, PI_CODING_AGENT_DIR: home, PI_REMEMBERED_APPROVALS_CHILD: "1" }, stdout: "pipe", stderr: "pipe" });
+			const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
+			expect({ code, output: code === 0 ? "passed" : stdout + stderr }).toEqual({ code: 0, output: "passed" });
+		} finally { rmSync(home, { recursive: true, force: true }); }
+	});
+	const config = { enabled: true, classifyReadOnlyTools: false, allowInsideWorkingDirectory: false, deniedPaths: [], protectedPaths: [], permissionDeny: [], permissionAsk: [], permissionAllow: [], environment: [], allow: [], softDeny: [], hardDeny: [], log: { enabled: false, classifierIo: false }, askOnBlock: { enabled: true, timeoutSeconds: 30 } };
+	const SUMMARY = "Read-only uptime checks on ci-host for the outage investigation; no restarts or writes.";
+
+	function host(root: string, answer: string) {
+		const s = session();
+		const seen: any[][] = [];
+		let prompts = 0;
+		let rendered = "";
+		const branch: any[] = [];
+		const api = s.api() as any;
+		api.getAllTools = () => [{ name: "bash", description: "Shell" }, ...s.definitions.values()];
+		api.getActiveTools = () => ["bash", ...s.tools];
+		piPermissions(api, {
+			loadConfig: () => config as never,
+			// Stands in for the model: allows only once it sees a remembered, summarized approval.
+			classifyAction: async (_ctx, _cfg, _action, _loaded, approvals = []) => {
+				seen.push([...approvals]);
+				return (approvals as any[]).some(a => a.approved === SUMMARY)
+					? { decision: "allow", tier: "explicit_intent", reason: "Covered by the remembered approval" }
+					: { decision: "block", tier: "soft_deny", reason: "Remote access needs approval" };
+			},
+			proposeDirectories: async () => undefined,
+			summarize: async () => SUMMARY,
+			directoryStore: new DirectoryGrantStore(join(root, "directory-grants")),
+			commandStore: new CommandApprovalStore(join(root, "command-approvals")),
+		});
+		const ctx = {
+			cwd: root, hasUI: true, mode: "tui", isIdle: () => true, isProjectTrusted: () => true,
+			ui: { notify() {}, setStatus() {}, theme: { fg: (_slot: string, text: string) => text }, custom: (factory: Function) => new Promise((resolve) => {
+				prompts++;
+				const view = factory({ terminal: { rows: 40 }, requestRender() {} }, { fg: (_slot: string, text: string) => text, bold: (text: string) => text }, {}, resolve);
+				rendered = view.render(200).join("\n");
+				view.handleInput(answer);
+			}) },
+			sessionManager: { getEntries: () => s.entries, getSessionId: () => `session-${answer}`, getSessionName: () => "remembered approvals", getSessionFile: () => undefined, getSessionDir: () => root, getBranch: () => [...branch, ...s.entries] },
+		};
+		const say = (text: string) => {
+			branch.push({ type: "message", message: { role: "user", content: [{ type: "text", text }], timestamp: Date.now() } });
+			s.handlers.get("input")![0]!({ source: "interactive", text }, ctx);
+		};
+		return { s, ctx, seen, say, prompts: () => prompts, rendered: () => rendered };
+	}
+
+	isolated("shows the summary, keeps it for the conversation and, when chosen, for later sessions", async () => {
+		const root = realpathSync(mkdtempSync(join(tmpdir(), "pi-remembered-approvals-")));
+		try {
+			const call = { toolName: "bash", input: { command: "ssh ci-host uptime" } };
+			const first = host(root, "f");
+			for (const handler of first.s.handlers.get("session_start") ?? []) await handler({}, first.ctx);
+			first.say("ci-host is slow; check its uptime, read-only");
+			expect(await first.s.toolCall({ ...call, toolCallId: "c1" }, first.ctx)).toBeUndefined();
+			expect(first.prompts()).toBe(1);
+			expect(first.rendered()).toContain(`Approves: ${SUMMARY}`);
+			expect(first.rendered()).toContain(`Remember for sessions started in ${root}`);
+			expect(new CommandApprovalStore(join(root, "command-approvals")).load(root)).toMatchObject([{ toolName: "bash", input: call.input, summary: SUMMARY }]);
+
+			// A follow-up message: no prompt, and the classifier sees the summary and its referent.
+			first.say("continue");
+			expect(await first.s.toolCall({ ...call, toolCallId: "c2" }, first.ctx)).toBeUndefined();
+			expect(first.prompts()).toBe(1);
+			expect(first.seen.at(-1)).toContainEqual(expect.objectContaining({ approved: SUMMARY, lifetime: "conversation", afterUserMessage: "ci-host is slow; check its uptime, read-only" }));
+
+			// A new conversation started in the same folder reviews against the saved approval.
+			const later = host(root, "n");
+			for (const handler of later.s.handlers.get("session_start") ?? []) await handler({}, later.ctx);
+			later.say("check ci-host again");
+			expect(await later.s.toolCall({ ...call, toolCallId: "c3" }, later.ctx)).toBeUndefined();
+			expect(later.prompts()).toBe(0);
+			expect(later.seen.at(-1)).toContainEqual(expect.objectContaining({ approved: SUMMARY, lifetime: "saved" }));
+		} finally { rmSync(root, { recursive: true, force: true }); }
+	});
+
+	isolated("a session-only answer is not saved, and survives follow-ups in the same conversation", async () => {
+		const root = realpathSync(mkdtempSync(join(tmpdir(), "pi-remembered-approvals-")));
+		try {
+			const call = { toolName: "bash", input: { command: "ssh ci-host uptime" } };
+			const h = host(root, "y");
+			for (const handler of h.s.handlers.get("session_start") ?? []) await handler({}, h.ctx);
+			h.say("check ci-host uptime");
+			expect(await h.s.toolCall({ ...call, toolCallId: "c1" }, h.ctx)).toBeUndefined();
+			expect(new CommandApprovalStore(join(root, "command-approvals")).load(root)).toEqual([]);
+			h.say("try again");
+			h.say("continue");
+			expect(await h.s.toolCall({ ...call, toolCallId: "c2" }, h.ctx)).toBeUndefined();
+			expect(h.prompts()).toBe(1);
+			expect(h.seen.at(-1)).toContainEqual(expect.objectContaining({ approved: SUMMARY, lifetime: "conversation" }));
+		} finally { rmSync(root, { recursive: true, force: true }); }
+	});
 });

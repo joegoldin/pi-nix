@@ -135,7 +135,7 @@ export type PiAutomodeOptions = {
   onDenied?: (review: ApprovalReview) => void;
   /** Shared session ledger, owned by pi-permissions rather than this classifier. */
   approvals?: {
-    prepare?(ctx: ExtensionContext, config: EffectiveConfig, toolName: string, input: Record<string, unknown>, loadedContext: string): Promise<{ scope: string; futureScope?: string; remember(future: boolean): boolean } | undefined>;
+    prepare?(ctx: ExtensionContext, config: EffectiveConfig, toolName: string, input: Record<string, unknown>, loadedContext: string, reason: string): Promise<{ scope: string; futureScope?: string; remember(future: boolean): boolean } | undefined>;
     context?(toolName: string, cwd: string, input: Record<string, unknown>): readonly VerifiedApproval[];
     confirmed?(): void;
     scope(toolName: string, input: unknown, cwd: string): string | undefined;
@@ -1077,7 +1077,7 @@ export function createPiAutomode(options: PiAutomodeOptions = {}) {
       }
       const sessionAtAsk = ctx.sessionManager?.getSessionId?.();
       const prepared = canReuseApproval && decision.tier === "soft_deny" && cfg.askOnBlock?.enabled && ctx.hasUI && (ctx.mode === "tui" || (ctx.mode === "rpc" && options.remoteReview?.available(ctx)))
-        ? await options.approvals?.prepare?.(ctx, cfg, event.toolName, input, loadedContext)
+        ? await options.approvals?.prepare?.(ctx, cfg, event.toolName, input, loadedContext, decision.reason)
         : undefined;
       if (steering(ctx)) return interrupted(ctx, "classifier", event.toolName, summary, logCtx);
       if (sessionAtAsk !== ctx.sessionManager?.getSessionId?.() || (prepared && ctx.signal?.aborted)) {
