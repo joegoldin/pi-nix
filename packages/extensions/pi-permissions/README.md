@@ -103,33 +103,46 @@ For edit/write calls, the scope remains that tool's operation on the same resolv
 file path; contents may differ. Older saved shell grants retain their original
 exact-command scope rather than silently gaining broader authority.
 
-These call scopes expire on your next instruction or submitted questionnaire answer,
-or when revoked. They resolve soft denials, not hard denials or classifier
-failures, and never skip deterministic checks, explicit ask rules or
-protected-write checks. Branches restore their own ledger. `Y` records no
-reusable scope.
+Before the popup opens, the classifier model condenses the approval into one or
+two lines: the task, targets, side-effect types and limits. The popup shows it as
+`Approves: …`, and the same text is stored with the approval and given to every
+later classifier review as the bound of what you approved. If the summary call
+fails, the mechanical scope alone is shown and stored.
 
-For an eligible soft denial, the classifier model makes one additional, bounded
-call to recommend folder access. It chooses only native canonical targets: a
+These call scopes last for the conversation until revoked in `/permissions`.
+Follow-ups such as "continue" or "try again" do not end them. Until your next
+message the exact approved call skips the classifier. After that every use is
+reviewed, and the classifier sees the approval, its summary and the message you
+had last sent when you approved it. A later instruction that refuses, narrows or
+ends the work therefore still controls. Scopes resolve soft denials, not hard
+denials or classifier failures, and never skip deterministic checks, explicit ask
+rules or protected-write checks. Branches restore their own ledger. `Y` records
+no reusable scope.
+
+For an eligible soft denial with folder targets, the classifier model also makes
+a bounded call, in parallel with the summary, to recommend folder access. It chooses only native canonical targets: a
 repository/worktree root or, for file tools, the narrower containing folder.
 Capabilities are read, read/write, execute, or their combinations. A direct write
 always requires a writable proposal, even before the external-directory gate.
 Invalid, unavailable or timed-out suggestions fall back to native scope detection;
 the model never grants access or chooses its lifetime.
 
-When a bounded folder scope is available, the primary popup offers:
+The primary popup offers:
 
 - **Allow for this session** (`y`, default).
-- **Allow for this and future sessions** (`f`). Only folder permissions persist,
-  and only for conversations started in the same canonical Pi launch folder.
-  Starting in the target folder, a parent or a sibling does not inherit them.
+- **Allow for this and future sessions** (`f`), for shell scopes and folder
+  permissions. They persist only for conversations started in the same canonical
+  Pi launch folder; starting in the target folder, a parent or a sibling does not
+  inherit them. In a later conversation a saved shell approval never skips the
+  classifier: each use is reviewed against its summary and what you say there.
 - **Allow once** (`Y`), without a reusable grant.
 - **Deny** (`n` or Esc). The same action is not asked again until a new operator
   instruction or explicit menu approval; extension continuations do not reset it.
 
 The popup displays the folder, capabilities and future-session boundary before
 approval. Future grants are stored under Pi's agent directory in
-`permissions/directory-grants`, not in project-controlled configuration. They are
+`permissions/directory-grants` and `permissions/command-approvals`, not in
+project-controlled configuration. They are
 reloaded before checks, so revocation also reaches other running conversations.
 The Allowed tab in `/permissions` revokes the selected session or saved grant.
 Persistent grants are not offered for child-owned requests.

@@ -3,8 +3,10 @@ import { writableDirectory, directoryScopeLabel, type DirectoryAccess, type Dire
 // ledger in the session; the prompt and /permissions menu both use it.
 //
 // Legacy and non-shell menu grants retain their session-wide overrides.
-// Shell menu and scoped prompt grants pass policy checks, expire on new user
-// intent, and can be revoked from the same menu.
+// Shell menu and scoped prompt grants pass policy checks and last for the
+// conversation (or, when saved, for later sessions in the launch folder) until
+// revoked from the same menu. After a later user message they no longer skip
+// the classifier: it weighs them against what the user has said since.
 
 import { resolve } from "node:path";
 import { createHash } from "node:crypto";
@@ -17,6 +19,10 @@ export interface ApprovalScope {
 	label: string;
 	/** Absent on legacy grants, whose displayed scope only covered the exact command. */
 	scenario?: { cwd: string };
+	/** The model-condensed statement of what the user approved, as shown at approval. */
+	summary?: string;
+	/** The latest user message when this was approved, so later ones can be told apart. */
+	afterUserMessage?: string;
 }
 
 /** Variants need classifier review; the key still identifies only an exact reusable scope. */
@@ -34,7 +40,8 @@ export function approvalScope(toolName: string, input: unknown, cwd: string): Ap
 			delete args.description;
 		}
 		scenario = { cwd: directory };
-		label = `Similar shell actions for this task in ${directory}: same targets (hosts, repositories, directories, services and recipients) and side-effect types. Arguments and diagnostic filenames may vary; each action is rechecked`;
+		// "in <cwd>" was read as confining targets to cwd; the cwd only locates the session.
+		label = `Similar shell actions for this task, run from ${directory}: same targets (hosts, repositories, directories, services and recipients) and side-effect types. Arguments and diagnostic filenames may vary; each action is rechecked`;
 	} else if ((toolName === "edit" || toolName === "write") && typeof args.path === "string") {
 		const path = resolveToolInputPath(toolName, directory, args.path);
 		if (path === undefined) return undefined;
@@ -43,7 +50,7 @@ export function approvalScope(toolName: string, input: unknown, cwd: string): Ap
 		else delete args.content;
 		label = `${toolName} ${args.path} in ${directory} (new contents/edits allowed)`;
 	} else return undefined;
-	return { key: `scope\u0000${directory}\u0000${toolName}\u0000${canonicalJson(args)}`, label: `${label}; until your next instruction or questionnaire answer`, ...(scenario ? { scenario } : {}) };
+	return { key: `scope\u0000${directory}\u0000${toolName}\u0000${canonicalJson(args)}`, label: `${label}; for this conversation unless revoked in /permissions`, ...(scenario ? { scenario } : {}) };
 }
 
 /** A parser-proven directory read does not describe every effect of a shell program. */
@@ -123,8 +130,26 @@ function ownerKey(key: string, owner?: PermissionOwner): string {
 	return owner ? `child\u0000${owner.sessionId}\u0000${owner.cwd ?? ""}\u0000${key}` : key;
 }
 
+/** Fields a remembered approval carries beyond its mechanical scope. */
+export interface ApprovalDetails {
+	summary?: string;
+}
+
+/** A shell approval saved for later sessions started in the same launch folder. */
+export interface SavedCommandApproval {
+	toolName: "bash" | "bg_run";
+	input: Record<string, unknown>;
+	cwd: string;
+	summary?: string;
+	at: number;
+}
+
+const USER_MESSAGE_EXCERPT = 300;
+
 export class PermissionLedger {
 	private denials: Denial[] = [];
+	/** Not persisted: restored from the session branch, which is the record of what the user said. */
+	private lastUserInput: { at: number; text: string } | undefined;
 	private grants = new Map<string, Grant>();
 	private nextId = 1;
 	private rejected = new Set<string>();
@@ -227,33 +252,57 @@ export class PermissionLedger {
 		});
 	}
 
-	refreshSaved(workspace: string, records: readonly { directory: DirectoryAccess; at: number }[]): void {
+	refreshSaved(workspace: string, records: readonly { directory: DirectoryAccess; at: number }[], commands: readonly SavedCommandApproval[] = []): void {
 		for (const [key, grant] of this.grants) if (grant.savedFor) this.grants.delete(key);
 		for (const { directory, at } of records) {
 			const grant = this.approveDirectory(directory, undefined, workspace);
 			if (grant) grant.at = at;
 		}
+		for (const saved of commands) {
+			const scope = approvalScope(saved.toolName, saved.input, saved.cwd);
+			if (!scope?.scenario) continue;
+			const key = `saved\u0000${workspace}\u0000${scope.key}`;
+			this.grants.set(key, { key, toolName: saved.toolName, input: structuredClone(saved.input), at: saved.at, savedFor: workspace,
+				scope: { ...scope, label: `${scope.label.replace(/; for this conversation unless revoked in \/permissions$/, "")}; saved for sessions started in ${workspace} until revoked`, ...(saved.summary ? { summary: saved.summary } : {}) } });
+		}
+	}
+
+	/** What the user said last. Approvals made before it no longer skip the classifier. */
+	noteUserInput(text: string, at = this.now()): void {
+		this.lastUserInput = { at, text: text.trim().slice(0, USER_MESSAGE_EXCERPT) };
+	}
+
+	/** A questionnaire or approval answer is new intent too; the last message text stays the referent. */
+	noteUserDecision(at = this.now()): void {
+		this.lastUserInput = { at, text: this.lastUserInput?.text ?? "" };
 	}
 
 	/** Store exactly the combined command/directory scope displayed at approval. */
-	rememberScope(toolName: string, input: unknown, cwd: string, directories: readonly DirectoryAccess[] = [], owner?: PermissionOwner): void {
+	rememberScope(toolName: string, input: unknown, cwd: string, directories: readonly DirectoryAccess[] = [], owner?: PermissionOwner, details: ApprovalDetails = {}): Grant | undefined {
 		for (const directory of directories) this.approveDirectory(directory, owner);
 		if ((!owner || owner.cwd) && (!directories.length || toolName === "bash" || toolName === "bg_run"))
-			this.approveSimilar(toolName, input, cwd, owner);
+			return this.approveSimilar(toolName, input, cwd, owner, details);
+		return undefined;
 	}
 
-	approveSimilar(toolName: string, input: unknown, cwd: string, owner?: PermissionOwner): Grant | undefined {
+	approveSimilar(toolName: string, input: unknown, cwd: string, owner?: PermissionOwner, details: ApprovalDetails = {}): Grant | undefined {
 		if (owner && !owner.sessionId) return undefined;
-		const scope = approvalScope(toolName, input, cwd);
-		if (!scope) return undefined;
+		const base = approvalScope(toolName, input, cwd);
+		if (!base) return undefined;
+		const scope: ApprovalScope = { ...base, ...(details.summary ? { summary: details.summary } : {}), ...(this.lastUserInput?.text ? { afterUserMessage: this.lastUserInput.text } : {}) };
 		const grant = { key: ownerKey(scope.key, owner), toolName, input: structuredClone(input), at: this.now(), scope, ...(owner ? { owner } : {}) };
 		this.grants.set(grant.key, grant);
 		return grant;
 	}
 
+	/**
+	 * The exact approved call may skip the classifier only until the user next
+	 * speaks; after that a later instruction might narrow it, so it is reviewed.
+	 */
 	isSimilarlyGranted(toolName: string, input: unknown, cwd: string, owner?: PermissionOwner): boolean {
 		const scope = approvalScope(toolName, input, cwd);
-		return !!scope && this.grants.has(ownerKey(scope.key, owner));
+		const grant = scope && this.grants.get(ownerKey(scope.key, owner));
+		return !!grant && !grant.savedFor && grant.at >= (this.lastUserInput?.at ?? 0);
 	}
 
 	/** Only newly displayed shell scenarios can inform review of different commands. */
@@ -266,20 +315,14 @@ export class PermissionLedger {
 			const scope = grant.scope;
 			if (!scope?.scenario || scope.scenario.cwd !== directory) continue;
 			if (grant.toolName !== "bash" && grant.toolName !== "bg_run") continue;
-			approvals.push({ scope: scope.label, cwd: directory, toolName: grant.toolName, input: structuredClone(grant.input), at: grant.at });
+			approvals.push({
+				scope: scope.label, cwd: directory, toolName: grant.toolName, input: structuredClone(grant.input), at: grant.at,
+				lifetime: grant.savedFor ? "saved" : "conversation",
+				...(scope.summary ? { approved: scope.summary } : {}),
+				...(!grant.savedFor && scope.afterUserMessage ? { afterUserMessage: scope.afterUserMessage } : {}),
+			});
 		}
 		return approvals;
-	}
-
-	clearSimilar(): boolean {
-		let changed = false;
-		for (const [key, grant] of this.grants) {
-			if (grant.scope && !grant.directory) {
-				this.grants.delete(key);
-				changed = true;
-			}
-		}
-		return changed;
 	}
 
 	/** Newest first. */
@@ -299,6 +342,7 @@ export class PermissionLedger {
 		this.rejected = new Set(Array.isArray(record?.rejected) ? record.rejected.filter(key => typeof key === "string" && /^[a-f0-9]{64}$/.test(key)) : []);
 		this.denials = Array.isArray(record?.denials) ? record.denials.slice(0, DENIAL_LIMIT).map((d) => ({ ...d })) : [];
 		this.grants = new Map((Array.isArray(record?.grants) ? record.grants : []).map((g) => [g.key, { ...g }]));
+		this.lastUserInput = undefined;
 		const highest = Math.max(0, ...this.denials.map((d) => Number(d.id.slice(1)) || 0));
 		this.nextId = highest + 1;
 	}

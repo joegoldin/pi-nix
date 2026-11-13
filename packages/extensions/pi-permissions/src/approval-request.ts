@@ -57,7 +57,7 @@ export function registerApprovalRequest(pi: ExtensionAPI, ledger: PermissionLedg
 				persist();
 			}
 			if (answer !== "allow-session") return result("blocked", denialGuidance(denial).trim());
-			// Expire earlier intent before storing this answer, never immediately after it.
+			// Mark this answer as new intent before storing it, so the exact-call shortcut covers it.
 			pi.events.emit("pi-user-decision:submitted", { source: "permission-approval", denialId });
 			ledger.rememberScope(denial.toolName, denial.input, ctx.cwd, denial.directories);
 			denial.state = "approved";

@@ -919,7 +919,7 @@ test("directory facts survive follow-ups and restoration but never skip risk rev
   expect(seen.at(-1)).toEqual([]);
   ledger.approveDirectory({ path: directory, access: "write" });
   expect((await review("write", { path: "/tmp/directory-fixture/a.txt", content: "a" })).kind).toBe("allow");
-  ledger.clearSimilar();
+  ledger.noteUserInput("continue");
   ledger.restore(structuredClone(ledger.snapshot()));
   expect((await review("write", { path: "/tmp/directory-fixture/new/b.txt", content: "b" })).kind).toBe("allow");
   expect((await review("bash", { command: "git push origin HEAD" })).kind).toBe("deny");

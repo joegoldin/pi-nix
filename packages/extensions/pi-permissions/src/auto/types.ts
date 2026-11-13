@@ -226,6 +226,12 @@ export type ScenarioApproval = {
   toolName: "bash" | "bg_run";
   input: unknown;
   at: number;
+  /** "conversation" lasts for this session; "saved" came from an earlier session. */
+  lifetime?: "conversation" | "saved";
+  /** Model-condensed statement of what the user approved, shown at approval. */
+  approved?: string;
+  /** The latest user message when the user approved; later messages follow it. */
+  afterUserMessage?: string;
 };
 
 export type VerifiedApproval = ScenarioApproval | DirectoryApproval;

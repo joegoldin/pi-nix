@@ -12,7 +12,7 @@ function setup(answer = "allow-session", remote?: Pick<RemotePermissionReview, "
 	let saveCount = 0;
 	let prompt: any;
 	const events: { channel: string; data: any }[] = [];
-	const pi = { registerTool(t: any) { tool = t; }, events: { emit(channel: string, data: unknown) { events.push({ channel, data }); if (channel === "pi-user-decision:submitted") ledger.clearSimilar(); } } };
+	const pi = { registerTool(t: any) { tool = t; }, events: { emit(channel: string, data: unknown) { events.push({ channel, data }); if (channel === "pi-user-decision:submitted") ledger.noteUserDecision(); } } };
 	const ctx = { hasUI: true, mode: "tui", cwd: "/tmp/main", sessionManager: { getSessionId: () => "session" } };
 	let respond = async () => answer;
 	registerApprovalRequest(pi as never, ledger, () => saveCount++, async (_ctx, ask) => { asked++; prompt = ask; return await respond() as never; }, remote);
