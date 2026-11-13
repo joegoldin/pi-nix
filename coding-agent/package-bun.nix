@@ -8,6 +8,7 @@
   callPackage,
   src,
   version,
+  patch,
 }:
 let
   bunInstallFlags =
@@ -65,11 +66,11 @@ let
     dontRunLifecycleScripts = true;
 
     postPatch = ''
+      ${patch}/bin/pi-patch
       cp ${../bun.lock} bun.lock
     '';
 
     preBuild = ''
-      node ${./dependency-compat.mjs}
           find packages -name "package.json" -exec sed -i \
             -e 's/--watch --preserveWatchOutput//g' \
             {} \;

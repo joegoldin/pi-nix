@@ -36,7 +36,7 @@ Object.assign(context, {
   HORIZONTAL_MIN_WIDTH: 80, files: new Map([["a.ts", fixture[0]]]), lspServers: new Map(), sessionLanguages: ["typescript"],
   dedupeByBasename: value => value, shouldRenderFile: () => true, sortByTierThenRecency: value => value,
   countBlockingIn: () => 2, countTotalIn: severity => severity === "error" ? 2 : 35,
-  countSuppressedIn: () => 2, isPendingAnalysis: () => false,
+  countSuppressedIn: () => 2, isPendingAnalysis: () => false, isUncheckedClean: () => false,
   visibleWidth: text => text.length, fitLine: (text, width) => text.slice(0, width),
 });
 vm.runInContext(source.slice(source.indexOf("function fitCompactHeader("), renderEnd), context);

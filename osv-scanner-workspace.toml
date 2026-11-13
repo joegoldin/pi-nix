@@ -3,7 +3,3 @@
 [[IgnoredVulns]]
 id = "GHSA-mqxh-6gq7-558m"
 reason = "False positive: OSV Scanner treats Bun's workspace reference as the package version; the workspace package is newer than the fixed version 0.79.0."
-
-[[IgnoredVulns]]
-id = "GHSA-vfj7-8cjw-p6xm"
-reason = "braces is used by shx for trusted, fixed build-script patterns. It is absent from the runtime install lock and is not shipped. No fixed braces release is available."

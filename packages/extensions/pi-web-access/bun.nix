@@ -13,9 +13,9 @@
   ...
 }:
 {
-  "@hono/node-server@1.19.17" = fetchurl {
-    url = "https://registry.npmjs.org/@hono/node-server/-/node-server-1.19.17.tgz";
-    hash = "sha512-dSneS5qhiauZWGDCeK4o695Xd9nUNjviSZCMQrj10eetr8Uln1ucn6bbphOM6UynAMMtNIzZNSpL9vnASJwrPQ==";
+  "@hono/node-server@2.1.8" = fetchurl {
+    url = "https://registry.npmjs.org/@hono/node-server/-/node-server-2.1.8.tgz";
+    hash = "sha512-jdf7FHh6A1lzjpHHQUgxsg2GeER2vMetnAOfeActzcoli6jamlK+NAwL6Dsr5Fl3BS3tYUQzCdtZjU8Qxv7bEA==";
   };
   "@mixmark-io/domino@2.2.0" = fetchurl {
     url = "https://registry.npmjs.org/@mixmark-io/domino/-/domino-2.2.0.tgz";
@@ -365,9 +365,9 @@
     url = "https://registry.npmjs.org/hasown/-/hasown-2.0.4.tgz";
     hash = "sha512-T2UbfbBEF32wiepXIsMlTW9+dDYC6wMh/t/vYA4tuOMKqWz/n3vr1NFSxQiyP+zk2mXsoMA/i/7qV6LKut1t1A==";
   };
-  "hono@4.13.13" = fetchurl {
-    url = "https://registry.npmjs.org/hono/-/hono-4.13.13.tgz";
-    hash = "sha512-CQ46U0ZkAGmbT/4UxdzzGJpacP2IeKgY4a5/tOI9AABbpOMfK739wfDXmv1usCk+3RkKj1hQy4/fjhiwa2xlrA==";
+  "hono@4.13.18" = fetchurl {
+    url = "https://registry.npmjs.org/hono/-/hono-4.13.18.tgz";
+    hash = "sha512-H9q/E1XizaWstJxUW881dmLxEj+t/TrGGnyxINkm4+sK0qUwsMtFdo2BWI9Vs3cIS19MU6b6iCijoUoEf4f3DA==";
   };
   "html-escaper@3.0.3" = fetchurl {
     url = "https://registry.npmjs.org/html-escaper/-/html-escaper-3.0.3.tgz";

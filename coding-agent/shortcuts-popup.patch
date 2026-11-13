@@ -1,6 +1,26 @@
+diff --git a/packages/coding-agent/src/core/keybindings.ts b/packages/coding-agent/src/core/keybindings.ts
+index c5908e7..3bdbcd1 100644
+--- a/packages/coding-agent/src/core/keybindings.ts
++++ b/packages/coding-agent/src/core/keybindings.ts
+@@ -39,11 +39,11 @@ const APP_KEYBINDINGS = {
+ 		description: "Save thinking level",
+ 	},
+ 	"app.model.cycleForward": {
+-		defaultKeys: "ctrl+p",
++		defaultKeys: "shift+ctrl+p",
+ 		description: "Cycle to next model",
+ 	},
+ 	"app.model.cycleBackward": {
+-		defaultKeys: windowsKeybindings ? "alt+p" : "shift+ctrl+p",
++		defaultKeys: windowsKeybindings ? "alt+p" : [],
+ 		description: "Cycle to previous model",
+ 	},
+ 	"app.model.select": { defaultKeys: "ctrl+l", description: "Open model selector" },
+diff --git a/packages/coding-agent/src/modes/interactive/interactive-mode.ts b/packages/coding-agent/src/modes/interactive/interactive-mode.ts
+index 215b5ec..ca6d1ad 100644
 --- a/packages/coding-agent/src/modes/interactive/interactive-mode.ts
 +++ b/packages/coding-agent/src/modes/interactive/interactive-mode.ts
-@@ -2643,6 +2643,10 @@
+@@ -2784,6 +2784,10 @@ export class InteractiveMode {
  				if (result?.consume) return;
  				data = result?.data ?? data;
  			}
@@ -11,7 +31,7 @@
  			handleInput.call(editor, data);
  		};
  	}
-@@ -3095,6 +3099,7 @@
+@@ -3264,6 +3268,7 @@ export class InteractiveMode {
  	// =========================================================================
  
  	private setupKeyHandlers(): void {
@@ -19,7 +39,7 @@
  		// Set up handlers on defaultEditor - they use this.editor for text access
  		// so they work correctly regardless of which editor is active
  		this.defaultEditor.onEscape = () => {
-@@ -6894,7 +6899,7 @@
+@@ -7128,7 +7133,7 @@ export class InteractiveMode {
  		return keyDisplayText(action);
  	}
  
@@ -28,7 +48,7 @@
  		// Navigation keybindings
  		const cursorUp = this.getEditorKeyDisplay("tui.editor.cursorUp");
  		const cursorDown = this.getEditorKeyDisplay("tui.editor.cursorDown");
-@@ -6989,9 +6994,10 @@
+@@ -7224,9 +7229,10 @@ export class InteractiveMode {
  
  		// Add extension-registered shortcuts
  		const extensionRunner = this.session.extensionRunner;
@@ -40,18 +60,15 @@
  **Extensions**
  | Key | Action |
  |-----|--------|
-@@ -6999,10 +7005,62 @@
+@@ -7234,10 +7240,62 @@ export class InteractiveMode {
  			for (const [key, shortcut] of shortcuts) {
  				const description = shortcut.description ?? shortcut.extensionPath;
  				const keyDisplay = formatKeyText(key, { capitalize: true });
 -				hotkeys += `| \`${keyDisplay}\` | ${description} |\n`;
--			}
--		}
--
 +				extensionKeys += `| \`${keyDisplay}\` | ${description} |\n`;
-+			}
-+		}
-+
+ 			}
+ 		}
+ 
 +		return (extensionKeys + "\n" + hotkeys).trim();
 +	}
 +
@@ -107,19 +124,3 @@
  		this.chatContainer.addChild(new Spacer(1));
  		this.chatContainer.addChild(new DynamicBorder());
  		this.chatContainer.addChild(new ThemedText(() => theme.bold(theme.fg("accent", "Keyboard Shortcuts")), 1, 0));
---- a/packages/coding-agent/src/core/keybindings.ts
-+++ b/packages/coding-agent/src/core/keybindings.ts
-@@ -39,11 +39,11 @@
- 		description: "Save thinking level",
- 	},
- 	"app.model.cycleForward": {
--		defaultKeys: "ctrl+p",
-+		defaultKeys: "shift+ctrl+p",
- 		description: "Cycle to next model",
- 	},
- 	"app.model.cycleBackward": {
--		defaultKeys: windowsKeybindings ? "alt+p" : "shift+ctrl+p",
-+		defaultKeys: windowsKeybindings ? "alt+p" : [],
- 		description: "Cycle to previous model",
- 	},
- 	"app.model.select": { defaultKeys: "ctrl+l", description: "Open model selector" },

@@ -1,3 +1,5 @@
+diff --git a/packages/coding-agent/src/utils/open-browser.ts b/packages/coding-agent/src/utils/open-browser.ts
+index 727603a..0a45aa8 100644
 --- a/packages/coding-agent/src/utils/open-browser.ts
 +++ b/packages/coding-agent/src/utils/open-browser.ts
 @@ -1,4 +1,4 @@
@@ -6,11 +8,10 @@
  
  /**
   * Open a URL or file in the platform browser/default handler.
-@@ -18,7 +18,23 @@
+@@ -18,10 +18,26 @@ export function openBrowser(target: string): void {
  	// spawn reports launcher failures (for example, missing xdg-open) via an
  	// error event. Browser launch is best-effort: callers still present the target
  	// to the user, so keep the launcher failure from becoming a process crash.
--	spawn(cmd, args, { stdio: "ignore", detached: true })
 +	let env = process.env;
 +	const flags = process.argv.slice(2, process.argv.indexOf("--") < 0 ? undefined : process.argv.indexOf("--"));
 +	const headless = flags.some((flag, index) => flag === "--print" || flag === "-p" || flag === "--mode=json" || flag === "--mode=rpc" || (flag === "--mode" && flags[index + 1] !== "text"));
@@ -27,7 +28,11 @@
 +			}
 +		} catch { /* A terminal without a graphical user session keeps the normal fallback. */ }
 +	}
-+	spawn(cmd, args, { stdio: "ignore", detached: true, env })
+ 	// On WSL, xdg-open launches explorer.exe, which fails when the cwd's
+ 	// \\wsl.localhost\... path exceeds MAX_PATH (#11592). The target is a URL,
+ 	// so no launcher needs pi's cwd.
+-	spawn(cmd, args, { stdio: "ignore", detached: true, cwd: "/" })
++	spawn(cmd, args, { stdio: "ignore", detached: true, cwd: "/", env })
  		.on("error", () => {})
  		.unref();
  }

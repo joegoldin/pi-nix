@@ -1,30 +1,26 @@
+diff --git a/packages/coding-agent/src/core/extensions/types.ts b/packages/coding-agent/src/core/extensions/types.ts
+index 72f365e..8a46ee8 100644
 --- a/packages/coding-agent/src/core/extensions/types.ts
 +++ b/packages/coding-agent/src/core/extensions/types.ts
-@@ -52,6 +52,7 @@
- 	KeyId,
- 	OverlayHandle,
- 	OverlayOptions,
-+	ProgramStatus,
- 	TUI,
- } from "@earendil-works/pi-tui";
- import type { Static, TSchema } from "typebox";
-@@ -167,6 +168,13 @@
- 
+@@ -183,6 +183,13 @@ export interface ExtensionUIContext {
  	/** Set status text in the footer/status bar. Pass undefined to clear. */
  	setStatus(key: string, text: string | undefined): void;
-+
+ 
 +	/** Report independent terminal activity, not footer text. Keys are id paths under pi/.
 +	 * Use working for autonomous waits, blocked only for required user action, idle for cancellation.
 +	 * Omit progress unless measured. Never put prompts, commands, credentials or output in metadata.
 +	 * Undefined clears this record and its descendants. Optional on older/noninteractive hosts.
 +	 */
 +	setProgramStatus?(key: string, status: Omit<ProgramStatus, "id" | "app"> | undefined): void;
- 
++
  	/** Set the working/loading message shown during streaming. Call with no argument to restore default. */
  	setWorkingMessage(message?: string): void;
+ 
+diff --git a/packages/coding-agent/src/modes/interactive/interactive-mode.ts b/packages/coding-agent/src/modes/interactive/interactive-mode.ts
+index e13bd1a..d073044 100644
 --- a/packages/coding-agent/src/modes/interactive/interactive-mode.ts
 +++ b/packages/coding-agent/src/modes/interactive/interactive-mode.ts
-@@ -2712,6 +2712,7 @@
+@@ -2853,6 +2853,7 @@ export class InteractiveMode {
  			onTerminalInput: (handler) => this.addExtensionTerminalInputListener(handler),
  			onEditorInput: (handler) => this.addExtensionEditorInputListener(handler),
  			setStatus: (key, text) => this.setExtensionStatus(key, text),
@@ -32,7 +28,7 @@
  			setWorkingMessage: (message) => {
  				this.workingMessage = message;
  				if (this.activeStatusIndicator?.kind === "working") {
-@@ -2778,6 +2779,7 @@
+@@ -2919,6 +2920,7 @@ export class InteractiveMode {
  		if (index === -1) return;
  		this.extensionDialogs.splice(index, 1);
  		if (index === this.extensionDialogs.length) this.showTopExtensionDialog();
@@ -40,7 +36,7 @@
  	}
  
  	private showTopExtensionDialog(): void {
-@@ -2786,7 +2788,7 @@
+@@ -2927,7 +2929,7 @@ export class InteractiveMode {
  		this.editorContainer.clear();
  		this.editorContainer.addChild(component);
  		this.ui.setFocus(component, { preserveOverlayFocus: true });
@@ -49,7 +45,7 @@
  		this.ui.requestRender();
  	}
  
-@@ -6412,6 +6414,7 @@
+@@ -6660,6 +6662,7 @@ export class InteractiveMode {
  		method: "api_key" | "oauth",
  	): Promise<void> {
  		this.programStatus.setBlocked("login", { kind: "auth", message: `Log in to ${providerName}` });
@@ -57,7 +53,7 @@
  		try {
  			await this.session.modelRuntime.login(
  				providerId,
-@@ -6423,6 +6426,11 @@
+@@ -6671,6 +6674,11 @@ export class InteractiveMode {
  				},
  				{ getDeviceId: () => this.settingsManager.getOrCreateDeviceId() },
  			);
@@ -69,6 +65,8 @@
  		} finally {
  			this.programStatus.setBlocked("login", undefined);
  		}
+diff --git a/packages/coding-agent/src/modes/interactive/program-status-reporter.ts b/packages/coding-agent/src/modes/interactive/program-status-reporter.ts
+index 4dac611..125e404 100644
 --- a/packages/coding-agent/src/modes/interactive/program-status-reporter.ts
 +++ b/packages/coding-agent/src/modes/interactive/program-status-reporter.ts
 @@ -1,4 +1,4 @@
@@ -77,7 +75,7 @@
  import { APP_NAME } from "../../config.ts";
  import type { AgentSessionEvent } from "../../core/agent-session.ts";
  
-@@ -19,6 +19,8 @@
+@@ -19,6 +19,8 @@ export class ProgramStatusReporter {
  	private readonly getSessionName: () => string | undefined;
  	private runActive = false;
  	private compacting = false;
@@ -86,7 +84,7 @@
  	/** Outcome of the current run, reported once it settles. */
  	private runResult: ProgramStatus = { state: "done" };
  	/** Status while no run is active. */
-@@ -26,6 +28,7 @@
+@@ -26,6 +28,7 @@ export class ProgramStatusReporter {
  	/** Open dialogs by source, in the order they opened. The most recent one is reported. */
  	private readonly blocked = new Map<string, BlockedStatus>();
  	private lastReport: string | undefined;
@@ -94,14 +92,14 @@
  
  	constructor(getTerminal: () => Terminal, getSessionName: () => string | undefined) {
  		this.getTerminal = getTerminal;
-@@ -36,7 +39,21 @@
+@@ -36,8 +39,22 @@ export class ProgramStatusReporter {
  		switch (event.type) {
  			case "agent_start":
  				this.runActive = true;
 +				this.retrying = false;
 +				this.tools.clear();
  				this.runResult = { state: "done" };
-+				break;
+ 				break;
 +			case "tool_execution_start":
 +				this.tools.set(event.toolCallId, event.toolName);
 +				break;
@@ -113,10 +111,11 @@
 +				break;
 +			case "auto_retry_end":
 +				this.retrying = false;
- 				break;
++				break;
  			case "message_end":
  				// The latest response decides the outcome, so a retried error is replaced by its successful retry.
-@@ -65,6 +82,8 @@
+ 				if (event.message.role !== "assistant") return;
+@@ -65,6 +82,8 @@ export class ProgramStatusReporter {
  				break;
  			case "agent_settled":
  				this.runActive = false;
@@ -125,7 +124,7 @@
  				this.restingStatus = event.aborted ? { state: "idle" } : this.runResult;
  				break;
  			case "session_info_changed":
-@@ -83,10 +102,34 @@
+@@ -83,10 +102,34 @@ export class ProgramStatusReporter {
  		this.report();
  	}
  
@@ -160,7 +159,7 @@
  		this.runResult = { state: "done" };
  		this.restingStatus = { state: "idle" };
  		this.report();
-@@ -103,7 +146,16 @@
+@@ -103,7 +146,16 @@ export class ProgramStatusReporter {
  	private currentStatus(): ProgramStatus {
  		const blocked = [...this.blocked.values()].at(-1);
  		if (blocked) return { state: "blocked", ...blocked };
@@ -177,9 +176,11 @@
  		const status = this.runActive ? { state: "working" as const } : this.restingStatus;
  		if (status.state === "working" || status.state === "done") return { ...status, message: this.getSessionName() };
  		return status;
+diff --git a/packages/tui/src/index.ts b/packages/tui/src/index.ts
+index 8b4f9ea..f6fc159 100644
 --- a/packages/tui/src/index.ts
 +++ b/packages/tui/src/index.ts
-@@ -112,7 +112,7 @@
+@@ -113,7 +113,7 @@ export { type RenderLatexOptions, renderLatex } from "./latex.ts";
  export { getNativeClipboard, type NativeClipboard } from "./native-platform.ts";
  export { oklabToOkhslLightness } from "./oklab.ts";
  // Program status reporting (OSC 7501)
@@ -188,6 +189,8 @@
  // Input buffering for batch splitting
  export { StdinBuffer, type StdinBufferEventMap, type StdinBufferOptions } from "./stdin-buffer.ts";
  // Terminal interface and implementations
+diff --git a/packages/tui/src/program-status.ts b/packages/tui/src/program-status.ts
+index 919b6fc..06446f9 100644
 --- a/packages/tui/src/program-status.ts
 +++ b/packages/tui/src/program-status.ts
 @@ -1,6 +1,6 @@
@@ -198,7 +201,7 @@
   *
   * Spec: https://www.superlogical.com/rex/docs/build/program-status
   */
-@@ -8,6 +8,12 @@
+@@ -10,6 +10,12 @@ import { replaceControlCharacters } from "./utils.ts";
  export interface ProgramStatus {
  	/** `clear` removes the status instead of reporting one. */
  	state: "idle" | "working" | "blocked" | "done" | "error" | "clear";
@@ -211,12 +214,10 @@
  	/** Stable program name, `[A-Za-z0-9_.+-]{1,32}`. Other values are omitted. */
  	app?: string;
  	/** What a blocked program waits for. Omitted for other states. */
-@@ -22,6 +28,24 @@
- /** The reply to {@link PROGRAM_STATUS_QUERY}. Later spec revisions may add pairs after the `?`. */
- export function isProgramStatusReply(sequence: string): boolean {
+@@ -26,6 +32,24 @@ export function isProgramStatusReply(sequence: string): boolean {
  	return /^\x1b\]7501;\?[^\x07\x1b]*(?:\x07|\x1b\\)$/.test(sequence);
-+}
-+
+ }
+ 
 +export interface ProgramStatusCapabilities { states: string[]; kinds: string[] }
 +const STATES = ["idle", "working", "done", "blocked", "error"];
 +const KINDS = ["permission", "question", "auth"];
@@ -233,10 +234,12 @@
 +
 +export function validProgramStatusId(id: string): boolean {
 +	return id.length <= 128 && id.split("/").length <= 8 && id.split("/").every(segment => APP_PATTERN.test(segment));
- }
- 
++}
++
  const APP_PATTERN = /^[A-Za-z0-9_.+-]{1,32}$/;
-@@ -44,10 +68,26 @@
+ /** Decoded `msg` limit. Its base64 encoding stays under the 2732-byte encoded limit. */
+ const MAX_MESSAGE_BYTES = 2048;
+@@ -45,10 +69,26 @@ function truncateUtf8(text: string, maxBytes: number): string {
  
  /** Encode a status report. Terminals discard reports whose text contains control characters, so they are replaced. */
  export function formatProgramStatus(status: ProgramStatus): string {
@@ -245,12 +248,12 @@
 +	if (status.id !== undefined) pairs.push(`id=${status.id}`);
 +	if (status.state === "clear") return `\x1b]7501;${pairs.join(":")}\x1b\\`;
 +	if ((status.state === "working" || status.state === "blocked") && Number.isInteger(status.progress) && status.progress! >= 0 && status.progress! <= 100) pairs.push(`progress=${status.progress}`);
-+	const title = truncateUtf8((status.title ?? "").replace(CONTROL_CHARACTERS, " ").trim(), 192);
++	const title = truncateUtf8(replaceControlCharacters(status.title ?? "").trim(), 192);
 +	if (title) pairs.push(`title=${Buffer.from(title, "utf8").toString("base64")}`);
  	if (status.app !== undefined && APP_PATTERN.test(status.app)) pairs.push(`app=${status.app}`);
 -	if (status.state === "blocked" && status.kind) pairs.push(`kind=${status.kind}`);
 +	if (status.state === "blocked" && status.kind && KINDS.includes(status.kind)) pairs.push(`kind=${status.kind}`);
- 	const message = truncateUtf8((status.message ?? "").replace(CONTROL_CHARACTERS, " ").trim(), MAX_MESSAGE_BYTES);
+ 	const message = truncateUtf8(replaceControlCharacters(status.message ?? "").trim(), MAX_MESSAGE_BYTES);
  	if (message) pairs.push(`msg=${Buffer.from(message, "utf8").toString("base64")}`);
  	return `\x1b]7501;${pairs.join(":")}\x1b\\`;
  }
@@ -264,9 +267,11 @@
 +		?? entries.find(([id]) => !protectedSubtree(id, ["blocked"]))?.[0]
 +		?? entries[0]?.[0];
 +}
+diff --git a/packages/tui/src/terminal.ts b/packages/tui/src/terminal.ts
+index 55dab58..358192c 100644
 --- a/packages/tui/src/terminal.ts
 +++ b/packages/tui/src/terminal.ts
-@@ -4,8 +4,11 @@
+@@ -4,8 +4,11 @@ import { setKittyProtocolActive } from "./keys.ts";
  import { isNativeModifierPressed } from "./native-modifiers.ts";
  import { getNativePlatformHelper } from "./native-platform.ts";
  import {
@@ -278,7 +283,7 @@
  	PROGRAM_STATUS_QUERY,
  	type ProgramStatus,
  } from "./program-status.ts";
-@@ -168,7 +171,9 @@
+@@ -176,7 +179,9 @@ export class ProcessTerminal implements Terminal {
  	private stdinDataHandler?: (data: string) => void;
  	private progressInterval?: ReturnType<typeof setInterval>;
  	/** Latest program status, kept across stop() so start() can report it again. */
@@ -289,7 +294,7 @@
  	/** Whether the terminal confirmed OSC 7501 support since the last start(), or `PI_PROGRAM_STATUS=1`. */
  	private programStatusSupported = false;
  	/** The support query was sent and its DA1 sentinel has not arrived yet. */
-@@ -245,7 +250,8 @@
+@@ -253,7 +258,8 @@ export class ProcessTerminal implements Terminal {
  			if (isProgramStatusReply(sequence)) {
  				if (this.programStatusQueryPending) {
  					this.programStatusQueryPending = false;
@@ -299,7 +304,7 @@
  					this.writeProgramStatus();
  				}
  				return;
-@@ -299,6 +305,8 @@
+@@ -307,6 +313,8 @@ export class ProcessTerminal implements Terminal {
  		this.clearKeyboardProtocolNegotiationBuffer();
  		const programStatusOverride = process.env.PI_PROGRAM_STATUS;
  		this.programStatusSupported = programStatusOverride === "1";
@@ -308,7 +313,7 @@
  		this.programStatusQueryPending = programStatusOverride !== "1" && programStatusOverride !== "0";
  		const programStatusQuery = this.programStatusQueryPending ? PROGRAM_STATUS_QUERY : "";
  		process.stdout.write(`${KITTY_KEYBOARD_PROTOCOL_QUERY}${programStatusQuery}${DEVICE_ATTRIBUTES_QUERY}`);
-@@ -474,9 +482,10 @@
+@@ -482,9 +490,10 @@ export class ProcessTerminal implements Terminal {
  		if (this.clearProgressInterval()) {
  			process.stdout.write(TERMINAL_PROGRESS_CLEAR_SEQUENCE);
  		}
@@ -322,7 +327,7 @@
  		}
  		this.programStatusSupported = false;
  		this.programStatusQueryPending = false;
-@@ -541,6 +550,17 @@
+@@ -549,6 +558,17 @@ export class ProcessTerminal implements Terminal {
  
  	write(data: string): void {
  		process.stdout.write(data);
@@ -340,18 +345,12 @@
  		if (this.writeLogPath) {
  			try {
  				fs.appendFileSync(this.writeLogPath, data, { encoding: "utf8" });
-@@ -595,14 +615,43 @@
+@@ -604,16 +624,45 @@ export class ProcessTerminal implements Terminal {
  	}
  
  	setProgramStatus(status: ProgramStatus): void {
 -		this.programStatus = status.state === "clear" ? undefined : status;
 -		if (this.programStatusSupported) process.stdout.write(formatProgramStatus(status));
--	}
--
--	private writeProgramStatus(): void {
--		if (this.programStatusSupported && this.programStatus) {
--			process.stdout.write(formatProgramStatus(this.programStatus));
--		}
 +		if (!formatProgramStatus(status)) return;
 +		const key = status.id ?? "";
 +		if (status.state === "clear") {
@@ -370,14 +369,17 @@
 +			this.programStatuses.set(key, { ...status });
 +		}
 +		this.emitProgramStatus(status);
-+	}
-+
+ 	}
+ 
+-	private writeProgramStatus(): void {
+-		if (this.programStatusSupported && this.programStatus) {
+-			process.stdout.write(formatProgramStatus(this.programStatus));
 +	private writeProgramStatus(activeOnly = false): void {
 +		for (const status of this.programStatuses.values()) {
 +			if (!activeOnly || (status.state !== "done" && status.state !== "error")) this.emitProgramStatus(status);
-+		}
-+	}
-+
+ 		}
+ 	}
+ 
 +	private emitProgramStatus(status: ProgramStatus): void {
 +		if (!this.programStatusSupported) return;
 +		const capabilities = this.programStatusCapabilities;
@@ -389,12 +391,16 @@
 +			if (status.kind && !capabilities.kinds.includes(status.kind)) status = { ...status, kind: undefined };
 +		}
 +		process.stdout.write(formatProgramStatus(status));
- 	}
- 
++	}
++
  	setProgress(active: boolean): void {
+ 		if (active) {
+ 			// OSC 9;4;3 - indeterminate progress
+diff --git a/packages/tui/test/terminal.test.ts b/packages/tui/test/terminal.test.ts
+index 8f8ce0e..1f0f32b 100644
 --- a/packages/tui/test/terminal.test.ts
 +++ b/packages/tui/test/terminal.test.ts
-@@ -236,7 +236,7 @@
+@@ -243,7 +243,7 @@ describe("ProcessTerminal Kitty keyboard protocol negotiation", () => {
  	// #10607
  	describe("program status (OSC 7501)", () => {
  		const working = "\x1b]7501;state=working:app=pi\x1b\\";
@@ -403,7 +409,7 @@
  
  		function withOverride(value: string | undefined, fn: () => void): void {
  			const previous = process.env.PI_PROGRAM_STATUS;
-@@ -332,14 +332,15 @@
+@@ -339,14 +339,15 @@ describe("ProcessTerminal Kitty keyboard protocol negotiation", () => {
  			});
  		});
  

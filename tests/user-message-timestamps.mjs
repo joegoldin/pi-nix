@@ -12,7 +12,7 @@ const { InteractiveMode } = await load("@earendil-works/pi-coding-agent/dist/mod
 initTheme("dark", false);
 process.env.TZ = "UTC";
 const timestamp = Date.parse("2026-10-19T16:24:00Z");
-const component = new UserMessageComponent("A user message", getMarkdownTheme(), 1, [], timestamp);
+const component = new UserMessageComponent("A user message", getMarkdownTheme(), 1, [], undefined, undefined, timestamp);
 const plain = (rows) => rows.map(stripTerminalSequences);
 const rows = component.render(50);
 assert(plain(rows)[0].endsWith("4:24 PM "));
@@ -33,7 +33,7 @@ for (const width of [1, 5, 8, 10, 20, 50]) {
 }
 component.setOutputPad(2);
 assert(plain(component.render(50))[0].endsWith("4:24 PM  "));
-assert(!plain(new UserMessageComponent("old", getMarkdownTheme(), 1, [], NaN).render(50)).join("\n").includes("Invalid"));
+assert(!plain(new UserMessageComponent("old", getMarkdownTheme(), 1, [], undefined, undefined, NaN).render(50)).join("\n").includes("Invalid"));
 process.env.TZ = "America/Los_Angeles";
 assert(plain(component.render(50))[0].includes("9:24 AM"), "time is local, not fixed UTC");
 process.env.TZ = "UTC";
@@ -56,7 +56,7 @@ console.log("User timestamps: stored time, local zone, narrow widths, history/sk
 const continuation = "Continue the active /goal until it is complete:\n\n<goal_objective>\nFinish the implementation\n</goal_objective>\n\nFull continuation rules remain in model input.\n\n<!-- pi-goal-continuation:goal-id:4:nonce -->";
 const goalMessage = { role: "user", content: continuation, timestamp };
 const goalContext = {
-  chatContainer: new Container(), loadedResourcesContainer: new Container(), outputPad: 1,
+  chatContainer: new Container(), loadedResourcesContainer: new Container(), pendingMessagesContainer: new Container(), outputPad: 1,
   messageComponents: new WeakMap(), toolOutputExpanded: false, showStatus() {},
   getUserMessageText: () => continuation, getMarkdownThemeWithSettings: getMarkdownTheme,
   getMarkdownTransformers: () => [],

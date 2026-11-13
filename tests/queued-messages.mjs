@@ -13,7 +13,8 @@ initTheme("dark", false);
 const { KEYBINDINGS, KeybindingsManager } = await load("@earendil-works/pi-coding-agent/dist/core/keybindings.js");
 assert.equal(KEYBINDINGS["app.message.sendNow"].defaultKeys, "ctrl+enter");
 assert.equal(KEYBINDINGS["app.message.followUp"].defaultKeys, "alt+enter");
-const image = { type: "image", mimeType: "image/png", data: "aW1hZ2U=" };
+// A real 1x1 PNG: Pi 1.5 resizes queued images on delivery and omits undecodable ones.
+const image = { type: "image", mimeType: "image/png", data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==" };
 const message = { role: "user", content: [{ type: "text", text: "inspect this" }, image], timestamp: 1 };
 const agent = new Agent();
 agent.steer(message);
@@ -45,6 +46,7 @@ assert.equal(agent.getQueuedMessages()[0], message, "failed preparation does not
 const proto = InteractiveMode.prototype;
 const display = {
   pendingMessagesContainer: new Container(),
+  pendingBashComponents: [],
   getAllQueuedMessages: () => ({ steering: ["/tmp/screenshot.png inspect this"], followUp: [] }),
   getAppKeyDisplay: (key) => ({ "app.message.dequeue": "Alt+Up", "app.message.sendNow": "Ctrl+Enter", "app.message.interruptAndSend": "Ctrl+Shift+Enter", "app.message.followUp": "Alt+Enter" })[key],
   session: { isCompacting: false },
@@ -98,7 +100,7 @@ assert(keys.matches("\x1b[13;6u", "app.message.interruptAndSend"));
 assert(!keys.matches("\x1b[13;6u", "app.message.sendNow"));
 const { CustomEditor } = await load("@earendil-works/pi-coding-agent/dist/modes/interactive/components/custom-editor.js");
 const routed = [];
-const routingEditor = { actionHandlers: new Map(), keybindings: keys, onAction: CustomEditor.prototype.onAction };
+const routingEditor = { actionHandlers: new Map(), keybindings: keys, onAction: CustomEditor.prototype.onAction, isShowingAutocomplete: () => false };
 proto.setupKeyHandlers.call({
   editor: routingEditor, defaultEditor: routingEditor, ui: {}, wrapEditorInput() {},
   handleSendQueuedNow: (interrupt = false) => routed.push(interrupt),

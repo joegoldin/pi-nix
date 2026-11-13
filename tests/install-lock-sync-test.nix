@@ -17,7 +17,6 @@ pkgs.runCommand "pi-install-lock-sync-tests"
     chmod -R u+w source
     cp ${../package-lock.json} source/package-lock.json
     cd source
-    # The workspace source already carries dependency-updates.patch.
     patch --batch --forward --fuzz=0 -p1 < ${../coding-agent/installer-chord.patch}
     node scripts/generate-coding-agent-install-lock.mjs
     cmp packages/coding-agent/install-lock/package.json ${../coding-agent/install-lock/package.json}

@@ -73,7 +73,6 @@
               inherit rev hash;
             };
             patches = [
-              ./coding-agent/dependency-updates.patch
               ./coding-agent/open-browser.patch
               ./coding-agent/jump-to-last-user.patch
               ./coding-agent/user-message-timestamps.patch
@@ -132,10 +131,15 @@
             default = coding-agent;
 
             coding-agent = pkgs.callPackage ./coding-agent/package.nix {
-              inherit src version npmDepsHash;
+              inherit
+                src
+                version
+                npmDepsHash
+                patch
+                ;
             };
             coding-agent-bun = bunPkgs.callPackage ./coding-agent/package-bun.nix {
-              inherit src version;
+              inherit src version patch;
             };
 
             docs-md =

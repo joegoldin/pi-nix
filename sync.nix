@@ -48,14 +48,13 @@ pkgs.writeShellApplication {
       # bun2nix supports lockfile version 1; Bun preserves it when updating.
       cp bun.lock "$tmpdir/bun.lock"
 
-      # Bun updates workspace versions but leaves their dependency ranges at the
-      # previous release in the seeded lockfile. For example, when updating to
-      # v0.87.0, "@earendil-works/pi-ai": "^0.86.1" must become "^0.87.0".
-      # Otherwise the mismatch triggers dependency re-resolution in the
-      # network-isolated Nix build.
+      # Bun can leave workspace dependency references at the previous release
+      # in the seeded lockfile. Update exact pins and caret ranges alike, e.g.
+      # "@earendil-works/pi-ai": "1.3.0" becomes "1.4.0", preserving any caret.
+      # Stale references can fail audit fix or re-resolve during sandboxed builds.
       previous_version=$(jq -r '.rev | ltrimstr("v")' VERSION.json)
       if [[ "$previous_version" != "''${rev#v}" ]]; then
-        sed -Ei "s#(\"@earendil-works/[^\"]+\": \"\^)''${previous_version//./\\.}(\")#\1''${rev#v}\2#g" "$tmpdir/bun.lock"
+        sed -Ei "s#(\"@earendil-works/[^\"]+\": \"\^?)''${previous_version//./\\.}(\")#\1''${rev#v}\2#g" "$tmpdir/bun.lock"
       fi
 
       pushd "$tmpdir" >/dev/null
@@ -68,7 +67,6 @@ pkgs.writeShellApplication {
       node scripts/generate-coding-agent-install-lock.mjs
 
       bun install --ignore-scripts
-      node ${./coding-agent/dependency-compat.mjs}
       # Bun has no audit-level=none. Reuse only the workspace exceptions;
       # registry/install errors and other remaining advisories still fail.
       # Exact-pin fixes can rewrite manifests, which our pristine-source builds
@@ -99,7 +97,8 @@ pkgs.writeShellApplication {
       # which nix resolves when it schedules the build rather than while it is
       # still evaluating.
       sed -i '/^  fetchurl,$/a\  workspaceSubdir ? throw "coding-agent/bun.nix requires workspaceSubdir (see package-bun.nix)",' "$tmpdir/bun.nix"
-      sed -Ei 's|copyPathToStore \.\/packages\/([^ );]+)|workspaceSubdir "packages/\1"|g' "$tmpdir/bun.nix"
+      # Every workspace member, including apps/* added in Pi 1.5.
+      sed -Ei 's|copyPathToStore \.\/([^ );]+)|workspaceSubdir "\1"|g' "$tmpdir/bun.nix"
 
       npm_deps_hash=$(prefetch-npm-deps "$tmpdir/package-lock.json" | tail -n1)
 

@@ -15,7 +15,7 @@ execFileSync("npm", ["--version"], { stdio: "pipe" });
 
 // Model selection and package filters rely on the upgraded minimatch API.
 const { minimatch } = require("minimatch");
-assert.equal(require("minimatch/package.json").version, "11.0.1");
+assert.equal(require("minimatch/package.json").version, "11.0.3");
 for (const [value, pattern, options, expected] of [
   ["openai/GPT-6", "openai/gpt-*", { nocase: true }, true],
   ["anthropic/claude-sonnet", "openai/*", { nocase: true }, false],

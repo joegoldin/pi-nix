@@ -1,6 +1,20 @@
+diff --git a/packages/coding-agent/src/core/extensions/runner.ts b/packages/coding-agent/src/core/extensions/runner.ts
+index aec06d1..72c0501 100644
+--- a/packages/coding-agent/src/core/extensions/runner.ts
++++ b/packages/coding-agent/src/core/extensions/runner.ts
+@@ -352,6 +352,7 @@ const noOpUIContext: ExtensionUIContext = {
+ 	pasteToEditor: () => {},
+ 	setEditorText: () => {},
+ 	getEditorText: () => "",
++	getInputDockHeight: () => 0,
+ 	editor: async () => undefined,
+ 	addAutocompleteProvider: () => {},
+ 	setEditorComponent: () => {},
+diff --git a/packages/coding-agent/src/core/extensions/types.ts b/packages/coding-agent/src/core/extensions/types.ts
+index 8a46ee8..1ca6fc9 100644
 --- a/packages/coding-agent/src/core/extensions/types.ts
 +++ b/packages/coding-agent/src/core/extensions/types.ts
-@@ -254,6 +254,9 @@
+@@ -274,6 +274,9 @@ export interface ExtensionUIContext {
  	/** Get the current text from the core input editor. */
  	getEditorText(): string;
  
@@ -10,19 +24,11 @@
  	/** Show a multi-line editor for text editing. */
  	editor(title: string, prefill?: string): Promise<string | undefined>;
  
---- a/packages/coding-agent/src/core/extensions/runner.ts
-+++ b/packages/coding-agent/src/core/extensions/runner.ts
-@@ -352,6 +352,7 @@
- 	pasteToEditor: () => {},
- 	setEditorText: () => {},
- 	getEditorText: () => "",
-+	getInputDockHeight: () => 0,
- 	editor: async () => undefined,
- 	addAutocompleteProvider: () => {},
- 	setEditorComponent: () => {},
+diff --git a/packages/coding-agent/src/modes/interactive/interactive-mode.ts b/packages/coding-agent/src/modes/interactive/interactive-mode.ts
+index d073044..5f95357 100644
 --- a/packages/coding-agent/src/modes/interactive/interactive-mode.ts
 +++ b/packages/coding-agent/src/modes/interactive/interactive-mode.ts
-@@ -2733,6 +2733,14 @@
+@@ -2873,6 +2873,14 @@ export class InteractiveMode {
  			pasteToEditor: (text) => this.editor.handleInput(`\x1b[200~${text}\x1b[201~`),
  			setEditorText: (text) => this.editor.setText(text),
  			getEditorText: () => this.editor.getExpandedText?.() ?? this.editor.getText(),
@@ -37,14 +43,16 @@
  			editor: (title, prefill) => this.showExtensionEditor(title, prefill),
  			addAutocompleteProvider: (factory) => {
  				this.autocompleteProviderWrappers.push(factory);
+diff --git a/packages/coding-agent/src/modes/rpc/rpc-mode.ts b/packages/coding-agent/src/modes/rpc/rpc-mode.ts
+index ead7023..f33be54 100644
 --- a/packages/coding-agent/src/modes/rpc/rpc-mode.ts
 +++ b/packages/coding-agent/src/modes/rpc/rpc-mode.ts
-@@ -252,6 +252,8 @@
- 				text,
+@@ -257,6 +257,8 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
  			} as RpcExtensionUIRequest);
  		},
-+
-+		getInputDockHeight: () => 0,
  
++		getInputDockHeight: () => 0,
++
  		getEditorText(): string {
  			// Synchronous method can't wait for RPC response
+ 			// Host should track editor state locally if needed

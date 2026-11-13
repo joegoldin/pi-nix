@@ -1,6 +1,8 @@
+diff --git a/packages/coding-agent/src/modes/interactive/components/user-message.ts b/packages/coding-agent/src/modes/interactive/components/user-message.ts
+index e313e02..2cda775 100644
 --- a/packages/coding-agent/src/modes/interactive/components/user-message.ts
 +++ b/packages/coding-agent/src/modes/interactive/components/user-message.ts
-@@ -3,7 +3,7 @@
+@@ -3,7 +3,7 @@ import type { MarkdownTransformer } from "../../../core/extensions/types.ts";
  import { getMarkdownTheme, theme } from "../theme/theme.ts";
  import { createMarkdownTransform } from "./markdown-transform.ts";
  
@@ -9,22 +11,26 @@
  const OSC133_ZONE_END = "\x1b]133;B\x07";
  const OSC133_ZONE_FINAL = "\x1b]133;C\x07";
  
+diff --git a/packages/coding-agent/src/modes/interactive/tui-renderer.ts b/packages/coding-agent/src/modes/interactive/tui-renderer.ts
+index 6487c1c..56918b2 100644
 --- a/packages/coding-agent/src/modes/interactive/tui-renderer.ts
 +++ b/packages/coding-agent/src/modes/interactive/tui-renderer.ts
-@@ -30,6 +30,10 @@
- 			scrollToEndIndicator: () => {
- 				const shortcut = keyDisplayText("tui.altScreen.bottom");
+@@ -32,6 +32,10 @@ export function createInteractiveTui(options: InteractiveTuiOptions): TuiMainScr
  				const label = ` ↓ Jump to latest message${shortcut ? ` · ${shortcut}` : ""} `;
-+				return theme.bg("selectedBg", theme.fg("text", label));
-+			},
-+			scrollToLastPromptIndicator: () => {
-+				const label = " ↑ Jump to previous user message ";
  				return theme.bg("selectedBg", theme.fg("text", label));
  			},
++			scrollToLastPromptIndicator: () => {
++				const label = " ↑ Jump to previous user message ";
++				return theme.bg("selectedBg", theme.fg("text", label));
++			},
  			openUrl: openBrowser,
+ 			onRightClickPaste: options.onRightClickPaste,
+ 			copyOnSelect: options.fullscreenCopyOnSelect,
+diff --git a/packages/tui/src/layout.ts b/packages/tui/src/layout.ts
+index a64c262..ba14441 100644
 --- a/packages/tui/src/layout.ts
 +++ b/packages/tui/src/layout.ts
-@@ -11,7 +11,7 @@
+@@ -11,7 +11,7 @@ import {
  	visibleWidth,
  } from "./utils.ts";
  
@@ -33,9 +39,11 @@
  
  export interface LayoutRect {
  	x: number;
+diff --git a/packages/tui/src/tui-alt-screen.ts b/packages/tui/src/tui-alt-screen.ts
+index 85f69ac..d4c12a4 100644
 --- a/packages/tui/src/tui-alt-screen.ts
 +++ b/packages/tui/src/tui-alt-screen.ts
-@@ -71,8 +71,9 @@
+@@ -71,8 +71,9 @@ const FOCUS_IN = "\x1b[I";
  const FOCUS_OUT = "\x1b[O";
  const BEGIN_SYNCHRONIZED_OUTPUT = "\x1b[?2026h";
  const END_SYNCHRONIZED_OUTPUT = "\x1b[?2026l";
@@ -47,7 +55,7 @@
  const PAGE_SCROLL_OVERLAP = 4;
  const ALT_WHEEL_SCROLL_MULTIPLIER = 5;
  const MAX_CACHED_OFFSCREEN_KITTY_IMAGES = 16;
-@@ -184,6 +185,7 @@
+@@ -185,6 +186,7 @@ export interface TuiAltScreenOptions {
  	 * primary scroll view while that view is scrolled away from its end.
  	 */
  	scrollToEndIndicator?: () => string;
@@ -55,7 +63,7 @@
  	/** Open an OSC 8 hyperlink activated with a primary-button click. */
  	openUrl?: (url: string) => void;
  	/** Handle an unmodified secondary-button press for clipboard paste. Currently enabled on Windows only. */
-@@ -227,6 +229,7 @@
+@@ -228,6 +230,7 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
  	private scrollbarDrag?: ScrollbarDrag;
  	private scrollbarHover?: ScrollView;
  	private scrollToEndIndicatorRect?: ScrollToEndIndicatorRect;
@@ -63,7 +71,7 @@
  	private activeSearch?: ActiveSearch;
  	private pressedUrl?: string;
  	private selectionDragged = false;
-@@ -247,6 +250,7 @@
+@@ -248,6 +251,7 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
  	private readonly searchCurrentMatchStyle: (text: string) => string;
  	private readonly searchNavigationButtonStyle: (text: string, hovered: boolean) => string;
  	private readonly scrollToEndIndicator?: () => string;
@@ -71,7 +79,7 @@
  	private readonly openUrl?: (url: string) => void;
  	private readonly onRightClickPaste?: () => void;
  	private copyOnSelect: boolean;
-@@ -274,6 +278,7 @@
+@@ -275,6 +279,7 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
  		this.searchCurrentMatchStyle = options.searchCurrentMatchStyle ?? ((text) => `\x1b[1;7m${text}\x1b[22;27m`);
  		this.searchNavigationButtonStyle = options.searchNavigationButtonStyle ?? ((text) => text);
  		this.scrollToEndIndicator = options.scrollToEndIndicator;
@@ -79,7 +87,7 @@
  		this.openUrl = options.openUrl;
  		this.onRightClickPaste = options.onRightClickPaste;
  		this.copyOnSelect = options.copyOnSelect ?? true;
-@@ -1034,6 +1039,20 @@
+@@ -1048,6 +1053,20 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
  	}
  
  	private handleScrollToEndIndicatorMouseEvent(event: SgrMouseEvent): boolean {
@@ -100,7 +108,7 @@
  		const rect = this.scrollToEndIndicatorRect;
  		if (!rect || event.release || (event.button & 32) !== 0 || (event.button & 3) !== 0) return false;
  		if (event.y !== rect.row || event.x < rect.column || event.x >= rect.column + rect.width) return false;
-@@ -1662,6 +1681,42 @@
+@@ -1676,6 +1695,42 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
  		return result;
  	}
  
@@ -143,7 +151,7 @@
  	private compositeFlashes(screen: string[], width: number, height: number): string[] {
  		const flashLines = this.flashes.render(width).slice(-height);
  		if (flashLines.length === 0) return screen;
-@@ -1689,6 +1744,7 @@
+@@ -1703,6 +1758,7 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
  		let screen = this.resolveFakeCursors(nextLayout.lines.map((line) => line.replace(OSC133_ZONE_PREFIX, "")));
  		screen = this.applySearchHighlights(screen, nextLayout);
  		screen = this.compositeScrollToEndIndicator(screen, nextLayout, width);
@@ -151,6 +159,9 @@
  		screen = this.compositeOverlays(screen, width, height);
  		if (screen.length > height) screen = screen.slice(screen.length - height);
  		screen = this.applySelection(screen, nextLayout);
+diff --git a/packages/tui/test/jump-to-last-user.test.ts b/packages/tui/test/jump-to-last-user.test.ts
+new file mode 100644
+index 0000000..3966272
 --- /dev/null
 +++ b/packages/tui/test/jump-to-last-user.test.ts
 @@ -0,0 +1,201 @@

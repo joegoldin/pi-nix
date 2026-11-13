@@ -4,6 +4,11 @@
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+
+// Pi 1.5's StringEnum returns its own schema type, which loses its literal
+// static type inside a typebox object. Unsafe keeps the same JSON schema.
+const literalEnum = <T extends readonly string[]>(values: T, options?: Parameters<typeof StringEnum<T>>[1]) =>
+	Type.Unsafe<T[number]>(StringEnum(values, options));
 import type { Intercom } from "./runtime.ts";
 import { registerPeerCompletion } from "./completion.ts";
 
@@ -42,7 +47,7 @@ export function registerIntercomTool(pi: ExtensionAPI, intercom: () => Intercom 
 		// One fixed string: a snippet that changed with state would break prompt caching (pi-intercom #118).
 		promptSnippet: "Use to coordinate with other local agent sessions (pi or Claude Code): list peers, send updates, ask for help, or check intercom connectivity.",
 		parameters: Type.Object({
-			action: StringEnum(["list", "list-cwd", "send", "ask", "handover", "reply", "pending", "status", "cancel", "complete"] as const, {
+			action: literalEnum(["list", "list-cwd", "send", "ask", "handover", "reply", "pending", "status", "cancel", "complete"] as const, {
 				description:
 					"Action: 'list', 'list-cwd', 'send', 'ask', 'handover', 'reply', 'pending', 'status', 'cancel', or 'complete'. 'complete' reports contribution evidence and optionally requests graceful exit; it never authorizes terminal cleanup. 'handover' summarizes this session with the current model and sends it to the target, which acts on it; 'message' is the optional next task.",
 			}),
@@ -55,12 +60,12 @@ export function registerIntercomTool(pi: ExtensionAPI, intercom: () => Intercom 
 			message: Type.Optional(
 				Type.String({ description: "Message to send (for 'send', 'ask', 'reply', or 'complete'; completion should include evidence and blockers). For 'handover', the optional next task for the receiver." }),
 			),
-			quit: Type.Optional(StringEnum(["keep", "ask", "auto"] as const, { description: "For complete: keep this Pi open (default), ask its local user to exit, or use an explicitly authorized --peer-auto-exit launch. Never closes a pane." })),
+			quit: Type.Optional(literalEnum(["keep", "ask", "auto"] as const, { description: "For complete: keep this Pi open (default), ask its local user to exit, or use an explicitly authorized --peer-auto-exit launch. Never closes a pane." })),
 			requestCleanup: Type.Optional(Type.Boolean({ description: "For complete: ask the requester to arrange terminal cleanup. This is a request, not permission to close anything." })),
 			attachments: Type.Optional(
 				Type.Array(
 					Type.Object({
-						type: StringEnum(["file", "snippet", "context"] as const),
+						type: literalEnum(["file", "snippet", "context"] as const),
 						name: Type.String(),
 						content: Type.String(),
 						language: Type.Optional(Type.String()),

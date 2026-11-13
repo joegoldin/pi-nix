@@ -554,6 +554,7 @@ it("routes native mouse clicks and typing between the live main editor and real 
 	const mode = Object.assign(Object.create(InteractiveMode.prototype), {
 		ui: tui, editor: main, editorContainer, extensionDialogs: [], keybindings: {},
 		widgetContainerBelow: new Container(), footerContainer: new Container(),
+		extensionOverlays: new Map(), nextBlockingOverlayId: 0,
 	});
 	Object.assign(h.ctx.ui, mode.createExtensionUIContext());
 	tui.setFocus(main);

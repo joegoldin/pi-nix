@@ -1,6 +1,8 @@
+diff --git a/packages/coding-agent/src/core/extensions/runner.ts b/packages/coding-agent/src/core/extensions/runner.ts
+index 637940a..aec06d1 100644
 --- a/packages/coding-agent/src/core/extensions/runner.ts
 +++ b/packages/coding-agent/src/core/extensions/runner.ts
-@@ -121,6 +121,8 @@
+@@ -121,6 +121,8 @@ type BuiltInKeyBindings = Partial<Record<KeyId, { keybinding: string; restrictOv
  const buildBuiltinKeybindings = (resolvedKeybindings: KeybindingsConfig): BuiltInKeyBindings => {
  	const builtinKeybindings = {} as BuiltInKeyBindings;
  	for (const [keybinding, keys] of Object.entries(resolvedKeybindings)) {

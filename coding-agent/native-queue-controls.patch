@@ -1,5 +1,51 @@
+diff --git a/packages/agent/src/agent-loop.ts b/packages/agent/src/agent-loop.ts
+index cfc9401..a41b5e6 100644
+--- a/packages/agent/src/agent-loop.ts
++++ b/packages/agent/src/agent-loop.ts
+@@ -409,11 +409,14 @@ async function streamAssistantResponse(
+ 	const resolvedApiKey =
+ 		(config.getApiKey ? await config.getApiKey(config.model.provider) : undefined) || config.apiKey;
+ 
++	// Yielding thinking cancels only this request, never the run or a running tool.
++	const requestController = new AbortController();
++	const requestSignal = signal ? AbortSignal.any([signal, requestController.signal]) : requestController.signal;
+ 	const response = await streamFunction(config.model, llmContext, {
+ 		...config,
+ 		apiKey: resolvedApiKey,
+ 		identity: mergeClientIdentity(DEFAULT_AGENT_IDENTITY, config.identity),
+-		signal,
++		signal: requestSignal,
+ 	});
+ 	// Record the requested level, whichever stream function answered.
+ 	const result = async () => Object.assign(await response.result(), { thinkingLevel: config.reasoning ?? "off" });
+@@ -447,6 +450,25 @@ async function streamAssistantResponse(
+ 						assistantMessageEvent: event,
+ 						message: { ...partialMessage },
+ 					});
++					const completedThinkingLine = event.type === "thinking_end" ||
++						(event.type === "thinking_delta" && /\r?\n/.test(event.delta));
++					if (completedThinkingLine && config.shouldYieldAfterThinking?.() && !signal?.aborted &&
++						!partialMessage.content.some((part) => part.type === "toolCall")) {
++						// Providers mutate their partial on cancellation. Preserve a detached snapshot,
++						// not an aborted reply or an incomplete signed reasoning item for replay.
++						const yielded = structuredClone(partialMessage);
++						yielded.stopReason = "stop";
++						yielded.thinkingLevel = config.reasoning ?? "off";
++						delete yielded.responseId;
++						const thinking = yielded.content[event.contentIndex];
++						if (thinking?.type === "thinking" && event.type !== "thinking_end") {
++							delete thinking.thinkingSignature;
++						}
++						requestController.abort();
++						context.messages[context.messages.length - 1] = yielded;
++						await emit({ type: "message_end", message: yielded });
++						return yielded;
++					}
+ 				}
+ 				break;
+ 
 diff --git a/packages/agent/src/agent.ts b/packages/agent/src/agent.ts
-index c0a482d3..5f5e1ff2 100644
+index c0a482d..05545ab 100644
 --- a/packages/agent/src/agent.ts
 +++ b/packages/agent/src/agent.ts
 @@ -148,6 +148,7 @@ export interface AgentOptions {
@@ -28,7 +74,7 @@ index c0a482d3..5f5e1ff2 100644
  		if (this.mode === "all") return this.messages.slice();
  		const first = this.messages[0];
  		return first ? [first] : [];
-@@ -171,11 +178,25 @@ class PendingMessageQueue {
+@@ -171,11 +182,25 @@ class PendingMessageQueue {
  	drain(): AgentMessage[] {
  		const drained = this.peek();
  		this.messages = this.messages.slice(drained.length);
@@ -54,7 +100,7 @@ index c0a482d3..5f5e1ff2 100644
  	}
  }
  
-@@ -196,6 +217,7 @@ export class Agent {
+@@ -196,6 +221,7 @@ export class Agent {
  	private readonly listeners = new Set<(event: AgentEvent, signal: AbortSignal) => Promise<void> | void>();
  	private readonly steeringQueue: PendingMessageQueue;
  	private readonly followUpQueue: PendingMessageQueue;
@@ -62,7 +108,7 @@ index c0a482d3..5f5e1ff2 100644
  
  	public convertToLlm: (messages: AgentMessage[]) => Message[] | Promise<Message[]>;
  	public transformContext?: (messages: AgentMessage[], signal?: AbortSignal) => Promise<AgentMessage[]>;
-@@ -316,12 +338,12 @@ export class Agent {
+@@ -316,12 +342,12 @@ export class Agent {
  
  	/** Remove all queued steering messages. */
  	clearSteeringQueue(): void {
@@ -77,7 +123,7 @@ index c0a482d3..5f5e1ff2 100644
  	}
  
  	/** Remove all queued steering and follow-up messages. */
-@@ -335,6 +357,25 @@ export class Agent {
+@@ -335,6 +361,25 @@ export class Agent {
  		return this.steeringQueue.hasItems() || this.followUpQueue.hasItems();
  	}
  
@@ -103,7 +149,7 @@ index c0a482d3..5f5e1ff2 100644
  	/** Preview the messages selected for the next turn without consuming them. */
  	peekQueuedMessages(): AgentMessage[] {
  		const steering = this.steeringQueue.peek();
-@@ -401,13 +442,13 @@ export class Agent {
+@@ -401,13 +446,13 @@ export class Agent {
  		}
  
  		if (lastMessage.role === "assistant") {
@@ -119,7 +165,7 @@ index c0a482d3..5f5e1ff2 100644
  			if (queuedFollowUps.length > 0) {
  				await this.runPromptMessages(queuedFollowUps);
  				return;
-@@ -473,6 +514,22 @@ export class Agent {
+@@ -473,6 +518,22 @@ export class Agent {
  		};
  	}
  
@@ -142,7 +188,8 @@ index c0a482d3..5f5e1ff2 100644
  	private createLoopConfig(options: { skipInitialSteeringPoll?: boolean } = {}): AgentLoopConfig {
  		let skipInitialSteeringPoll = options.skipInitialSteeringPoll === true;
  		return {
-@@ -504,13 +561,16 @@ export class Agent {
+@@ -503,14 +564,17 @@ export class Agent {
+ 			convertToLlm: this.convertToLlm,
  			transformContext: this.transformContext,
  			getApiKey: this.getApiKey,
 +			shouldYieldAfterThinking: () => this.steeringQueue.hasPrioritizedMessages(),
@@ -161,7 +208,7 @@ index c0a482d3..5f5e1ff2 100644
  		};
  	}
  
-@@ -558,6 +617,13 @@ export class Agent {
+@@ -558,6 +622,13 @@ export class Agent {
  	}
  
  	private finishRun(): void {
@@ -175,7 +222,7 @@ index c0a482d3..5f5e1ff2 100644
  		this._state.isStreaming = false;
  		this._state.streamingMessage = undefined;
  		this._state.pendingToolCalls = new Set<string>();
-@@ -575,6 +641,10 @@ export class Agent {
+@@ -575,6 +646,10 @@ export class Agent {
  	private async processEvents(event: AgentEvent): Promise<void> {
  		switch (event.type) {
  			case "message_start":
@@ -186,11 +233,25 @@ index c0a482d3..5f5e1ff2 100644
  				this._state.streamingMessage = event.message;
  				break;
  
+diff --git a/packages/agent/src/types.ts b/packages/agent/src/types.ts
+index 24bdd75..85c420e 100644
+--- a/packages/agent/src/types.ts
++++ b/packages/agent/src/types.ts
+@@ -292,6 +292,9 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
+ 	 */
+ 	getSteeringMessages?: () => Promise<AgentMessage[]>;
+ 
++	/** Whether explicitly prioritized input should yield at the next completed thinking line. */
++	shouldYieldAfterThinking?: () => boolean;
++
+ 	/**
+ 	 * Returns follow-up messages to process after the agent would otherwise stop.
+ 	 *
 diff --git a/packages/coding-agent/src/core/agent-session.ts b/packages/coding-agent/src/core/agent-session.ts
-index 3a9174cf..c7a21dd4 100644
+index f76247d..455475d 100644
 --- a/packages/coding-agent/src/core/agent-session.ts
 +++ b/packages/coding-agent/src/core/agent-session.ts
-@@ -393,6 +393,8 @@ export class AgentSession {
+@@ -424,6 +424,8 @@ export class AgentSession {
  
  	/** Tracks pending steering messages for UI display. Removed when delivered. */
  	private _steeringMessages: string[] = [];
@@ -198,18 +259,41 @@ index 3a9174cf..c7a21dd4 100644
 +	private readonly _sendingQueueMessages = new Set<AgentMessage>();
  	/** Tracks pending follow-up messages for UI display. Removed when delivered. */
  	private _followUpMessages: string[] = [];
- 	/** Messages queued to be included with the next user prompt as context ("asides"). */
-@@ -1122,7 +1123,8 @@ export class AgentSession {
+ 	/** Queued user messages whose images are normalized when they are delivered. */
+@@ -1182,18 +1184,21 @@ export class AgentSession {
+ 		// This ensures the UI sees the updated queue state
  		if (event.type === "message_start" && event.message.role === "user") {
  			this._overflowRecoveryAttempted = false;
 +			this._sendingQueueMessages.delete(event.message);
  			const messageText = contentText(event.message.content, "");
--			if (messageText) {
+-			// Check steering queue first
+-			const steeringIndex = this._steeringMessages.indexOf(messageText);
+-			if (steeringIndex !== -1) {
+-				this._steeringMessages.splice(steeringIndex, 1);
+-				this._emitQueueUpdate();
+-			} else {
+-				// Check follow-up queue
+-				const followUpIndex = this._followUpMessages.indexOf(messageText);
+-				if (followUpIndex !== -1) {
+-					this._followUpMessages.splice(followUpIndex, 1);
 +			if (!this._submittedQueueMessages.delete(event.message)) {
- 				// Check steering queue first
- 				const steeringIndex = this._steeringMessages.indexOf(messageText);
- 				if (steeringIndex !== -1) {
-@@ -1141,3 +1141,7 @@ export class AgentSession {
++				// Check steering queue first
++				const steeringIndex = this._steeringMessages.indexOf(messageText);
++				if (steeringIndex !== -1) {
++					this._steeringMessages.splice(steeringIndex, 1);
+ 					this._emitQueueUpdate();
++				} else {
++					// Check follow-up queue
++					const followUpIndex = this._followUpMessages.indexOf(messageText);
++					if (followUpIndex !== -1) {
++						this._followUpMessages.splice(followUpIndex, 1);
++						this._emitQueueUpdate();
++					}
+ 				}
+ 			}
+ 			// Normalize queued images at delivery, before events and persistence see the message,
+@@ -1205,6 +1210,10 @@ export class AgentSession {
+ 		}
  
  		// Emit to extensions first, then notify public listeners.
 +		if (event.type === "agent_end") {
@@ -217,7 +301,9 @@ index 3a9174cf..c7a21dd4 100644
 +			this._emitQueueUpdate();
 +		}
  		await this._emitExtensionEvent(event);
-@@ -1870,12 +1871,16 @@ export class AgentSession {
+ 		this._emit(event.type === "agent_end" ? { ...event, willRetry: this._willRetryAfterAgentEnd(event) } : event);
+ 
+@@ -1940,12 +1949,16 @@ export class AgentSession {
  	 * starting another, and an abort requested meanwhile aborts the run as soon as it exists.
  	 * @param onStarted Called once the run's messages are prepared, before the first request.
  	 */
@@ -235,7 +321,7 @@ index 3a9174cf..c7a21dd4 100644
  		} catch (error) {
  			this._isAgentRunActive = false;
  			this._flushPendingBashMessages();
-@@ -1887,7 +1892,7 @@ export class AgentSession {
+@@ -1957,7 +1970,7 @@ export class AgentSession {
  		// have while idle. No run exists yet, so they cannot split a tool call from its result.
  		this._flushPendingBashMessages();
  		this._flushPendingCustomMessages();
@@ -244,12 +330,15 @@ index 3a9174cf..c7a21dd4 100644
  
  		// Compaction before the prompt may have scheduled a retry; the new prompt replaces it.
  		this._failedResponse = undefined;
-@@ -2465,3 +2465,4 @@ export class AgentSession {
+@@ -2567,6 +2580,7 @@ export class AgentSession {
+ 	 * @returns Object with steering and followUp arrays
+ 	 */
  	clearQueue(): { steering: string[]; followUp: string[] } {
 +		this._sendingQueueMessages.clear();
  		const steering = [...this._steeringMessages];
  		const followUp = [...this._followUpMessages];
-@@ -2473,6 +2478,45 @@ export class AgentSession {
+ 		this._steeringMessages = [];
+@@ -2576,6 +2590,45 @@ export class AgentSession {
  		return { steering, followUp };
  	}
  
@@ -296,7 +385,7 @@ index 3a9174cf..c7a21dd4 100644
  	get pendingMessageCount(): number {
  		return this._steeringMessages.length + this._followUpMessages.length;
 diff --git a/packages/coding-agent/src/core/keybindings.ts b/packages/coding-agent/src/core/keybindings.ts
-index 75e540b3..92e3fbcc 100644
+index f06a2e6..c5908e7 100644
 --- a/packages/coding-agent/src/core/keybindings.ts
 +++ b/packages/coding-agent/src/core/keybindings.ts
 @@ -68,6 +68,14 @@ const APP_KEYBINDINGS = {
@@ -315,10 +404,10 @@ index 75e540b3..92e3fbcc 100644
  		defaultKeys: windowsKeybindings ? "alt+q" : "alt+up",
  		description: "Restore queued messages",
 diff --git a/packages/coding-agent/src/modes/interactive/interactive-mode.ts b/packages/coding-agent/src/modes/interactive/interactive-mode.ts
-index e4e2ffb1..fc847b4f 100644
+index 11b787b..e255b11 100644
 --- a/packages/coding-agent/src/modes/interactive/interactive-mode.ts
 +++ b/packages/coding-agent/src/modes/interactive/interactive-mode.ts
-@@ -1044,6 +1044,8 @@ export class InteractiveMode {
+@@ -1082,6 +1082,8 @@ export class InteractiveMode {
  					rawKeyHint("!", "to run bash"),
  					rawKeyHint("!!", "to run bash (no context)"),
  					hint("app.message.followUp", "to queue follow-up"),
@@ -327,7 +416,7 @@ index e4e2ffb1..fc847b4f 100644
  					hint("app.message.dequeue", "to edit all queued messages"),
  					hint("app.clipboard.pasteImage", "to paste files on macOS, images, or text"),
  					rawKeyHint("drop files", "to attach"),
-@@ -3025,6 +3027,8 @@ export class InteractiveMode {
+@@ -3193,6 +3195,8 @@ export class InteractiveMode {
  		// Set up handlers on defaultEditor - they use this.editor for text access
  		// so they work correctly regardless of which editor is active
  		this.defaultEditor.onEscape = () => {
@@ -336,7 +425,7 @@ index e4e2ffb1..fc847b4f 100644
  			if (this.session.isStreaming) {
  				this.restoreQueuedMessagesToEditor({ abort: true });
  			} else if (this.session.isBashRunning) {
-@@ -3071,6 +3075,8 @@ export class InteractiveMode {
+@@ -3239,6 +3243,8 @@ export class InteractiveMode {
  			() => void this.handleCopyCommand({ flashConfirmation: true, preferSelection: true }),
  		);
  		this.defaultEditor.onAction("app.message.followUp", () => this.handleFollowUp());
@@ -345,7 +434,7 @@ index e4e2ffb1..fc847b4f 100644
  		this.defaultEditor.onAction("app.message.dequeue", () => this.handleDequeue());
  		this.defaultEditor.onAction("app.session.new", () => this.handleClearCommand());
  		this.defaultEditor.onAction("app.session.tree", () => this.showTreeSelector());
-@@ -4443,6 +4449,42 @@ export class InteractiveMode {
+@@ -4658,6 +4664,42 @@ export class InteractiveMode {
  		}
  	}
  
@@ -388,7 +477,8 @@ index e4e2ffb1..fc847b4f 100644
  	private async handleFollowUp(): Promise<void> {
  		const text = (this.editor.getExpandedText?.() ?? this.editor.getText()).trim();
  		if (!text) return;
-@@ -4697,15 +4737,23 @@ export class InteractiveMode {
+@@ -4915,16 +4957,24 @@ export class InteractiveMode {
+ 		const { steering: steeringMessages, followUp: followUpMessages } = this.getAllQueuedMessages();
  		if (steeringMessages.length > 0 || followUpMessages.length > 0) {
  			this.pendingMessagesContainer.addChild(new Spacer(1));
 +			const sending = this.session.queuedMessagesSendingCount;
@@ -415,7 +505,7 @@ index e4e2ffb1..fc847b4f 100644
  			this.pendingMessagesContainer.addChild(new TruncatedText(hintText, 1, 0));
  		}
  	}
-@@ -6867,6 +6908,8 @@ export class InteractiveMode {
+@@ -7085,6 +7135,8 @@ export class InteractiveMode {
  | \`${copyMessage}\` | Copy selection or last assistant message |
  | \`${followUp}\` | Queue follow-up message |
  | \`${dequeue}\` | Restore queued messages |
@@ -424,61 +514,3 @@ index e4e2ffb1..fc847b4f 100644
  | \`${pasteImage}\` | Paste files on macOS, images, or text from clipboard |
  | \`/\` | Slash commands |
  | \`!\` | Run bash command |
-diff --git a/packages/agent/src/types.ts b/packages/agent/src/types.ts
---- a/packages/agent/src/types.ts
-+++ b/packages/agent/src/types.ts
-@@ -291,6 +291,9 @@
- 	 * Contract: must not throw or reject. Return [] when no steering messages are available.
- 	 */
- 	getSteeringMessages?: () => Promise<AgentMessage[]>;
-+
-+	/** Whether explicitly prioritized input should yield at the next completed thinking line. */
-+	shouldYieldAfterThinking?: () => boolean;
- 
- 	/**
- 	 * Returns follow-up messages to process after the agent would otherwise stop.
-diff --git a/packages/agent/src/agent-loop.ts b/packages/agent/src/agent-loop.ts
---- a/packages/agent/src/agent-loop.ts
-+++ b/packages/agent/src/agent-loop.ts
-@@ -409,11 +409,14 @@
- 	const resolvedApiKey =
- 		(config.getApiKey ? await config.getApiKey(config.model.provider) : undefined) || config.apiKey;
- 
-+	// Yielding thinking cancels only this request, never the run or a running tool.
-+	const requestController = new AbortController();
-+	const requestSignal = signal ? AbortSignal.any([signal, requestController.signal]) : requestController.signal;
- 	const response = await streamFunction(config.model, llmContext, {
- 		...config,
- 		apiKey: resolvedApiKey,
- 		identity: mergeClientIdentity(DEFAULT_AGENT_IDENTITY, config.identity),
--		signal,
-+		signal: requestSignal,
- 	});
- 	// Record the requested level, whichever stream function answered.
- 	const result = async () => Object.assign(await response.result(), { thinkingLevel: config.reasoning ?? "off" });
-@@ -447,6 +450,25 @@
- 						assistantMessageEvent: event,
- 						message: { ...partialMessage },
- 					});
-+					const completedThinkingLine = event.type === "thinking_end" ||
-+						(event.type === "thinking_delta" && /\r?\n/.test(event.delta));
-+					if (completedThinkingLine && config.shouldYieldAfterThinking?.() && !signal?.aborted &&
-+						!partialMessage.content.some((part) => part.type === "toolCall")) {
-+						// Providers mutate their partial on cancellation. Preserve a detached snapshot,
-+						// not an aborted reply or an incomplete signed reasoning item for replay.
-+						const yielded = structuredClone(partialMessage);
-+						yielded.stopReason = "stop";
-+						yielded.thinkingLevel = config.reasoning ?? "off";
-+						delete yielded.responseId;
-+						const thinking = yielded.content[event.contentIndex];
-+						if (thinking?.type === "thinking" && event.type !== "thinking_end") {
-+							delete thinking.thinkingSignature;
-+						}
-+						requestController.abort();
-+						context.messages[context.messages.length - 1] = yielded;
-+						await emit({ type: "message_end", message: yielded });
-+						return yielded;
-+					}
- 				}
- 				break;
- 

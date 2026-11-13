@@ -1130,7 +1130,10 @@ export function createPiAutomode(options: PiAutomodeOptions = {}) {
       }),
       async execute(_toolCallId, params, signal, _onUpdate, ctx) {
         if (signal?.aborted) throw new Error("Auto-mode inspection cancelled");
-        const result = inspectAutomode(params.action, ctx);
+        // Pi 1.5's StringEnum schema does not narrow inside a typebox object.
+        const action = params.action;
+        if (!INSPECTION_ACTIONS.includes(action as InspectionAction)) throw new Error(`Unknown auto-mode inspection: ${String(action)}`);
+        const result = inspectAutomode(action as InspectionAction, ctx);
         return {
           content: [{ type: "text", text: safeJson(result, 16000) }],
           details: result,

@@ -13,9 +13,9 @@
   ...
 }:
 {
-  "@aliou/pi-utils-settings@0.22.0" = fetchurl {
-    url = "https://registry.npmjs.org/@aliou/pi-utils-settings/-/pi-utils-settings-0.22.0.tgz";
-    hash = "sha512-MzKG5KTpnOVczSAZLRzA0A9gYi28VRiM7b7lh/Q5A3fs/pkcSEojZS55rptwC8qDR4J38m9DkCLrAeUNA2i8EA==";
+  "@aliou/pi-utils-settings@0.24.1" = fetchurl {
+    url = "https://registry.npmjs.org/@aliou/pi-utils-settings/-/pi-utils-settings-0.24.1.tgz";
+    hash = "sha512-yu2H0gWVO7W+Tt4my+bWr9MMPm0vRzf8Dcuegd4cqJY01nxNo63QXLD9HMfi0evk7FTBSL86jW9HTT3yJV2uWQ==";
   };
   "@aliou/pi-utils-ui@0.5.1" = fetchurl {
     url = "https://registry.npmjs.org/@aliou/pi-utils-ui/-/pi-utils-ui-0.5.1.tgz";

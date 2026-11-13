@@ -1,6 +1,8 @@
+diff --git a/packages/tui/src/tui.ts b/packages/tui/src/tui.ts
+index cacd440..e0b9181 100644
 --- a/packages/tui/src/tui.ts
 +++ b/packages/tui/src/tui.ts
-@@ -287,6 +287,8 @@
+@@ -293,6 +293,8 @@ export interface OverlayOptions {
  	visible?: (termWidth: number, termHeight: number) => boolean;
  	/** If true, don't capture keyboard focus when shown */
  	nonCapturing?: boolean;
@@ -9,7 +11,7 @@
  }
  
  /** Options for {@link OverlayHandle.unfocus}. */
-@@ -927,6 +929,16 @@
+@@ -933,6 +935,16 @@ export abstract class TuiBase extends Container implements TUI {
  					}
  				: { hit: true };
  		}

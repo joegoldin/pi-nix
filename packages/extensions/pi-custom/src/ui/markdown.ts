@@ -7,7 +7,8 @@
 import type { UiConfig } from "./config.ts";
 
 export interface TransformContext {
-	messageType: "user" | "assistant" | "assistant-thinking";
+	/** Pi adds message types over time (1.5 added "changelog"); only user and assistant text is decorated. */
+	messageType: string;
 	isStreaming: boolean;
 }
 
@@ -112,7 +113,7 @@ export function linkUrls(markdown: string): string {
 }
 
 export function transformMarkdown(markdown: string, context: TransformContext, config: UiConfig): string {
-	if (context.messageType === "assistant-thinking" || markdown.trim() === "") return markdown;
+	if ((context.messageType !== "user" && context.messageType !== "assistant") || markdown.trim() === "") return markdown;
 	let out = markdown;
 	if (config.admonitions) out = renderCallouts(out);
 	if (config.linkUrls) out = linkUrls(out);

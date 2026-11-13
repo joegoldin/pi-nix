@@ -1,6 +1,21 @@
+diff --git a/packages/coding-agent/src/modes/interactive/interactive-mode.ts b/packages/coding-agent/src/modes/interactive/interactive-mode.ts
+index ca6d1ad..e13bd1a 100644
+--- a/packages/coding-agent/src/modes/interactive/interactive-mode.ts
++++ b/packages/coding-agent/src/modes/interactive/interactive-mode.ts
+@@ -2926,7 +2926,7 @@ export class InteractiveMode {
+ 		const component = top?.component ?? this.editor;
+ 		this.editorContainer.clear();
+ 		this.editorContainer.addChild(component);
+-		this.ui.setFocus(component);
++		this.ui.setFocus(component, { preserveOverlayFocus: true });
+ 		this.programStatus.setBlocked("extension-dialog", top?.blocked);
+ 		this.ui.requestRender();
+ 	}
+diff --git a/packages/tui/src/tui.ts b/packages/tui/src/tui.ts
+index fe0f2c7..cacd440 100644
 --- a/packages/tui/src/tui.ts
 +++ b/packages/tui/src/tui.ts
-@@ -474,7 +474,7 @@
+@@ -480,7 +480,7 @@ export interface TUI extends Component {
  	setShowHardwareCursor(enabled: boolean): void;
  	getClearOnShrink(): boolean;
  	setClearOnShrink(enabled: boolean): void;
@@ -9,7 +24,7 @@
  	showOverlay(component: Component, options?: OverlayOptions): OverlayHandle;
  	hideOverlay(): void;
  	hasOverlay(): boolean;
-@@ -618,7 +618,16 @@
+@@ -624,7 +624,16 @@ export abstract class TuiBase extends Container implements TUI {
  		return this.focusedComponent;
  	}
  
@@ -27,14 +42,3 @@
  		this.setFocusInternal({ component, overlayFocusRestore: "clear" });
  	}
  
---- a/packages/coding-agent/src/modes/interactive/interactive-mode.ts
-+++ b/packages/coding-agent/src/modes/interactive/interactive-mode.ts
-@@ -2785,7 +2785,7 @@
- 		const component = top?.component ?? this.editor;
- 		this.editorContainer.clear();
- 		this.editorContainer.addChild(component);
--		this.ui.setFocus(component);
-+		this.ui.setFocus(component, { preserveOverlayFocus: true });
- 		this.programStatus.setBlocked("extension-dialog", top?.blocked);
- 		this.ui.requestRender();
- 	}

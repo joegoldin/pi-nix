@@ -1,3 +1,5 @@
+diff --git a/packages/coding-agent/src/modes/interactive/components/user-message.ts b/packages/coding-agent/src/modes/interactive/components/user-message.ts
+index 83164ef..d329e2a 100644
 --- a/packages/coding-agent/src/modes/interactive/components/user-message.ts
 +++ b/packages/coding-agent/src/modes/interactive/components/user-message.ts
 @@ -1,6 +1,7 @@
@@ -8,7 +10,7 @@
  import { createMarkdownTransform } from "./markdown-transform.ts";
  
  const OSC133_ZONE_START = "\x1b]133;A;pi=user\x07";
-@@ -12,6 +13,8 @@
+@@ -12,6 +13,8 @@ const OSC133_ZONE_FINAL = "\x1b]133;C\x07";
   */
  export class UserMessageComponent extends Container {
  	private text: string;
@@ -16,8 +18,8 @@
 +	private continuationNumber: string | undefined;
  	private markdownTheme: MarkdownTheme;
  	private outputPad: number;
- 	private timestamp?: number;
-@@ -26,10 +29,20 @@
+ 	private markdownTransformers: readonly MarkdownTransformer[];
+@@ -31,6 +34,10 @@ export class UserMessageComponent extends Container {
  	) {
  		super();
  		this.text = text;
@@ -27,18 +29,21 @@
 +			: undefined;
  		this.markdownTheme = markdownTheme;
  		this.outputPad = outputPad;
- 		this.timestamp = timestamp;
  		this.markdownTransformers = markdownTransformers;
-+		this.rebuild();
-+	}
-+
-+	setExpanded(expanded: boolean): void {
-+		if (this.continuationNumber === undefined || this.expanded === expanded) return;
-+		this.expanded = expanded;
+@@ -40,6 +47,12 @@ export class UserMessageComponent extends Container {
  		this.rebuild();
  	}
  
-@@ -44,7 +57,9 @@
++	setExpanded(expanded: boolean): void {
++		if (this.continuationNumber === undefined || this.expanded === expanded) return;
++		this.expanded = expanded;
++		this.rebuild();
++	}
++
+ 	setOutputPad(padding: number): void {
+ 		this.outputPad = padding;
+ 		this.rebuild();
+@@ -51,7 +64,9 @@ export class UserMessageComponent extends Container {
  		// line, with identical output.
  		this.addChild(
  			new Markdown(

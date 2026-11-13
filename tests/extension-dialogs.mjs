@@ -10,7 +10,7 @@ const container = { children: [editor], clear() { this.children = []; }, addChil
 const mode = Object.assign(Object.create(InteractiveMode.prototype), {
   editor, editorContainer: container, extensionDialogs: [],
   ui: { setFocus() {}, requestRender() {} }, keybindings: {}, disposeActiveSelector() {},
-  programStatus: { setBlocked() {} },
+  programStatus: { setBlocked() {} }, extensionOverlays: new Map(), nextBlockingOverlayId: 0,
 });
 const api = mode.createExtensionUIContext();
 // The measurement includes the live editor-slot dialog, below-editor widgets,
@@ -92,7 +92,7 @@ for (const Host of [TuiMainScreen, TuiAltScreen]) {
   ui.setFocus(editor);
   const host = Object.assign(Object.create(InteractiveMode.prototype), {
     editor, editorContainer, extensionDialogs: [], ui, keybindings: {}, disposeActiveSelector() {},
-    programStatus: { setBlocked() {} },
+    programStatus: { setBlocked() {} }, extensionOverlays: new Map(), nextBlockingOverlayId: 0,
   });
   const api = host.createExtensionUIContext();
   let inspector;

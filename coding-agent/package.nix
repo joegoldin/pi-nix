@@ -5,6 +5,7 @@
   src,
   version,
   npmDepsHash,
+  patch,
 }:
 let
   workspacePackages = buildNpmPackage {
@@ -15,11 +16,11 @@ let
     npmRebuildFlags = [ "--ignore-scripts" ];
 
     postPatch = ''
+      ${patch}/bin/pi-patch
       cp ${../package-lock.json} package-lock.json
     '';
 
     preBuild = ''
-      node ${./dependency-compat.mjs}
       find packages -name "package.json" -exec sed -i \
         -e 's/--watch --preserveWatchOutput//g' \
         {} \;

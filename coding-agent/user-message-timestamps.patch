@@ -1,3 +1,5 @@
+diff --git a/packages/coding-agent/src/modes/interactive/components/user-message.ts b/packages/coding-agent/src/modes/interactive/components/user-message.ts
+index 2cda775..83164ef 100644
 --- a/packages/coding-agent/src/modes/interactive/components/user-message.ts
 +++ b/packages/coding-agent/src/modes/interactive/components/user-message.ts
 @@ -1,4 +1,4 @@
@@ -6,35 +8,38 @@
  import type { MarkdownTransformer } from "../../../core/extensions/types.ts";
  import { getMarkdownTheme, theme } from "../theme/theme.ts";
  import { createMarkdownTransform } from "./markdown-transform.ts";
-@@ -14,6 +14,7 @@
- 	private text: string;
- 	private markdownTheme: MarkdownTheme;
- 	private outputPad: number;
-+	private timestamp?: number;
+@@ -17,6 +17,8 @@ export class UserMessageComponent extends Container {
  	private markdownTransformers: readonly MarkdownTransformer[];
+ 	private messageId?: string;
+ 	private timestamp?: string;
++	/** The saved message time shown in the corner, including when replaying history. */
++	private displayTime?: number;
  
  	constructor(
-@@ -21,11 +22,13 @@
- 		markdownTheme: MarkdownTheme = getMarkdownTheme(),
- 		outputPad = 1,
+ 		text: string,
+@@ -25,6 +27,7 @@ export class UserMessageComponent extends Container {
  		markdownTransformers: readonly MarkdownTransformer[] = [],
-+		timestamp?: number,
+ 		messageId?: string,
+ 		timestamp?: string,
++		displayTime?: number,
  	) {
  		super();
  		this.text = text;
- 		this.markdownTheme = markdownTheme;
- 		this.outputPad = outputPad;
-+		this.timestamp = timestamp;
+@@ -33,6 +36,7 @@ export class UserMessageComponent extends Container {
  		this.markdownTransformers = markdownTransformers;
+ 		this.messageId = messageId;
+ 		this.timestamp = timestamp;
++		this.displayTime = displayTime;
  		this.rebuild();
  	}
-@@ -64,6 +67,17 @@
+ 
+@@ -76,6 +80,17 @@ export class UserMessageComponent extends Container {
  			return lines;
  		}
  
 +		// Use the saved message time, including when replaying history. The top
 +		// padding already belongs to this message, so no transcript row is added.
-+		const date = this.timestamp === undefined ? undefined : new Date(this.timestamp);
++		const date = this.displayTime === undefined ? undefined : new Date(this.displayTime);
 +		if (date && Number.isFinite(date.getTime())) {
 +			const time = date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
 +			const left = width - visibleWidth(time) - this.outputPad;
@@ -46,20 +51,22 @@
  		lines[0] = OSC133_ZONE_START + lines[0];
  		lines[lines.length - 1] = OSC133_ZONE_END + OSC133_ZONE_FINAL + lines[lines.length - 1];
  		return lines;
+diff --git a/packages/coding-agent/src/modes/interactive/interactive-mode.ts b/packages/coding-agent/src/modes/interactive/interactive-mode.ts
+index d8e2390..11b787b 100644
 --- a/packages/coding-agent/src/modes/interactive/interactive-mode.ts
 +++ b/packages/coding-agent/src/modes/interactive/interactive-mode.ts
-@@ -3960,6 +3960,7 @@
- 								this.getMarkdownThemeWithSettings(),
- 								this.outputPad,
+@@ -4105,6 +4105,7 @@ export class InteractiveMode {
  								this.getMarkdownTransformers(),
+ 								options?.messageId,
+ 								options?.timestamp,
 +								message.timestamp,
  							);
  							this.chatContainer.addChild(userComponent);
  						}
-@@ -3969,6 +3970,7 @@
- 							this.getMarkdownThemeWithSettings(),
- 							this.outputPad,
+@@ -4116,6 +4117,7 @@ export class InteractiveMode {
  							this.getMarkdownTransformers(),
+ 							options?.messageId,
+ 							options?.timestamp,
 +							message.timestamp,
  						);
  						this.chatContainer.addChild(userComponent);

@@ -1,17 +1,17 @@
 {
   "pi-web-access": {
-    "version": "0.45.0",
-    "url": "https://registry.npmjs.org/pi-web-access/-/pi-web-access-0.45.0.tgz",
-    "hash": "sha512-AHgUKUas1vvBtdKbcv+7rWTPTIOl8xHR4E7s4dLBAz6soSGGPC4YNq1uVGuH5+bVrMx4X/fmPCm4rsOQIxexdQ==",
+    "version": "0.47.0",
+    "url": "https://registry.npmjs.org/pi-web-access/-/pi-web-access-0.47.0.tgz",
+    "hash": "sha512-Z176wTJjHw9Y+NpZ3WxOmKnh/7Sy3mu4QR05nBS/v6GRd5Cp7g5GnLIzI9LOT1IdR1105qXFS+L3LBUfkOMy8g==",
     "bundled": false,
     "entrypoints": [],
     "skills": [],
     "prompts": []
   },
   "pi-lens": {
-    "version": "4.4.6",
-    "url": "https://registry.npmjs.org/pi-lens/-/pi-lens-4.4.6.tgz",
-    "hash": "sha512-Hlf4YJuLNpzOnIUj0MMobtsG2mH4n3fkgjdywQhVvwmetUpkgr0J4n9NJKMhRaDszyTshQ4itJtkyd3nUKfktw==",
+    "version": "4.4.12",
+    "url": "https://registry.npmjs.org/pi-lens/-/pi-lens-4.4.12.tgz",
+    "hash": "sha512-6bVSQDGT+p5peOnyJRGUhgiOuu6mHtE0klkX8+4hms2ZCW7CtmnPbCEs0TNKWq1k8+lF/Kem+/xmxY0mJQ3TIQ==",
     "bundled": false,
     "entrypoints": [],
     "skills": [
@@ -20,18 +20,18 @@
     "prompts": []
   },
   "pi-mcp-adapter": {
-    "version": "7.0.0",
-    "url": "https://registry.npmjs.org/pi-mcp-adapter/-/pi-mcp-adapter-7.0.0.tgz",
-    "hash": "sha512-/7g2R11VEZYmYgsstTKJ6kTIbluOLI/w72cVq0e9UAhquLLEFG7NUfdFfGyNZ18YhmiIU84iKioKuBH4YHTXdg==",
+    "version": "7.0.1",
+    "url": "https://registry.npmjs.org/pi-mcp-adapter/-/pi-mcp-adapter-7.0.1.tgz",
+    "hash": "sha512-hLmB6v2NxzZLUcgnVP4EKxWPBQGPXK5DRvL48UP1lZeyfjzhZbB+3zcawOdIIxHujxE9eqrVNapx6Hh5YmDFrA==",
     "bundled": false,
     "entrypoints": [],
     "skills": [],
     "prompts": []
   },
   "@aliou/pi-synthetic": {
-    "version": "0.30.0",
-    "url": "https://registry.npmjs.org/@aliou/pi-synthetic/-/pi-synthetic-0.30.0.tgz",
-    "hash": "sha512-vIHNmVnTrB34mkiL8cbG+ZYIgHPFMAUOip/BPsRlD6YQzGvvFtgIKy1ETdeFcSJLzkFM5YcClNcqs/HoBN0hxA==",
+    "version": "0.31.1",
+    "url": "https://registry.npmjs.org/@aliou/pi-synthetic/-/pi-synthetic-0.31.1.tgz",
+    "hash": "sha512-eNYGKHQ3p+hq6NfwgnQ1sjAkF3Jb2+evupEMZl2ALvZ7FcD+XML9yfWRTc9AiSEY65Y8un9sieqxJAUr+apKdg==",
     "bundled": false,
     "entrypoints": [],
     "skills": [],
