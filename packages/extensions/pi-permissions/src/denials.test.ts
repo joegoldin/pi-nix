@@ -11,6 +11,9 @@ describe("the permission ledger", () => {
 		const grant = ledger.approveSimilar("bash", input, "/work")!;
 		expect(grant.scope?.label).toContain("Similar shell actions");
 		expect(grant.scope?.label).toContain("rechecked");
+		// The cwd locates the session; it must not read as a bound on targets.
+		expect(grant.scope?.label).toContain("run from /work:");
+		expect(grant.scope?.label).not.toContain("this task in /work");
 		expect(typeof ledger.scenarioApprovals).toBe("function");
 		const approvals = ledger.scenarioApprovals("bg_run", "/work");
 		expect(approvals).toHaveLength(1);

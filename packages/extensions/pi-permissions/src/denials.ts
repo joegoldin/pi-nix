@@ -34,7 +34,8 @@ export function approvalScope(toolName: string, input: unknown, cwd: string): Ap
 			delete args.description;
 		}
 		scenario = { cwd: directory };
-		label = `Similar shell actions for this task in ${directory}: same targets (hosts, repositories, directories, services and recipients) and side-effect types. Arguments and diagnostic filenames may vary; each action is rechecked`;
+		// "in <cwd>" was read as confining targets to cwd; the cwd only locates the session.
+		label = `Similar shell actions for this task, run from ${directory}: same targets (hosts, repositories, directories, services and recipients) and side-effect types. Arguments and diagnostic filenames may vary; each action is rechecked`;
 	} else if ((toolName === "edit" || toolName === "write") && typeof args.path === "string") {
 		const path = resolveToolInputPath(toolName, directory, args.path);
 		if (path === undefined) return undefined;

@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { buildClassifierContext, buildClassifierPrompt } from "./classifier.ts";
+import { buildEffectiveConfigFromSources } from "./config.ts";
 
 const approval = {
   scope: "Similar shell actions; same task, targets and side-effect types",
@@ -62,4 +63,21 @@ test("bookkeeping, requested inspection and continuing authorized tests retain t
   expect(prompt).toContain("Historical classifier denials and assistant wait messages are not user revocations");
   expect(prompt).toContain("A normal rebuild or repeat test run does not by itself change the authorized side-effect types");
   expect(prompt).toContain("This does not authorize retrying a denied call without the required user response");
+});
+
+test("task scratch, preparation, wrapper effects and credential use keep their preserved limits", () => {
+  const prompt = buildClassifierPrompt(buildEffectiveConfigFromSources());
+  expect(prompt).toContain("Task-local scratch work on this machine");
+  expect(prompt).toContain("does not cover unrelated pre-existing user files, other repositories");
+  expect(prompt).toContain("a read-only record does not block a write that an ALLOW exception or direct user authorization already covers");
+  expect(prompt).toContain("Locating an authorized credential and reading its public half or fingerprint");
+  expect(prompt).toContain("brevity is not ambiguity");
+  expect(prompt).toContain("Preparing is not executing");
+  expect(prompt).toContain("a local /tmp path is not a remote host");
+  expect(prompt).toContain("malicious code, embedded secret values, persistence locations");
+  expect(prompt).toContain("A listed rule that names the wrapper itself, such as one against sudo, still applies as written");
+  expect(prompt).toContain("Using a credential is not exposing it");
+  expect(prompt).toContain("Printing, copying or logging secret values");
+  // The new examples must not end up after the closing tier note.
+  expect(prompt.trimEnd().endsWith("The tier is the listed rule's: an example above never makes an action hard_deny on its own.")).toBe(true);
 });
