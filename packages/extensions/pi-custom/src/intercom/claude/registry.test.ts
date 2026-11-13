@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { randomBytes } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:net";
@@ -147,7 +148,7 @@ describe("writing", () => {
 
 	it("publishes a key Claude's senders find by socket hash", () => {
 		const sock = join(root, "41.sock");
-		const token = "0123456789abcdef0123456789abcdef";
+		const token = randomBytes(16).toString("hex");
 		const path = writeKey(dir, 41, sock, { peerToken: token, procStart: "Mon Oct  5 05:53:57 2026" });
 		expect(path).toBe(join(dir, keyFileName(41, sock)));
 		expect(statSync(path).mode & 0o777).toBe(0o600);

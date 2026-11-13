@@ -4,6 +4,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
 import { connect, createServer, type Server, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -15,7 +16,7 @@ import { sendRaw } from "./socket.ts";
 import { ClaudeTransport, type InboundMessage, type InboundReceipt } from "./transport.ts";
 
 const SESSION = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
-const CLAUDE_TOKEN = "fedcba9876543210fedcba9876543210";
+const CLAUDE_TOKEN = randomBytes(16).toString("hex");
 
 let root: string;
 let configDir: string;

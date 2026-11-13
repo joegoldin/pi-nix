@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import {
   chmodSync,
   existsSync,
@@ -194,13 +195,14 @@ describe("createPermissionSystemLogger", () => {
       config.debugLog = true;
       const logger = makeLogger();
 
+      const token = randomBytes(24).toString("base64url");
       logger.debug("permission.decision", {
         toolName: "bash",
-        command: 'curl -H "Authorization: Bearer sk-secret-value" https://x',
+        command: `curl -H "Authorization: Bearer ${token}" https://x`,
       });
 
       const written = readFileSync(debugLogPath, "utf8");
-      expect(written).not.toContain("sk-secret-value");
+      expect(written).not.toContain(token);
       expect(JSON.parse(written.trim())).toMatchObject({
         command: 'curl -H "Authorization:[redacted]" https://x',
       });
