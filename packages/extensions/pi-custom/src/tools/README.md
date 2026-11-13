@@ -47,8 +47,11 @@ or one next task when nothing is active), and preview. Clicking the todo widget
 does not change its view or group scoping. The full view shows group counts
 and indented tasks; use `/todos <group-id>` to collapse/expand a group.
 `/todos` displays the full list without changing the current view.
-Active work sorts first, then ready
-pending work, blocked work and completions. Groups follow their highest-priority
+Preview and focus rows include each child’s parent and overall group progress
+on the same line. Both subjects shorten independently to leave room for IDs,
+group progress and unresolved dependencies. Ungrouped tasks also truncate to
+one line; the expanded view keeps full, wrapped text.
+Active work sorts first, then ready pending work, blocked work and completions. Groups follow their highest-priority
 child. Satisfied dependency edges disappear from the widget, not the records.
 The heading labels overall counts; overflow labels only the tasks outside the
 current view. A compact list that

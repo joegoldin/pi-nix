@@ -433,6 +433,10 @@
     url = "https://registry.npmjs.org/@img/sharp-win32-x64/-/sharp-win32-x64-0.35.5.tgz";
     hash = "sha512-x76eH0vEiHlcMQu8Y8IenntaACtddpT6W0wmXtWrnKcnKI7ME5DdgqhAD6SEWOEl1v2zDvkZDhFA9KnURwpfqg==";
   };
+  "@isaacs/nonrecursive-glob-match@1.1.0" = fetchurl {
+    url = "https://registry.npmjs.org/@isaacs/nonrecursive-glob-match/-/nonrecursive-glob-match-1.1.0.tgz";
+    hash = "sha512-GPm/Dbvk5RLmhRnxXIa7nTpK0xtl4E0wj0MslsuNiJ1FIROU+2+9lgUC/dgF7Ey4QCWhfEsgxilMRMCdHPfDfw==";
+  };
   "@jridgewell/resolve-uri@3.1.2" = fetchurl {
     url = "https://registry.npmjs.org/@jridgewell/resolve-uri/-/resolve-uri-3.1.2.tgz";
     hash = "sha512-bRISgCIjP20/tbWSPWMEi54QVPRZExkuD9lJL+UIxUKtwVJA8wW1Trb1jMs1RFXo1CBTNZ/5hpC9QvmKWdopKw==";
@@ -1269,9 +1273,9 @@
     url = "https://registry.npmjs.org/miniflare/-/miniflare-5.20261012.1-beta.tgz";
     hash = "sha512-8Canhy6g9+vAhqMc0o80YphqYIwpiA3aAp8aX+uDXU7J/qbUeoZzcII9c2V1P4uT/eHD4SB93qet1o1bRY3BuQ==";
   };
-  "minimatch@10.2.6" = fetchurl {
-    url = "https://registry.npmjs.org/minimatch/-/minimatch-10.2.6.tgz";
-    hash = "sha512-vpLQEs+VLCr1nU0BXS07maYoFwlDAH0gngQuuttxIwutDFEMHq2blX+8vpgxDdK3J1PwjCJiep77OitTZ4Ll1A==";
+  "minimatch@11.0.1" = fetchurl {
+    url = "https://registry.npmjs.org/minimatch/-/minimatch-11.0.1.tgz";
+    hash = "sha512-t+Vn6DX4wPCxS23y03C0uhF7S1jpi1GfqPrnlEipCJaA2ykiNbMkVlDutZtmvLfRcUN6R8AYVlzTsQrT4RZoLQ==";
   };
   "minimatch@3.1.5" = fetchurl {
     url = "https://registry.npmjs.org/minimatch/-/minimatch-3.1.5.tgz";
@@ -1345,9 +1349,9 @@
     url = "https://registry.npmjs.org/node-fetch/-/node-fetch-3.3.2.tgz";
     hash = "sha512-dRB78srN/l6gqWulah9SrxeYnxeddIG30+GOqK/9OlLVyLg3HPnr6SqOWTWOXKRwC2eGYCkZ59NNuSgvSrpgOA==";
   };
-  "node-forge@1.4.0" = fetchurl {
-    url = "https://registry.npmjs.org/node-forge/-/node-forge-1.4.0.tgz";
-    hash = "sha512-LarFH0+6VfriEhqMMcLX2F7SwSXeWwnEAJEsYm5QKWchiVYVvJyV9v7UDvUv+w5HO23ZpQTXDv/GxdDdMyOuoQ==";
+  "node-forge@1.4.3" = fetchurl {
+    url = "https://registry.npmjs.org/node-forge/-/node-forge-1.4.3.tgz";
+    hash = "sha512-P6wzfh6t70avmV8FrVEAd/36sOPJQ+hkaJVX1Laap9J/77m7M0eyozDvc8SwnDf4P7MP94gwbAAo0rg3YVXT+g==";
   };
   "obug@2.2.1" = fetchurl {
     url = "https://registry.npmjs.org/obug/-/obug-2.2.1.tgz";
@@ -1393,8 +1397,10 @@
     url = "https://registry.npmjs.org/pathe/-/pathe-2.0.3.tgz";
     hash = "sha512-WUjGcAqP1gQacoQe+OBJsFA7Ld4DyXuUIjZ5cc75cLHvJ7dtNsTugphxIADwspS+AraAUePCKrSVtPLFj/F88w==";
   };
-  "pi-extension-custom-provider-anthropic" = workspaceSubdir "packages/coding-agent/examples/extensions/custom-provider-anthropic";
-  "pi-extension-custom-provider-gitlab-duo" = workspaceSubdir "packages/coding-agent/examples/extensions/custom-provider-gitlab-duo";
+  "pi-extension-custom-provider-anthropic" =
+    workspaceSubdir "packages/coding-agent/examples/extensions/custom-provider-anthropic";
+  "pi-extension-custom-provider-gitlab-duo" =
+    workspaceSubdir "packages/coding-agent/examples/extensions/custom-provider-gitlab-duo";
   "pi-extension-gondolin" = workspaceSubdir "packages/coding-agent/examples/extensions/gondolin";
   "pi-extension-sandbox" = workspaceSubdir "packages/coding-agent/examples/extensions/sandbox";
   "pi-extension-with-deps" = workspaceSubdir "packages/coding-agent/examples/extensions/with-deps";

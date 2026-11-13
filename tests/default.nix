@@ -35,3 +35,6 @@ in
   prompt-fragment-inventory = import ./prompt-lint.nix args;
 }
 // import ./extension-tests.nix args
+// pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+  open-browser = import ./open-browser-test.nix args;
+}

@@ -9,6 +9,8 @@
   fd,
   gitMinimal,
   openssh,
+  xdg-utils,
+  systemd,
   ripgrep,
   workspacePackages,
   runtime,
@@ -32,14 +34,20 @@ let
   internalPackages = builtins.filter (
     path: builtins.match "node_modules/@earendil-works/[^/]+" path != null
   ) (builtins.attrNames installLock.packages);
-  runtimeBins = lib.makeBinPath [
-    runtime
-    nodejs # Pi uses npm to manage extension packages, also under Bun.
-    gitMinimal
-    openssh
-    ripgrep
-    fd
-  ];
+  runtimeBins = lib.makeBinPath (
+    [
+      runtime
+      nodejs # Pi uses npm to manage extension packages, also under Bun.
+      gitMinimal
+      openssh
+      ripgrep
+      fd
+    ]
+    ++ lib.optionals stdenv.hostPlatform.isLinux [
+      xdg-utils
+      systemd
+    ]
+  );
 in
 assert lib.assertMsg (installPackage.version == version) "pi runtime lock must match VERSION.json";
 assert lib.assertMsg (lib.all (path: builtins.hasAttr path packageSourceOverrides)

@@ -1,0 +1,33 @@
+--- a/packages/coding-agent/src/utils/open-browser.ts
++++ b/packages/coding-agent/src/utils/open-browser.ts
+@@ -1,4 +1,4 @@
+-import { spawn } from "node:child_process";
++import { execFileSync, spawn } from "node:child_process";
+ 
+ /**
+  * Open a URL or file in the platform browser/default handler.
+@@ -18,7 +18,23 @@
+ 	// spawn reports launcher failures (for example, missing xdg-open) via an
+ 	// error event. Browser launch is best-effort: callers still present the target
+ 	// to the user, so keep the launcher failure from becoming a process crash.
+-	spawn(cmd, args, { stdio: "ignore", detached: true })
++	let env = process.env;
++	const flags = process.argv.slice(2, process.argv.indexOf("--") < 0 ? undefined : process.argv.indexOf("--"));
++	const headless = flags.some((flag, index) => flag === "--print" || flag === "-p" || flag === "--mode=json" || flag === "--mode=rpc" || (flag === "--mode" && flags[index + 1] !== "text"));
++	if (process.platform === "linux" && process.stdin.isTTY && process.stdout.isTTY && !headless && !env.DISPLAY && !env.WAYLAND_DISPLAY) {
++		try {
++			// Multiplexer terminals may predate the graphical login. Import only
++			// launch variables from this user's manager, never its PATH or policy.
++			const desktop = JSON.parse(execFileSync("systemctl", ["--user", "show-environment", "--output=json"], { env, encoding: "utf8", timeout: 1500, maxBuffer: 1024 * 1024, stdio: ["ignore", "pipe", "ignore"] }));
++			if (desktop && typeof desktop === "object" && (typeof desktop.DISPLAY === "string" || typeof desktop.WAYLAND_DISPLAY === "string")) {
++				env = { ...env };
++				for (const name of ["DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY", "XDG_CURRENT_DESKTOP", "XDG_SESSION_TYPE"]) {
++					if (typeof desktop[name] === "string") env[name] = desktop[name];
++				}
++			}
++		} catch { /* A terminal without a graphical user session keeps the normal fallback. */ }
++	}
++	spawn(cmd, args, { stdio: "ignore", detached: true, env })
+ 		.on("error", () => {})
+ 		.unref();
+ }

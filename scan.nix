@@ -1,12 +1,20 @@
 { pkgs }:
-
+let
+  # nixpkgs' Rust hook requires system AWS-LC; zizmor's package omits it.
+  zizmor = pkgs.zizmor.overrideAttrs (old: {
+    nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ pkgs.pkg-config ];
+    buildInputs = (old.buildInputs or [ ]) ++ [ pkgs.aws-lc ];
+  });
+in
 pkgs.writeShellApplication {
   name = "pi-scan";
-  runtimeInputs = with pkgs; [
-    gitleaks
-    osv-scanner
-    zizmor
-  ];
+  runtimeInputs =
+    with pkgs;
+    [
+      gitleaks
+      osv-scanner
+    ]
+    ++ [ zizmor ];
   text = # bash
     ''
       set -euo pipefail

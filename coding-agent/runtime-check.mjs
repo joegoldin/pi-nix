@@ -13,6 +13,18 @@ const manifest = JSON.parse(readFileSync(join(agent, "package.json")));
 assert(existsSync(join(agent, manifest.bin.pi)), "Missing package CLI entry");
 execFileSync("npm", ["--version"], { stdio: "pipe" });
 
+// Model selection and package filters rely on the upgraded minimatch API.
+const { minimatch } = require("minimatch");
+assert.equal(require("minimatch/package.json").version, "11.0.1");
+for (const [value, pattern, options, expected] of [
+  ["openai/GPT-6", "openai/gpt-*", { nocase: true }, true],
+  ["anthropic/claude-sonnet", "openai/*", { nocase: true }, false],
+  ["src/tools/todo.ts", "src/**/*.{ts,js}", {}, true],
+  ["todo.test.ts", "*.test.ts", {}, true],
+  ["src/.private/key", "src/**/*", {}, false],
+  ["README.md", "!*.ts", {}, true],
+]) assert.equal(minimatch(value, pattern, options), expected, `${value} vs ${pattern}`);
+
 // Detached extension workers need Chord even when the CLI does not import it.
 const chordManifestPath = require.resolve("@earendil-works/chord/package.json");
 const chordManifest = JSON.parse(readFileSync(chordManifestPath));

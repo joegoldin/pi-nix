@@ -124,3 +124,8 @@
 +		"vitest": "4.1.12"
  	}
  }
+--- a/packages/coding-agent/package.json
++++ b/packages/coding-agent/package.json
+@@ -53,1 +53,1 @@
+-		"minimatch": "10.2.6",
++		"minimatch": "11.0.1",

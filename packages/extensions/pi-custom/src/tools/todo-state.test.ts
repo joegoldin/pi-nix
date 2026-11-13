@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import { EMPTY, reduce, replay, sanitize, type TodoState, widgetRows, widgetLines } from "./todo-state.ts";
+import { EMPTY, reduce, replay, sanitize, type TodoState, widgetRows, widgetLines, compactWidgetRows } from "./todo-state.ts";
+import { stripTerminalSequences, visibleWidth } from "@earendil-works/pi-tui";
 
 const plain = { fg: (_s: string, t: string) => t };
 
@@ -13,6 +14,56 @@ function run(...steps: Array<Parameters<typeof reduce>[1]>): { state: TodoState;
 	}
 	return { state, texts };
 }
+
+describe("compact parent context", () => {
+	const state: TodoState = { nextId: 8, tasks: [
+		{ id: 1, subject: "Implement supervisor and notification input", kind: "group", status: "pending" },
+		{ id: 2, subject: "Bind supervisor questions to durable human input", parentId: 1, status: "pending", blockedBy: [4, 5, 6] },
+		{ id: 3, subject: "Finished child", parentId: 1, status: "completed" },
+		{ id: 4, subject: "Controller", status: "pending" },
+		{ id: 5, subject: "SSO", status: "pending" },
+		{ id: 6, subject: "Review", status: "pending" },
+		{ id: 7, subject: "Active child", parentId: 1, status: "in_progress", activeForm: "wiring the controller" },
+	] };
+	it("uses the full parent count even when siblings are hidden", () => {
+		const rows = compactWidgetRows(state, new Set([3, 7]), plain, 160, "preview");
+		expect(rows.map(row => row.text).join("\n")).toContain("#1 Implement supervisor and notification input (1/3) -> #2 Bind supervisor questions to durable human input ⛓ #4,#5,#6");
+		expect(rows[0].text).toContain("1/6");
+	});
+	it("truncates both subjects before the parent count or dependency suffix", () => {
+		const row = compactWidgetRows(state, new Set([3, 7]), plain, 85, "preview").find(row => row.text.includes("->"))!.text;
+		expect(stripTerminalSequences(row)).toMatch(/#1 Implement supervisor.*… \(1\/3\) -> #2 Bind supervisor.*… ⛓ #4,#5,#6/);
+		expect(visibleWidth(row)).toBeLessThanOrEqual(85);
+	});
+	it("retains parent context in focus mode, status and activity when space permits", () => {
+		const rows = compactWidgetRows(state, new Set(), plain, 180, "minimal");
+		expect(rows).toHaveLength(2);
+		expect(rows[1].text).toContain("◐ #1 Implement supervisor and notification input (1/3) -> #7 Active child (wiring the controller)");
+	});
+	it("truncates ungrouped rows in preview and focus but keeps expanded text wrapped", () => {
+		const subject = "Standalone acceptance task ".repeat(10);
+		const standalone: TodoState = { nextId: 3, tasks: [
+			{ id: 1, subject, status: "in_progress", blockedBy: [2] },
+			{ id: 2, subject: "Dependency", status: "pending" },
+		] };
+		for (const view of ["minimal", "preview"] as const) {
+			const rows = compactWidgetRows(standalone, new Set(), plain, 50, view);
+			expect(stripTerminalSequences(rows[1].text)).toMatch(/◐ #1 Standalone.*… ⛓ #2$/);
+			for (const row of rows) expect(visibleWidth(row.text)).toBeLessThanOrEqual(50);
+		}
+		const expanded = widgetRows(standalone, new Set(), 12, plain, true, 50);
+		expect(expanded.length).toBeGreaterThan(5);
+		expect(expanded.map(row => stripTerminalSequences(row.text)).join("")).not.toContain("…");
+	});
+	it("bounds ANSI, wide and tiny rows without mutating task subjects", () => {
+		const unicode = { ...state, tasks: state.tasks.map(task => ({ ...task, subject: task.subject + " 漢字👩‍💻".repeat(10) })) };
+		const theme = { fg: (_slot: string, text: string) => `\x1b[36m${text}\x1b[39m` };
+		for (const width of [1, 12, 40, 85, 120]) {
+			for (const row of compactWidgetRows(unicode, new Set(), theme, width, "preview")) expect(visibleWidth(row.text)).toBeLessThanOrEqual(width);
+		}
+		expect(state.tasks[0].subject).toBe("Implement supervisor and notification input");
+	});
+});
 
 describe("create", () => {
 	it("numbers tasks from 1 and reports them", () => {

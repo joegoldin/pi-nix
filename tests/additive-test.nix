@@ -40,14 +40,18 @@ let
   #   compatibility hook consistently to npm and Bun builds and regeneration.
   #   regenerate-models.nix -- apply the same manifest patches before npm ci.
   #   options.nix -- retain the published launcher configuration/MCP merge wiring.
+  #   VERSION.json, bun.nix -- minimatch 11.0.1 security upgrade; runtime-check.mjs
+  #   checks model-selection and package-filter glob compatibility. Also refresh
+  #   the unshipped node-forge example dependency to 1.4.3 and remove its exception.
+  #   scan.nix -- supply zizmor's missing system AWS-LC build dependency.
   expected = {
-    "VERSION.json" = "dd8e48737748a3613acb76c041a7a962da55f702bd1cd22fa5e56f12ecf77ce9";
-    "coding-agent/bun.nix" = "71950b35ce99c3c1132daf9f3c5e81f4a82cc018fd0eb0da4d66ad88969082b0";
+    "VERSION.json" = "32bc2d299e5b4636cf0d2bf571dd7602026bd8da8a41972b4df1cdee931eb6e2";
+    "coding-agent/bun.nix" = "48640c8e83066d55bad1f88815f5f0d6a430093bacf4014cd3c131138258fa8e";
     "coding-agent/options.nix" = "8e4d15055baf64dd62f7e5d724d1fd958eee1cbec2299f5a414a8d8fb001747a";
     "coding-agent/package-bun.nix" = "d3439e7199c9b4ee7d6e610dc5311bf361e9d766a298905cc2424db57187bdbc";
     "coding-agent/package.nix" = "2365edc0215c9ee48f34e45c1b143999daeef7011db7637de181fd0240f2dd67";
     "regenerate-models.nix" = "c91f62b9768a2af5129b8a02c55b887c4edf3a47aa7021ef79c184d9b8c116b4";
-    "scan.nix" = "916d7beef7edc2b9c586b5e2050f826d311af9e95a3d31b315be1648b8a2da14";
+    "scan.nix" = "f38a44631dd39dc4d4e2759760fa45909b5c50264b6b27b055d67d37a682d446";
     "sync.nix" = "395a4441c88c3717baaa4f7855f5f634c3273b04470794a95fdce58bb0adf2f1";
   };
 

@@ -4,7 +4,7 @@
 // Shapes and wording follow rpiv-todo: sessions recorded with it replay into
 // this list. Tool results and idle-reset entries carry { tasks, nextId }.
 
-import { wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 
 export type TodoStatus = "pending" | "in_progress" | "completed" | "deleted";
 export type TodoAction = "create" | "update" | "list" | "get" | "delete" | "clear";
@@ -349,6 +349,48 @@ const GLYPH: Record<Exclude<TodoStatus, "deleted">, [string, string]> = {
 export interface TodoWidgetRow {
 	text: string;
 	groupId?: number;
+}
+
+/** Compact views keep parent context without spending extra rows on headers. */
+export function compactWidgetRows(
+	state: TodoState, hidden: Set<number>, theme: WidgetTheme, width: number, view: "minimal" | "preview",
+): TodoWidgetRow[] {
+	const live = state.tasks.filter(t => t.status !== "deleted");
+	const tasks = live.filter(t => t.kind !== "group");
+	const unresolved = (t: Todo) => (t.blockedBy ?? []).filter(id => live.find(dep => dep.id === id)?.status !== "completed");
+	const rank = (t: Todo) => t.status === "in_progress" ? 0 : t.status === "completed" ? 3 : unresolved(t).length ? 2 : 1;
+	const ranked = tasks.filter(t => !hidden.has(t.id)).sort((a, b) => rank(a) - rank(b));
+	const active = ranked.filter(t => t.status === "in_progress");
+	const chosen = view === "minimal" ? (active.length ? active.slice(0, 2) : ranked.slice(0, 1)) : ranked.slice(0, 5);
+	if (!chosen.length) return [];
+	const showIds = live.some(t => t.kind === "group" || t.blockedBy?.length);
+	const rows: TodoWidgetRow[] = [{ text: theme.fg("dim", `▸ Todos · ${tasks.filter(t => t.status === "completed").length}/${tasks.length} · ${view === "minimal" ? "focus" : `${chosen.length} shown`}`) }];
+	for (const [index, task] of chosen.entries()) {
+		const parent = live.find(t => t.id === task.parentId && t.kind === "group");
+		const [glyph, slot] = GLYPH[task.status as keyof typeof GLYPH];
+		const prefix = theme.fg("dim", index === chosen.length - 1 ? "└─ " : "├─ ") + theme.fg(slot, `${glyph} `);
+		const id = showIds ? `#${task.id} ` : "";
+		const blockers = unresolved(task);
+		const suffix = blockers.length ? ` ⛓ ${blockers.map(id => `#${id}`).join(",")}` : "";
+		const subject = sanitize(task.subject);
+		const parentSubject = parent ? sanitize(parent.subject) : "";
+		const progress = parent ? groupProgress(state, parent.id) : undefined;
+		const parentId = parent ? `#${parent.id} ` : "";
+		const link = progress ? ` (${progress.done}/${progress.total}) -> ` : "";
+		const available = Math.max(0, width - visibleWidth(prefix + parentId + link + id + suffix));
+		// Share scarce columns between subjects; unused space goes to the longer one.
+		const parentBudget = parent ? Math.min(visibleWidth(parentSubject), Math.max(Math.floor(available / 2), available - visibleWidth(subject))) : 0;
+		const parentText = parent ? theme.fg("dim", parentId) + theme.fg("text", truncateToWidth(parentSubject, parentBudget, "…")) + theme.fg("muted", link) : "";
+		const label = truncateToWidth(subject, Math.max(0, available - parentBudget), "…");
+		const body = task.status === "completed" ? theme.fg("muted", theme.strikethrough ? theme.strikethrough(label) : label) : theme.fg(task.status === "in_progress" ? "accent" : "text", label);
+		let text = prefix + parentText + theme.fg("dim", id) + body;
+		if (task.status === "in_progress" && task.activeForm) {
+			const room = width - visibleWidth(text + suffix);
+			if (room > 4) text += theme.fg("muted", ` (${truncateToWidth(sanitize(task.activeForm), room - 3, "…")})`);
+		}
+		rows.push({ text: text + theme.fg("muted", suffix) });
+	}
+	return rows.map(row => ({ text: truncateToWidth(row.text, width, "…") }));
 }
 
 /** Logical rows retain group hit targets even when their text wraps. */
