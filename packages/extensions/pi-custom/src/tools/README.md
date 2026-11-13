@@ -23,8 +23,7 @@ Up/Down, Page Up/Down and Home/End scroll, and Escape or Enter closes them.
 Log views are bounded snapshots, not a live tail. Model-facing output and
 completion delivery are unchanged.
 
-Replaces pi-background-tasks. pi-subagents' `bg_wait` is separate: it waits for
-async subagent runs only.
+Replaces pi-background-tasks.
 
 ## Todo list (`todo.ts`, `todo-state.ts`)
 
@@ -42,12 +41,13 @@ groups. Dependencies (`blockedBy`) connect tasks independently of grouping.
 Move or delete all live children before deleting a group; deletion never
 silently cascades.
 
-The list above the editor starts in focus mode: up to two active tasks, or one
-next task when nothing is active. Ctrl+Alt+T cycles through focus, a five-task
-preview, and the full wrapped list with history. Clicking the todo widget does
-not change its view or group scoping. The full view shows group counts and
-indented tasks; use `/todos <group-id>` to collapse/expand a group.
-`/todos` displays the full list without changing the focus view. Active work sorts first, then ready
+The list above the editor starts with a five-task preview. Ctrl+Alt+T cycles
+through the full wrapped list with history, focus mode (up to two active tasks,
+or one next task when nothing is active), and preview. Clicking the todo widget
+does not change its view or group scoping. The full view shows group counts
+and indented tasks; use `/todos <group-id>` to collapse/expand a group.
+`/todos` displays the full list without changing the current view.
+Active work sorts first, then ready
 pending work, blocked work and completions. Groups follow their highest-priority
 child. Satisfied dependency edges disappear from the widget, not the records.
 The heading labels overall counts; overflow labels only the tasks outside the
@@ -173,8 +173,7 @@ Pi session. `/btw new` starts blank; `/btw` or `/btw list` resumes a conversatio
 Sessions, drafts and tool mode survive restarts. A fork made while a parent tool
 is pending records that its result is unavailable; it never claims to have run it.
 
-Side conversations appear in the existing Down-arrow fleet menu. Select one and
-press Enter to open or continue it. Inside a side conversation:
+Use `/btw` or `/btw list` to select and continue a side conversation. Inside it:
 
 - Enter sends a follow-up. Responses stream into the native overlay.
 - Alt+s switches conversations; Alt+f forks the current side conversation;
@@ -190,16 +189,21 @@ press Enter to open or continue it. Inside a side conversation:
   These actions cancel a pending side turn, preserve the main draft, and never
   submit it. Ctrl+Shift+r requires distinct terminal reporting, such as Kitty keys.
 
-The overlay has a bounded viewport and a separate composer. Mouse wheel and
+The panel occupies only the right half of the terminal, above the live main
+input dock. Click either conversation or its input to focus it; Alt+b also
+switches between main and side input without closing the panel. Both drafts
+remain independent. Escape/Ctrl+c closes the panel instead. A second `/btw`
+command is rejected while the panel is open; use its controls to switch threads.
+
+The panel has a bounded viewport and a separate composer. Mouse wheel and
 Page Up/Down scroll; Ctrl+Home/End jump to the beginning/latest messages. New
 answers follow the tail unless you have scrolled up. The main editor and footer
 remain full-width. Child status and editor writes cannot replace them.
 
 Side transcripts stay in their own session files. The main session stores a
-resume reference, not side messages; the fleet receives only identity/activity
-metadata. Side discussions do not enter the main model context or minimap unless
-you explicitly bring them back. Main-conversation Ctrl+c is unchanged; Ctrl+c in
-the fleet, including its steering forms, returns to main without stopping a child.
+resume reference, not side messages. Side discussions do not enter the main model
+context or minimap unless you explicitly bring them back. Main-conversation
+Ctrl+c is unchanged.
 
 Replaces pi-btw; the independent conversation workflow was inspired by
 [pi-side-chat](https://github.com/nicobailon/pi-side-chat).

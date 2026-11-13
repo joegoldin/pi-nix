@@ -37,43 +37,33 @@ import { callLabel } from "./ui/call-label.ts";
 import { framedMenu, type MenuTheme, PermissionsMenuView } from "./ui/menu.ts";
 import { type MenuEffect, type MenuTab, PermissionsMenu, type SettingRow } from "./ui/menu-state.ts";
 
-// Asked on the session's event bus before registering. A subagent can be
-// handed this package twice, by path: pi-subagents passes its npm link, and
-// settings.json's packages list passes the store path. pi de-duplicates by the
-// path as written, so both would load and the second would fail on a tool name
-// the first registered. The bus is the session's own, and runs a handler
-// synchronously up to its first await, so the copy that loaded first answers
-// before the second registers anything.
+// Multiple configured paths can resolve to the same package in one session.
+// Probe on that session's own bus before registering tools or menus twice.
 const PROBE = "pi-permissions:loaded";
 
-// pi-subagents' registry of extensions every child of a session must load
-// (its src/shared/required-child-extensions.js, version 1). A child launched
-// without one that is required fails to start rather than running, and no
-// agent default, override or empty extension list removes it; with
-// requireForAllRunners a child is also refused on a runner that cannot load
-// it. pi-permissions registers itself for each session, so every subagent is
-// gated, and a child registers itself for its own children in turn.
-const REQUIRED_CHILD_EXTENSIONS = Symbol.for("pi-subagents.required-child-extensions.v1");
+// /btw edit sessions must load their owner's permission extension. This is a
+// local side-session contract, not a permission grant to independent peers.
+const REQUIRED_SIDE_EXTENSIONS = Symbol.for("pi-custom.required-side-extensions.v1");
 const ENTRY_PATH = realpathSync(fileURLToPath(import.meta.url));
 
-interface RequiredChildEntry {
+interface RequiredSideEntry {
 	id: string;
 	path: string;
-	requireForAllRunners?: true;
+	requiredForEdits?: true;
 }
 
-/** Make every child of `sessionId` load this extension. Returns the undo. */
-export function requireInChildren(sessionId: string, root: Record<symbol, unknown> = globalThis as never): () => void {
-	let store = root[REQUIRED_CHILD_EXTENSIONS] as { version?: unknown; bySession?: unknown } | undefined;
+/** Require permissions in this owner's side sessions. Returns the undo. */
+export function requireInSideSessions(sessionId: string, root: Record<symbol, unknown> = globalThis as never): () => void {
+	let store = root[REQUIRED_SIDE_EXTENSIONS] as { version?: unknown; bySession?: unknown } | undefined;
 	if (store === undefined) {
 		store = { version: 1, bySession: new Map() };
-		root[REQUIRED_CHILD_EXTENSIONS] = store;
+		root[REQUIRED_SIDE_EXTENSIONS] = store;
 	}
 	if (store.version !== 1 || !(store.bySession instanceof Map)) {
-		throw new Error("pi-subagents' required child extension registry has an unknown shape; refusing to leave subagents ungated.");
+		throw new Error("Required side-session extension registry has an unknown shape; refusing to leave side sessions ungated.");
 	}
-	const bySession = store.bySession as Map<string, readonly RequiredChildEntry[]>;
-	const own: RequiredChildEntry = Object.freeze({ id: "pi-permissions", path: ENTRY_PATH, requireForAllRunners: true as const });
+	const bySession = store.bySession as Map<string, readonly RequiredSideEntry[]>;
+	const own: RequiredSideEntry = Object.freeze({ id: "pi-permissions", path: ENTRY_PATH, requiredForEdits: true as const });
 	const others = (bySession.get(sessionId) ?? []).filter((entry) => entry.id !== own.id);
 	const entries = Object.freeze([...others, own]);
 	bySession.set(sessionId, entries);
@@ -328,7 +318,7 @@ export default function piPermissions(pi: ExtensionAPI, autoOverrides: Pick<PiAu
 	pi.on("session_start", (_event, ctx) => {
 		unrequire?.();
 		const sessionId = ctx.sessionManager.getSessionId?.();
-		unrequire = sessionId ? requireInChildren(sessionId) : undefined;
+		unrequire = sessionId ? requireInSideSessions(sessionId) : undefined;
 		restoreLedger(ctx);
 	});
 

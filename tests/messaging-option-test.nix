@@ -1,4 +1,4 @@
-# Eval-level assertions on the messaging option. Cheap, and it catches the
+# Module assertions on the messaging option. Cheap, and it catches the
 # mistakes that would actually hurt: a default that lets an unauthenticated
 # local peer drive the agent, a config file written to a path pi-custom never
 # reads, a broker command that resolves through PATH, a second copy of the
@@ -88,7 +88,7 @@ let
   # The fork appends extension prompt fragments through --append-system-prompt
   # on a generated file rather than through upstream's `rules`, so this is where
   # the fragment has to show up.
-  appendedPrompts = map (p: builtins.readFile p) (flagValues on.finalArgs "--append-system-prompt");
+  appendedPrompts = flagValues on.finalArgs "--append-system-prompt";
 
   assertions = [
     {
@@ -166,10 +166,8 @@ let
       ok = on.messagingRuntimeInputs != [ ];
     }
     {
-      name = "the untrusted-peer prompt fragment reaches the appended prompt";
-      ok =
-        lib.any (lib.hasInfix (builtins.readFile ../prompt/untrusted-peer-input.md)) appendedPrompts
-        && flagValues customOnly.finalArgs "--append-system-prompt" == [ ];
+      name = "pi-custom alone appends no prompt";
+      ok = flagValues customOnly.finalArgs "--append-system-prompt" == [ ];
     }
   ];
 
@@ -178,7 +176,17 @@ in
 if failed != [ ] then
   throw "messaging option: ${lib.concatMapStringsSep "; " (a: a.name) failed}"
 else
-  pkgs.runCommand "pi-nix-messaging-option" { } ''
-    echo "messaging option: ${toString (lib.length assertions)} assertions ok"
+  pkgs.runCommand "pi-nix-messaging-option" { nativeBuildInputs = [ pkgs.python3 ]; } ''
+    # Reading generated prompts during evaluation makes a cold-store check
+    # require builds. Keep the substring assertion, but run it after building.
+    python3 - ${lib.escapeShellArgs appendedPrompts} <<'PY'
+    import sys
+    from pathlib import Path
+
+    fragment = Path("${../prompt/untrusted-peer-input.md}").read_text()
+    assert any(fragment in Path(path).read_text() for path in sys.argv[1:]), \
+        "the untrusted-peer prompt fragment must reach the appended prompt"
+    PY
+    echo "messaging option: ${toString (lib.length assertions + 1)} assertions ok"
     touch $out
   ''

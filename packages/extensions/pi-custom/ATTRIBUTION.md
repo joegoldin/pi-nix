@@ -91,8 +91,8 @@ with pi sessions and Claude Code sessions as peers.
   client, framing, paths and spawn code; the copyright and licence notice are
   kept in [`src/intercom/broker/LICENSE`](src/intercom/broker/LICENSE). The
   `intercom` tool's name, parameters, descriptions and result text, the
-  inbox's trigger and hold rules, reply tracking, the handover prompt, and
-  the event contract pi-subagents relies on follow pi-intercom; the rest of
+  inbox's trigger and hold rules, reply tracking and the handover prompt
+  follow pi-intercom; the rest of
   the extension is reimplemented. Left out: the cross-machine relay, Herdr
   panes, the CLI and the extension bus. Fixed: a live session ID can't be
   taken over (carried from pi-nix's patch), ask edges are cleared when a

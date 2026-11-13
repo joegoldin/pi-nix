@@ -21,12 +21,10 @@ function fakeCurrent(): AutocompleteProvider & { applied: number } {
 
 const sources = (over: Partial<CompleterSources> = {}): CompleterSources => ({
 	sessionsEnabled: () => true,
-	agentsEnabled: () => true,
 	files: () => undefined,
 	sessions: async () => [
 		{ id: "s1", path: "/s1", firstMessage: "fix the parser", modified: new Date(), messageCount: 2 },
 	],
-	agents: () => [{ name: "oracle", description: "wise" }],
 	currentSessionId: () => undefined,
 	trackFile: () => {},
 	...over,
@@ -40,22 +38,25 @@ describe("the @ completer", () => {
 		expect(got?.items[0].value).toBe("@session:s1");
 	});
 
-	it("answers @agent: from the agent list", async () => {
-		const p = createCompleter(sources())(fakeCurrent());
+	it("leaves legacy agent references to the existing completer", async () => {
+		const current = fakeCurrent();
+		const p = createCompleter(sources())(current);
 		const got = await p.getSuggestions(["@agent:or"], 0, 9, { signal });
-		expect(got?.items.map((i) => i.value)).toEqual(["@agent:oracle"]);
+		expect(got?.items.map((i) => i.value)).toEqual(["@README.md"]);
+		p.applyCompletion(["@agent:or"], 0, 9, { value: "@agent:oracle", label: "oracle" }, "@agent:or");
+		expect(current.applied).toBe(1);
 	});
 
 	it("offers the keywords beside pi's own file completions", async () => {
 		const p = createCompleter(sources())(fakeCurrent());
 		const got = await p.getSuggestions(["@"], 0, 1, { signal });
-		expect(got?.items.map((i) => i.value)).toEqual(["@session:", "@agent:", "@README.md"]);
+		expect(got?.items.map((i) => i.value)).toEqual(["@session:", "@README.md"]);
 	});
 
 	it("drops a keyword whose feature is off", async () => {
-		const p = createCompleter(sources({ agentsEnabled: () => false }))(fakeCurrent());
+		const p = createCompleter(sources({ sessionsEnabled: () => false }))(fakeCurrent());
 		const got = await p.getSuggestions(["@"], 0, 1, { signal });
-		expect(got?.items.map((i) => i.value)).not.toContain("@agent:");
+		expect(got?.items.map((i) => i.value)).not.toContain("@session:");
 	});
 
 	it("ranks files through FFF when it has an index", async () => {
@@ -69,8 +70,8 @@ describe("the @ completer", () => {
 		const kw = p.applyCompletion(["see @se"], 0, 7, { value: "@session:", label: "@session:" }, "@se");
 		expect(kw.lines[0]).toBe("see @session:");
 		expect(kw.cursorCol).toBe(13);
-		const ref = p.applyCompletion(["@agent:or x"], 0, 9, { value: "@agent:oracle", label: "oracle" }, "@agent:or");
-		expect(ref.lines[0]).toBe("@agent:oracle  x");
+		const ref = p.applyCompletion(["@session:s x"], 0, 10, { value: "@session:s1", label: "session" }, "@session:s");
+		expect(ref.lines[0]).toBe("@session:s1  x");
 	});
 
 	it("hands file completions back to pi and records the choice for ranking", () => {

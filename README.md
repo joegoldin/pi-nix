@@ -31,14 +31,11 @@ The flake supports Linux and macOS on the following architectures:
 | `aarch64-darwin` | `nixos-unstable` | Current |
 | `aarch64-linux` | `nixos-unstable` | Current |
 | `x86_64-linux` | `nixos-unstable` | Current |
-| `x86_64-darwin` | `nixpkgs-26.05-darwin` | Legacy, through the end of 2026 |
 
-Nixpkgs 26.11 dropped Intel macOS support, while Apple Silicon macOS remains
-supported normally. Intel Macs use Nixpkgs's final supported Darwin branch,
-which receives security fixes through the end of 2026. 
+Intel macOS (`x86_64-darwin`) is not supported. Nixpkgs 26.11 dropped that
+platform; Apple Silicon macOS remains supported.
 
-Consumers may make the primary `nixpkgs` input follow their own current
-Nixpkgs. The dedicated Intel-Darwin input should remain pinned:
+Consumers may make the `nixpkgs` input follow their own current Nixpkgs:
 
 ```nix
 inputs.pi.inputs.nixpkgs.follows = "nixpkgs";
@@ -83,7 +80,6 @@ nix.settings = {
     enable = true;
     systemPrompt = ./SYSTEM.md;
     extensionPackages = with inputs.pi-nix.packages.${pkgs.system}; [
-      ext-pi-subagents
       ext-pi-web-access
     ];
     custom.enable = true;
@@ -264,7 +260,7 @@ Claude Code peers talk through Claude's own registry. With
 `messaging.claude.enable`, each top-level interactive pi session writes an entry
 under `~/.claude/sessions` and listens on a socket beside Claude's own, so
 Claude's `ListAgents` shows it and `SendMessage` reaches it, and the `intercom`
-tool lists and messages Claude sessions in turn. Subagent children stay off
+tool lists and messages Claude sessions in turn. Non-interactive runs stay off
 that list. The default follows the jail: the jail exposes neither
 `~/.claude/sessions` nor `$XDG_RUNTIME_DIR`/`/tmp/cc-socks`, so a jailed pi
 leaves Claude peering off and keeps pi peering. Every message to Claude asserts
@@ -394,7 +390,6 @@ Pinned extensions are exposed as `packages.<system>.ext-<slug>`:
 
 | Attribute | npm package | What it adds |
 | --- | --- | --- |
-| `ext-pi-subagents` | `pi-subagents` | subagents |
 | `ext-pi-lens` | `pi-lens` | LSP and linter feedback, its tools deferred behind its loader |
 | `ext-pi-web-access` | `pi-web-access` | web search and fetch |
 | `ext-pi-mcp-adapter` | `pi-mcp-adapter` | on-demand MCP servers, a discovery/call proxy, prompts, and authentication UI |
@@ -434,7 +429,7 @@ rather than from a pin:
 | `ext-pi-notify` | `packages/extensions/pi-notify` | Desktop notifications on prompts, settle, and long tool calls |
 | `ext-pi-voice` | `packages/extensions/pi-voice` | Push-to-talk dictation into the editor |
 | `ext-pi-foreign-skills` | `packages/extensions/pi-foreign-skills` | Skills from other agents' directories |
-| `ext-pi-permissions` | `packages/extensions/pi-permissions` | Permissions and auto mode in one extension: policy rules, the classifier as a chain link that asks before it blocks, subagent prompt forwarding |
+| `ext-pi-permissions` | `packages/extensions/pi-permissions` | Permissions and auto mode in one extension: policy rules, the classifier as a chain link that asks before it blocks, permission gates for /btw editing |
 
 User-message blocks show their saved send time in local `4:24 PM` format,
 right-aligned in the existing top padding. Restored history uses the original
@@ -481,3 +476,26 @@ Upstream's own README, cachix cache, and issue tracker remain the reference for
 everything not in the table above. See
 [earendil-works/pi#2310](https://github.com/earendil-works/pi/issues/2310) for
 why an official flake does not exist.
+
+## Independent peer sessions
+
+The native subagents extension is no longer packaged or exported. Remove
+`ext-pi-subagents` from consumer `extensionPackages` lists before updating this
+input. Its agents, prompt templates, fleet UI and `@agent:` delegation references
+are removed with it; `@session:` references and file completion are unchanged.
+
+For occasional parallel work, launch ordinary Pi sessions in visible terminal
+panes and communicate through Intercom. Each session uses its normal profile and
+owns its own permissions; messaging does not transfer approval authority or copy
+a requester's todo tree. The companion
+[peer-session skill changes](https://github.com/joegoldin/agent-skills/pull/9)
+cover bounded assignments, terminal identity, recovery and integration.
+
+Intercom's `complete` action reports results and can ask the peer's local user
+whether to quit. Explicitly authorized disposable peers can use the one-shot
+`--peer-auto-exit` launch flag. Pane cleanup remains a separate, user-authorized
+terminal action; see the [Intercom documentation](packages/extensions/pi-custom/src/intercom/README.md).
+
+`/btw` remains a separate, local side-conversation feature, not a peer launcher.
+Use `/btw` or `/btw list` to reopen one. Edit-mode side conversations still load
+the owner's permission extension and fail closed if that requirement is missing.

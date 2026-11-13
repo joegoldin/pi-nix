@@ -94,7 +94,7 @@ test("a fork records pending parent tools as not executed by the child", () => {
 });
 
 test("child gates are scoped to the parent and invalid registries fail closed", () => {
-	const key = Symbol.for("pi-subagents.required-child-extensions.v1");
+	const key = Symbol.for("pi-custom.required-side-extensions.v1");
 	const registry = {
 		[key]: {
 			version: 1,
@@ -105,7 +105,7 @@ test("child gates are scoped to the parent and invalid registries fail closed", 
 						{
 							id: "pi-permissions",
 							path: "/trusted/permissions.ts",
-							requireForAllRunners: true,
+							requiredForEdits: true,
 						},
 					],
 				],

@@ -15,8 +15,8 @@ describe("presenceName", () => {
 		expect(presenceName("  reviewer ", "abc")).toEqual({ name: "reviewer", fallback: false });
 	});
 
-	it("matches pi-subagents' alias for an unnamed session", () => {
-		expect(presenceName(undefined, "session-0123456789abcdefghijkl")).toEqual({ name: "subagent-chat-0123456789abcdefgh", fallback: true });
+	it("gives an unnamed Pi session a readable alias", () => {
+		expect(presenceName(undefined, "session-0123456789abcdefghijkl")).toEqual({ name: "pi-0123456789abcdefgh", fallback: true });
 	});
 });
 

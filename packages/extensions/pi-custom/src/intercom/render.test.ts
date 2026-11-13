@@ -2,7 +2,7 @@ import { expect, it } from "bun:test";
 import { type InboundDetails, messageComponent, messageLines } from "./render.ts";
 
 const details = {
-	from: { id: "worker", name: "subagent-control" },
+	from: { id: "worker", name: "review-peer" },
 	message: { content: { text: "Worker needs attention.\n" + "More context. ".repeat(30) + "END_OF_MESSAGE" } },
 } as InboundDetails;
 const theme = { fg: (_slot: string, text: string) => text };

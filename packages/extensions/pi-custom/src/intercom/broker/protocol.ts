@@ -20,7 +20,7 @@ const DEFAULT_ASK_TIMEOUT_MS = 10 * 60 * 1000;
 
 /**
  * How long an ask may wait for its reply. The broker keeps the ask edge this
- * long and the asker waits this long; pi-subagents reads the same variable.
+ * long and the asker waits this long, using the same environment variable.
  */
 export function getAskTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
 	const raw = env.PI_INTERCOM_ASK_TIMEOUT_MS;

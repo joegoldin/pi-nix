@@ -92,7 +92,7 @@ function isRetryable(message: string): boolean {
 	return /overloaded|rate.?limit|\b429\b|\b5\d\d\b|timeout|timed out|network|ECONNRESET|stream ended|context length|context window/i.test(message);
 }
 
-export function registerGoal(pi: ExtensionAPI, config: () => UiConfig): void {
+export function registerGoal(pi: ExtensionAPI, config: () => UiConfig): { active(): boolean } {
 	let goal: Goal | undefined;
 	let completed = false;
 	let ctxRef: ExtensionContext | undefined;
@@ -789,4 +789,5 @@ export function registerGoal(pi: ExtensionAPI, config: () => UiConfig): void {
 		if (goal?.status === "active") reportActivity(ctxRef, "goal", { state: "idle", title: "Goal", message: "Goal suspended with session" });
 		ctxRef = undefined;
 	});
+	return { active: () => goal?.status === "active" || wrapUpActive };
 }

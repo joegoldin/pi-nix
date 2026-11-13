@@ -5,6 +5,7 @@
 // pi-automode-permission-chain check, which ran the same cases against the two
 // packages side by side.
 import { test, expect } from "bun:test";
+import { realpathSync } from "node:fs";
 import { approvalScope, PermissionLedger } from "./denials.ts";
 const { withPermissionChain, getPermissionsService, DETERMINISTIC_ONLY } = await import(
   `./auto/permission-chain.ts`
@@ -563,7 +564,7 @@ test("y supplies the approved scenario when classifying a different command", as
   const result = await h.service.links.get("pi-automode")({ ...details, toolCallId: "variant" }, {}, log);
   expect(seen[0]).toEqual([]);
   expect(seen[1]).toHaveLength(1);
-  expect(seen[1][0]).toMatchObject({ input, cwd: "/tmp/project" });
+  expect(seen[1][0]).toMatchObject({ input, cwd: `${realpathSync("/tmp")}/project` });
   expect(result).toEqual({ kind: "allow" });
   expect(term.mounted).toHaveLength(1);
   expect(h.classifierCalls()).toBe(2);
@@ -891,7 +892,9 @@ test("directory gates forward the original edit, never their empty policy-check 
 
 test("directory facts survive follow-ups and restoration but never skip risk review or first-write escalation", async () => {
   const ledger = new PermissionLedger();
-  ledger.approveDirectory({ path: "/tmp/directory-fixture", access: "read" });
+  // Receipts store canonical paths; /tmp is a symlink on macOS.
+  const directory = `${realpathSync("/tmp")}/directory-fixture`;
+  ledger.approveDirectory({ path: directory, access: "read" });
   const seen = [];
   const h = await realHost(
     () => ({ classifyReadOnlyTools: true }),
@@ -914,7 +917,7 @@ test("directory facts survive follow-ups and restoration but never skip risk rev
   expect((await review("read", { path: "/tmp/directory-fixture/a.txt" })).kind).toBe("allow");
   expect((await review("write", { path: "/tmp/directory-fixture/a.txt", content: "a" })).kind).toBe("deny");
   expect(seen.at(-1)).toEqual([]);
-  ledger.approveDirectory({ path: "/tmp/directory-fixture", access: "write" });
+  ledger.approveDirectory({ path: directory, access: "write" });
   expect((await review("write", { path: "/tmp/directory-fixture/a.txt", content: "a" })).kind).toBe("allow");
   ledger.clearSimilar();
   ledger.restore(structuredClone(ledger.snapshot()));

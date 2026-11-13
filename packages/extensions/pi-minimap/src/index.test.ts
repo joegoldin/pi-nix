@@ -148,12 +148,13 @@ function harness() {
 	};
 }
 
-test("starts visible; runtime adapter uses no tools, limits output and asks Luna for low reasoning", async () => {
+test("starts hidden; runtime adapter uses no tools, limits output and asks Luna for low reasoning after enabling", async () => {
 	const h = harness();
 	expect(h.calls).toHaveLength(0);
+	expect(h.view()).toBeUndefined();
+	await h.command("on");
 	expect(h.view().engine.state.enabled).toBe(true);
 	expect(h.input("\r")).toBeUndefined();
-	await h.command("on");
 	await h.view().engine.refresh();
 	expect(h.calls).toHaveLength(1);
 	expect(h.calls[0].model.provider).toBe("cerebras");
@@ -419,8 +420,13 @@ test("minimap shortcuts are discoverable and do not claim Intercom's Alt+j", asy
 	expect(h.shortcuts.get("alt+m").description).toBe("Toggle minimap");
 	expect(h.shortcuts.has("alt+shift+m")).toBe(true);
 	expect(h.shortcuts.has("alt+j")).toBe(false);
+	expect(h.view()).toBeUndefined();
+	await h.shortcuts.get("alt+m").handler(h.ctx);
+	expect(h.persisted.at(-1).enabled).toBe(true);
+	expect(h.view().engine.state.enabled).toBe(true);
 	await h.shortcuts.get("alt+m").handler(h.ctx);
 	expect(h.persisted.at(-1).enabled).toBe(false);
+	expect(h.view()).toBeUndefined();
 });
 
 test("call journal retains full inputs, excludes reasoning, and records rejected replies", async () => {

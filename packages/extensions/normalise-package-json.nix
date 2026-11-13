@@ -15,7 +15,7 @@
 #      writes the root dev entries into bun.lock without resolving them, and the
 #      later `--frozen-lockfile` run then dies with
 #      `Failed to resolve root dev dependency '@earendil-works/pi-coding-agent'`
-#      (reproduced on pi-subagents).
+#      (as happens with packages declaring host peers).
 #
 # Package-specific security overrides are shared by the updater and build so
 # frozen installs use the same manifest.

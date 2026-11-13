@@ -366,7 +366,7 @@ export function cardRenderers(toolName: string, deps: RendererDeps): ToolRendere
 
 /**
  * The resolver pi calls for every tool name. Built-in tools always get a card,
- * whoever registered them. Other tools keep renderers of their own (a subagent
+ * whoever registered them. Other tools keep renderers of their own (an intercom
  * or todo tool draws something a card would flatten) and only get the generic
  * card when they have none, which is every MCP tool.
  */

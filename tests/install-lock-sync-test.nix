@@ -1,9 +1,8 @@
 { pkgs, self, ... }:
 let
-  packages = self.packages.${pkgs.stdenv.hostPlatform.system};
-  pi = packages.coding-agent-bun;
+  pi = self.packages.${pkgs.stdenv.hostPlatform.system}.coding-agent-bun;
 in
-pkgs.runCommand "pi-subagent-host-peers-tests"
+pkgs.runCommand "pi-install-lock-sync-tests"
   {
     nativeBuildInputs = [
       pkgs.nodejs
@@ -12,9 +11,8 @@ pkgs.runCommand "pi-subagent-host-peers-tests"
   }
   ''
     export HOME="$TMPDIR"
-    node ${./subagent-host-peers.mjs} ${pi}/lib/node_modules ${packages.ext-pi-subagents}
 
-    # The next sync must retain the worker dependencies, not just today's lock.
+    # Keep the generator check even though the subagent worker check is gone.
     cp -R ${pi.workspacePackages.src} source
     chmod -R u+w source
     cp ${../package-lock.json} source/package-lock.json

@@ -1,6 +1,7 @@
-# Module tests are pure evaluation: build the same module list mkCodingAgent
-# builds, then assert on finalArgs. `self` is stubbed so the test does not
-# need the real coding-agent closure to check argument construction.
+# Evaluate the same module list mkCodingAgent builds, then assert on finalArgs.
+# Read generated files only in the build phase: evaluation must work without
+# import-from-derivation, even when none of those outputs exist yet.
+# `self` is stubbed so argument checks do not need the real coding-agent closure.
 { pkgs, self, ... }:
 let
   lib = pkgs.lib;
@@ -184,12 +185,6 @@ let
       longRunningToolSeconds = 45;
     };
   };
-
-  # unsafeDiscardStringContext because the rendered notifier is a store path and
-  # fromJSON refuses a string carrying context.
-  notifyJson = builtins.fromJSON (
-    builtins.unsafeDiscardStringContext (builtins.readFile notifyOn.notifications.configFile)
-  );
 
   # The option default is the real first-party extension, so `enable = true`
   # alone must be enough.
@@ -392,6 +387,14 @@ let
     lib.deepSeq (evalPi { pi.coding-agent.voice.enable = true; }).environment "unreachable"
   );
 
+  sandboxWithPaths = evalPi {
+    pi.coding-agent.sandbox = {
+      enable = true;
+      writablePaths = [ "/Users/joe/Development" ];
+      unreadablePaths = [ "/Users/joe/.ssh" ];
+    };
+  };
+
   notifyUnpackaged = builtins.tryEval (
     lib.deepSeq
       (evalPi {
@@ -469,15 +472,6 @@ assert (envValue notifyOn "PI_NOTIFY_CONFIG").value == "${notifyOn.notifications
 # pi hands extensions no settings reader, so a piNotify block there would be
 # config nothing can read.
 assert !(notifyOn.settings ? piNotify);
-# The event list becomes the three booleans the extension switches on, and the
-# threshold crosses from seconds to milliseconds exactly once.
-assert notifyJson.enabled == true;
-assert notifyJson.events.agentSettled == true;
-assert notifyJson.events.permissionPrompt == true;
-assert notifyJson.events.longToolCall == false;
-assert notifyJson.longToolCallThresholdMs == 45000;
-assert lib.hasPrefix "/nix/store/" notifyJson.notifier;
-assert notifyJson.appName == "pi";
 # The default package is this flake's own pi-notify, so enable alone works.
 assert
   flagValues notifyDefaults.finalArgs "--extension"
@@ -497,7 +491,6 @@ assert
 assert (envValue autoOn "PI_AUTOMODE_SETTINGS_JSON").file == "${autoOn.autoMode.configFile}";
 assert !(autoOn.settings ? autoMode);
 assert !(autoOn.finalConfigFiles ? "automode.json");
-assert builtins.fromJSON (builtins.readFile autoOn.autoMode.configFile) == autoJson;
 # Asking before a classifier block stands is off unless enabled, and its
 # timeout travels with it.
 assert
@@ -568,28 +561,6 @@ assert
 # The profile is rendered only when asked for.
 assert (evalPi { }).sandbox.profile == null;
 assert (evalPi { pi.coding-agent.sandbox.enable = true; }).sandbox.profile != null;
-# What the profile says. Writes closed then granted back, so a path nobody
-# named is read-only rather than quietly writable, and the working directory
-# arrives as a -D parameter because it is not known until launch.
-assert
-  let
-    profile =
-      builtins.readFile
-        (evalPi {
-          pi.coding-agent.sandbox = {
-            enable = true;
-            writablePaths = [ "/Users/joe/Development" ];
-            unreadablePaths = [ "/Users/joe/.ssh" ];
-          };
-        }).sandbox.profile;
-  in
-  lib.hasInfix "(deny file-write*)" profile
-  && lib.hasInfix ''(subpath (param "CWD"))'' profile
-  && lib.hasInfix ''(subpath (param "AGENT_DIR"))'' profile
-  && lib.hasInfix ''(subpath "/Users/joe/Development")'' profile
-  && lib.hasInfix "(deny file-read*" profile
-  && lib.hasInfix ''(subpath "/Users/joe/.ssh")'' profile;
-
 # Fast mode is a separate first-party plugin, loaded with custom commands but
 # independently disableable. Loading the command does not turn priority on.
 assert !bare.fastMode.enable;
@@ -670,43 +641,6 @@ assert
 assert !(lib.any (e: lib.hasInfix "pi-foreign-skills" e) (evalPi { }).extensions);
 assert lib.any (e: lib.hasInfix "pi-foreign-skills" e)
   (evalPi { pi.coding-agent.foreignSkills.enable = true; }).extensions;
-
-# pi-subagents resolves the permission system by name, so it has to be findable
-# at `npm/node_modules/<name>` -- the launcher links the store path there.
-assert
-  let
-    launcher = builtins.readFile (lib.getExe autoWithPermissionSystem.package);
-  in
-  lib.hasInfix "npm/node_modules/@gotgenes/pi-permission-system" launcher;
-# It must never be written into `extensions/`, which is a pi discovery root: a
-# package.json there would load the extension a second time on top of the
-# --extension flag. Only config.json belongs in that directory.
-assert
-  let
-    launcher = builtins.readFile (lib.getExe autoWithPermissionSystem.package);
-  in
-  !(lib.hasInfix "extensions/pi-permission-system/package.json" launcher);
-# The link tracks the package being loaded, not the chain being armed: a
-# subagent needs to find it either way.
-assert
-  let
-    launcher = builtins.readFile (lib.getExe autoChainOff.package);
-  in
-  lib.hasInfix "npm/node_modules/@gotgenes/pi-permission-system" launcher;
-# pi-permissions carries the permission system, so the link names it: a child
-# finds both halves there.
-assert
-  let
-    launcher = builtins.readFile (lib.getExe autoOn.package);
-  in
-  lib.hasInfix "npm/node_modules/@gotgenes/pi-permission-system" launcher
-  && lib.hasInfix "-pi-ext-pi-permissions-" launcher;
-# No permission system loaded, nothing to link.
-assert
-  let
-    launcher = builtins.readFile (lib.getExe autoOff.package);
-  in
-  !(lib.hasInfix "npm/node_modules" launcher);
 
 # An explicit `[ ]` survives to the rendered file as an empty array, so the
 # extension sees a section that was configured to hold nothing.
@@ -849,8 +783,63 @@ assert
 assert envValue autoWithPermissionSystem "PI_PERMISSION_DELEGATION_EXCLUDED_SURFACES" == null;
 # And unset when no link is registered, however the option is written.
 assert envValue autoChainNarrowedNoLink "PI_PERMISSION_DELEGATION_EXCLUDED_SURFACES" == null;
-pkgs.runCommand "pi-nix-options-tests" { } ''
+pkgs.runCommand "pi-nix-options-tests" { nativeBuildInputs = [ pkgs.jq ]; } ''
   set -euo pipefail
+
+  # The event list becomes the extension's three booleans, and the threshold
+  # crosses from seconds to milliseconds exactly once.
+  jq -e '
+    .enabled == true
+    and .events.agentSettled == true
+    and .events.permissionPrompt == true
+    and .events.longToolCall == false
+    and .longToolCallThresholdMs == 45000
+    and (.notifier | startswith("/nix/store/"))
+    and .appName == "pi"
+  ' ${notifyOn.notifications.configFile} > /dev/null
+
+  jq -e --slurpfile expected ${pkgs.writeText "pi-automode-expected.json" (builtins.toJSON autoJson)} \
+    '. == $expected[0]' ${autoOn.autoMode.configFile} > /dev/null
+
+  # Writes are closed then granted back. The working directory arrives as a
+  # -D parameter because it is not known until launch.
+  profile=${sandboxWithPaths.sandbox.profile}
+  grep -qF '(deny file-write*)' "$profile"
+  grep -qF '(subpath (param "CWD"))' "$profile"
+  grep -qF '(subpath (param "AGENT_DIR"))' "$profile"
+  grep -qF '(subpath "/Users/joe/Development")' "$profile"
+  grep -qF '(deny file-read*' "$profile"
+  grep -qF '(subpath "/Users/joe/.ssh")' "$profile"
+
+  # Negated commands do not trigger Bash's errexit. Require grep's no-match
+  # status explicitly, so both a forbidden string and a read error fail.
+  assert_absent() {
+    local status=0
+    grep -qF "$1" "$2" || status=$?
+    if [ "$status" -ne 1 ]; then
+      echo "Expected '$1' to be absent from $2 (grep exited $status)" >&2
+      exit 1
+    fi
+  }
+
+  # Independent sessions load their own permission package, without a
+  # managed-child resolver link. Only extension config belongs in the prelude.
+  for launcher in ${
+    lib.escapeShellArgs (
+      map (cfg: lib.getExe cfg.package) [
+        autoWithPermissionSystem
+        autoChainOff
+        autoOn
+        autoOff
+      ]
+    )
+  }; do
+    test -r "$launcher"
+    assert_absent 'npm/node_modules' "$launcher"
+  done
+  assert_absent 'extensions/pi-permission-system/package.json' \
+    ${lib.getExe autoWithPermissionSystem.package}
+
   # The written prompt must be the literal text, with no wrapper or frontmatter.
   grep -qxF 'You are terse.' ${inline.finalSystemPrompt}
   # renderConfig must emit the padding the option carries, proving the shared

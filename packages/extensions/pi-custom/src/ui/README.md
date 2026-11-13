@@ -81,8 +81,8 @@ completer.
 - **`/context`.** Where the context window is going: system prompt, tools,
   skills, messages, estimated and scaled to pi's own total.
 - **References.** `@session:<id>` pulls an earlier session's gist (what was asked
-  and concluded) into the turn as its own card; `@agent:<name>` names a
-  pi-subagents agent. Both complete after `@`.
+  and concluded) into the turn as its own card. Session references complete
+  after `@`; the removed native subagent catalogue is not offered.
 - **Search.** `find`, `grep` and `@` file completion through FFF's frecency
   index, so recently used files rank first. Anything FFF can't answer the way
   pi's tools would falls back to them, and paths auto mode denies (`.env` and
@@ -110,7 +110,7 @@ completer.
 | `config.ts` | `pi-custom.json`: defaults, coercion, load and save |
 | `settings.ts` | `/ui` |
 | `context.ts` | `/context` |
-| `references.ts` | `@session:` digests and `@agent:` lookup |
+| `references.ts` | `@session:` digests and lookup |
 | `complete.ts` | The `@` completer layered over pi's |
 | `search.ts` | find/grep semantics over FFF, with fallbacks (pure) |
 | `fff.ts` | The live FFF index, tools and file completion |

@@ -30,9 +30,8 @@ import {
 	disposeSideRuntime,
 	type SideMode,
 } from "./btw-runtime.ts";
-import { registerSideConversations } from "./btw-fleet.ts";
 import { forkSideSession } from "./btw-session.ts";
-import { truncateToWidth } from "@earendil-works/pi-tui";
+import { matchesKey, truncateToWidth, type OverlayHandle } from "@earendil-works/pi-tui";
 export { BtwView, bringBackDraft, bringBackThreadDraft } from "./btw-view.ts";
 
 const ENTRY = "pi-custom:btw-session";
@@ -112,10 +111,10 @@ export function sideTurns(
 export function registerBtw(
 	pi: ExtensionAPI,
 	createRuntime = createSideRuntime,
-): void {
+): { running(): number } {
 	const threads = new Map<string, LiveThread>();
 	let shuttingDown = false;
-	const fleetBindings = new Map<string, () => void>();
+	let closePanel: (() => void) | undefined;
 	const directory = (ctx: ExtensionContext) => {
 		const file = ctx.sessionManager.getSessionFile();
 		if (!file)
@@ -355,11 +354,25 @@ export function registerBtw(
 		while (thread) {
 			const current = thread;
 			let draft: string | undefined;
+			let handle: OverlayHandle | undefined;
+			let closeCurrent: (() => void) | undefined;
+			let renderCurrent: (() => void) | undefined;
+			let removeInputListener: (() => void) | undefined;
+			let screenRows = () => 0;
+			const availableHeight = () => Math.max(0, screenRows() - ctx.ui.getInputDockHeight());
 			const action = await ctx.ui.custom<
 				"close" | "fork" | "fresh" | "switch" | "mode"
 			>(
 				(tui, theme, _keys, done) => {
-					current.render = () => tui.requestRender();
+					screenRows = () => tui.terminal.rows;
+					closePanel = closeCurrent = () => done("close");
+					current.render = renderCurrent = () => tui.requestRender();
+					removeInputListener = tui.addInputListener((data) => {
+						if (!matchesKey(data, "alt+b") || !handle) return;
+						if (handle.isFocused()) handle.unfocus();
+						else handle.focus();
+						return { consume: true };
+					});
 					const view = new BtwView(
 						current,
 						theme,
@@ -376,7 +389,7 @@ export function registerBtw(
 						},
 						() => done("close"),
 						current.render,
-						() => Math.max(5, Math.floor(tui.terminal.rows * 0.8) - 3),
+						() => Math.max(1, availableHeight() - 2),
 						{
 							fork: () => done("fork"),
 							fresh: () => done("fresh"),
@@ -397,12 +410,15 @@ export function registerBtw(
 						question = undefined;
 					}
 					return {
+						get focused() { return view.focused; },
+						set focused(value: boolean) { view.focused = value; },
 						render: (width) => new Framed(
 							view,
 							truncateToWidth(`btw · ${current.saved.mode} · ${current.saved.name.replace(/[\p{C}\p{Zl}\p{Zp}]/gu, " ")}`, Math.max(1, width - 5)),
 							theme,
 						).render(width),
 						invalidate: () => view.invalidate(),
+						dispose: () => removeInputListener?.(),
 						handleInput: (data) => {
 							view.handleInput(data);
 							tui.requestRender();
@@ -412,10 +428,22 @@ export function registerBtw(
 				},
 				{
 					overlay: true,
-					overlayOptions: { width: "90%", maxHeight: "90%", anchor: "center" },
+					overlayOptions: {
+						width: "50%",
+						anchor: "top-right",
+						nonCapturing: true,
+						unfocusOnOutsideClick: true,
+						get maxHeight() { return availableHeight(); },
+						get margin() { return { bottom: ctx.ui.getInputDockHeight() }; },
+						visible: (width) => width >= 16 && availableHeight() >= 5,
+					},
+					onHandle: (overlay) => { handle = overlay; overlay.focus(); },
 				},
-			);
-			current.render = undefined;
+			).finally(() => {
+				removeInputListener?.();
+				if (current.render === renderCurrent) current.render = undefined;
+				if (closePanel === closeCurrent) closePanel = undefined;
+			});
 			save(current);
 			if (draft) {
 				const previous = ctx.ui.getEditorText();
@@ -443,49 +471,6 @@ export function registerBtw(
 			} else thread = undefined;
 		}
 	}
-	function installFleet(ctx: ExtensionContext): void {
-		const owner = ctx.sessionManager.getSessionId();
-		const file = ctx.sessionManager.getSessionFile();
-		if (!file) return;
-		fleetBindings.get(file)?.();
-		fleetBindings.set(
-			file,
-			registerSideConversations(file, {
-				snapshot: () => {
-					if (ctx.sessionManager.getSessionId() !== owner) return [];
-					return [...threads.values()]
-						.filter((thread) => thread.sessionId === owner)
-						.map((thread) => ({
-							id: thread.id,
-							label: thread.saved.name,
-							state: thread.busy ? "running" : "idle",
-							startedAt: thread.saved.updatedAt,
-							updatedAt: thread.saved.updatedAt,
-							...(thread.saved.parentId
-								? { parentId: thread.saved.parentId }
-								: {}),
-						}));
-				},
-				open: async (id) => {
-					const thread = threads.get(id);
-					if (
-						!thread ||
-						thread.sessionId !== owner ||
-						ctx.sessionManager.getSessionId() !== owner
-					)
-						return;
-					try {
-						await open(ctx, thread);
-					} catch (error) {
-						ctx.ui.notify(
-							`Cannot open /btw: ${(error as Error).message}`,
-							"error",
-						);
-					}
-				},
-			}),
-		);
-	}
 	pi.on("session_start", (_event, ctx) => {
 		if (ctx.mode !== "tui") return;
 		for (const thread of threads.values()) {
@@ -494,7 +479,6 @@ export function registerBtw(
 		}
 		try {
 			restore(ctx);
-			installFleet(ctx);
 		} catch (error) {
 			ctx.ui.notify(
 				`Cannot restore /btw: ${(error as Error).message}`,
@@ -510,9 +494,12 @@ export function registerBtw(
 				ctx.ui.notify("/btw requires interactive TUI mode", "error");
 				return;
 			}
+			if (closePanel) {
+				ctx.ui.notify("/btw is already open. Click its panel or press Alt+b to focus it.", "info");
+				return;
+			}
 			try {
 				restore(ctx);
-				installFleet(ctx);
 				const question = args.trim();
 				const thread =
 					question === "new"
@@ -535,8 +522,7 @@ export function registerBtw(
 	});
 	pi.on("session_shutdown", async () => {
 		shuttingDown = true;
-		for (const dispose of fleetBindings.values()) dispose();
-		fleetBindings.clear();
+		closePanel?.();
 		const errors: unknown[] = [];
 		for (const thread of threads.values()) {
 			thread.busy?.abort();
@@ -558,4 +544,5 @@ export function registerBtw(
 				"Could not completely close side conversations",
 			);
 	});
+	return { running: () => [...threads.values()].filter(thread => thread.busy).length };
 }

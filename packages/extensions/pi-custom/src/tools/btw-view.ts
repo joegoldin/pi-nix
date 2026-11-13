@@ -53,6 +53,8 @@ ${content}
 
 export class BtwView {
 	private input = new Input();
+	get focused(): boolean { return this.input.focused; }
+	set focused(value: boolean) { this.input.focused = value; }
 	private get busy(): AbortController | undefined {
 		return this.thread.busy;
 	}
@@ -171,6 +173,8 @@ export class BtwView {
 	}
 
 	handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+		if ((event.type === "press" || event.type === "click") && event.button === "left")
+			return { handled: true, focus: true, render: true };
 		if (event.type !== "wheel") return;
 		this.scroll((event.wheelDelta ?? 0) * 3);
 		return { handled: true, render: true };
@@ -204,6 +208,7 @@ export class BtwView {
 		const input = this.input.render(width)[0] ?? "";
 		const status = this.busy ? "Answering…" : this.status;
 		const hints = [
+			"Alt+b focus main/btw · Click either panel to focus",
 			"Enter ask · Ctrl+r latest · Ctrl+Shift+r all",
 			this.actions
 				? "Esc/Ctrl+c main · Alt+s switch · Alt+f fork · Alt+n new · Alt+t mode · Alt+x stop"
