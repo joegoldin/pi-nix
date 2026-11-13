@@ -33,6 +33,9 @@ in
   intercom-smoke = import ./intercom-smoke-test.nix args;
   messaging-option = import ./messaging-option-test.nix args;
   prompt-fragment-inventory = import ./prompt-lint.nix args;
+  # The modules install the Bun build with pi-patches.nix on top; options-test
+  # only sees a stub, so apply the --replace-fail patterns to the real build.
+  pi-patches = import ../coding-agent/pi-patches.nix { inherit (pkgs) lib; } self.packages.${pkgs.stdenv.hostPlatform.system}.coding-agent-bun;
 }
 // import ./extension-tests.nix args
 // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {

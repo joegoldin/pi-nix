@@ -38,14 +38,14 @@ package.overrideAttrs (old: {
                         const titlesOnly = thinkingBlocks.every((block) => block.split("\n").every((line) => !line.trim() || /^\*\*[^*]+\*\*$/.test(line.trim())));
                         const hidden = !titlesOnly && (this.thinkingVisibilityOverrides.get(runIndex) ?? this.hideThinkingBlock);''}
     substituteInPlace "$out/${file}" --replace-fail \
-      ${lib.escapeShellArg "this.contentContainer.addChild(new MouseRegion(thinkingComponent, (event) => {"} \
-      ${lib.escapeShellArg "this.contentContainer.addChild(titlesOnly ? thinkingComponent : new MouseRegion(thinkingComponent, (event) => {"}
+      ${lib.escapeShellArg "addVisibleChild(new MouseRegion(thinkingComponent, (event) => {"} \
+      ${lib.escapeShellArg "addVisibleChild(titlesOnly ? thinkingComponent : new MouseRegion(thinkingComponent, (event) => {"}
     substituteInPlace "$out/${file}" --replace-fail \
-      ${lib.escapeShellArg ": new Markdown(thinkingBlocks.join(\"\\n\\n\"), this.outputPad, 0, this.markdownTheme, {"} \
+      ${lib.escapeShellArg ": markdownBlock(\"thinking\", thinking, () => new Markdown(thinking, this.outputPad, 0, this.markdownTheme, {"} \
       ${lib.escapeShellArg ''
         : titlesOnly
                         ? new Text(thinkingBlocks.flatMap((block) => block.split("\n")).map((line) => line.trim().replace(/^\*\*([^*]+)\*\*$/, "$1")).filter(Boolean).map((line) => theme.italic(theme.fg("thinkingText", `∴ ''${line}`))).join("\n"), this.outputPad, 0)
-                        : new Markdown(thinkingBlocks.join("\n\n"), this.outputPad, 0, this.markdownTheme, {''}
+                        : markdownBlock("thinking", thinking, () => new Markdown(thinking, this.outputPad, 0, this.markdownTheme, {''}
     substituteInPlace "$out/${file}" --replace-fail \
       ${lib.escapeShellArg "this.contentContainer.clear();"} \
       ${lib.escapeShellArg ''

@@ -22,8 +22,8 @@ let
         chmod +x $out/bin/pi
         cat > $out/lib/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/assistant-message.js <<'JS'
         const hidden = this.thinkingVisibilityOverrides.get(runIndex) ?? this.hideThinkingBlock;
-        : new Markdown(thinkingBlocks.join("\n\n"), this.outputPad, 0, this.markdownTheme, {
-        this.contentContainer.addChild(new MouseRegion(thinkingComponent, (event) => {
+        : markdownBlock("thinking", thinking, () => new Markdown(thinking, this.outputPad, 0, this.markdownTheme, {
+        addVisibleChild(new MouseRegion(thinkingComponent, (event) => {
         this.contentContainer.clear();
         const lines = super.render(width);
         JS
