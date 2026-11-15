@@ -1,0 +1,400 @@
+--- a/packages/tui/src/utils.ts
++++ b/packages/tui/src/utils.ts
+@@ -950,7 +950,7 @@
+ 	for (const line of lines) Number(line);
+ }
+ 
+-export function wrapTextWithAnsi(text: string, width: number): string[] {
++export function wrapTextWithAnsi(text: string, width: number, trackCopyWraps = false): string[] {
+ 	if (!text) {
+ 		return [""];
+ 	}
+@@ -965,7 +965,9 @@
+ 		// Prepend active ANSI codes from previous lines (except for first line)
+ 		const prefix = result.length > 0 ? tracker.getActiveCodes() : "";
+ 		const wrappedLines = wrapSingleLine(prefix + inputLine, width);
+-		for (const wrappedLine of wrappedLines) {
++		const copyLines =
++			trackCopyWraps && isCopyTrackingEnabled() ? annotateCopyWraps(wrappedLines, inputLine) : wrappedLines;
++		for (const wrappedLine of copyLines) {
+ 			result.push(wrappedLine);
+ 		}
+ 		// Update tracker with codes from this line for next iteration
+@@ -973,6 +975,92 @@
+ 	}
+ 
+ 	return result.length > 0 ? result : [""];
++}
++
++let copyTrackingDepth = 0;
++
++/** Only fullscreen owns text selection; ordinary component renders keep their existing output. */
++export function withCopyTracking<T>(render: () => T): T {
++	copyTrackingDepth++;
++	try {
++		return render();
++	} finally {
++		copyTrackingDepth--;
++	}
++}
++
++export function isCopyTrackingEnabled(): boolean {
++	return copyTrackingDepth > 0;
++}
++
++// APC markers travel with rendered text through margins, styling and layout composition.
++// They have zero cell width and are ignored by terminals, like the existing cursor marker.
++const COPY_START = "\x1b_pi:copy-start\x1b\\";
++let nextCopySource = 0;
++const COPY_END = /\x1b_pi:copy-end;([^\x1b]*)\x1b\\/g;
++
++function annotateCopyWraps(lines: string[], source: string): string[] {
++	if (source.includes(COPY_START)) return lines;
++	const plain = stripTerminalSequences(source);
++	let offset = 0;
++	const ranges = lines.map((line) => {
++		const text = stripTerminalSequences(line);
++		const start = plain.indexOf(text, offset);
++		const end = start + text.length;
++		offset = end;
++		return { start, end };
++	});
++	// Unknown transformations must not cause us to guess at source whitespace.
++	if (ranges.some((range) => range.start < 0)) return lines;
++	const sourceId = ++nextCopySource;
++	return lines.map((line, index) => {
++		const next = ranges[index + 1];
++		const separator = next ? plain.slice(ranges[index]!.end, next.start) : `${plain.slice(ranges[index]!.end)}\n`;
++		// Semantic prompt markers must stay at the start for prompt navigation and layout.
++		const zone = line.match(/^(?:\x1b\]133;[ABC](?:;pi=user)?(?:\x07|\x1b\\))+/)?.[0] ?? "";
++		return `${zone}${COPY_START}${line.slice(zone.length)}\x1b_pi:copy-end;${JSON.stringify([sourceId, index, separator])}\x1b\\`;
++	});
++}
++
++/** Source boundaries for a single wrapped text span; composite multi-column rows remain literal. */
++export function getCopySpan(line: string):
++	| {
++			start: number;
++			end: number;
++			source: number;
++			row: number;
++			separator: string;
++	  }
++	| undefined {
++	const start = line.indexOf(COPY_START);
++	if (start < 0 || line.indexOf(COPY_START, start + COPY_START.length) >= 0) return undefined;
++	const matches = [...line.matchAll(COPY_END)];
++	if (matches.length !== 1 || matches[0]!.index < start) return undefined;
++	const match = matches[0]!;
++	try {
++		const data: unknown = JSON.parse(match[1]!);
++		if (!Array.isArray(data) || data.length !== 3) return undefined;
++		const [source, row, separator] = data;
++		if (
++			!Number.isSafeInteger(source) ||
++			!Number.isSafeInteger(row) ||
++			typeof separator !== "string" ||
++			/\S/.test(separator)
++		)
++			return undefined;
++		const prefix = stripTerminalSequences(line.slice(0, start));
++		// A first-line bullet or quote prefix is content; repeated continuation gutters are not.
++		const contentStart = row === 0 && /\S/.test(prefix) ? (prefix.match(/^\s*/)?.[0] ?? "") : prefix;
++		return {
++			start: visibleWidth(contentStart),
++			end: visibleWidth(line.slice(0, match.index)),
++			source,
++			row,
++			separator,
++		};
++	} catch {
++		return undefined;
++	}
+ }
+ 
+ function wrapSingleLine(line: string, width: number): string[] {
+--- a/packages/tui/src/components/text.ts
++++ b/packages/tui/src/components/text.ts
+@@ -1,5 +1,11 @@
+ import type { Component } from "../tui.ts";
+-import { applyBackgroundToLine, flattenLines, visibleWidth, wrapTextWithAnsi } from "../utils.ts";
++import {
++	applyBackgroundToLine,
++	flattenLines,
++	isCopyTrackingEnabled,
++	visibleWidth,
++	wrapTextWithAnsi,
++} from "../utils.ts";
+ 
+ /**
+  * Text component - displays multi-line text with word wrapping
+@@ -13,6 +19,7 @@
+ 	// Cache for rendered output
+ 	private cachedText?: string;
+ 	private cachedWidth?: number;
++	private cachedCopyTracking = false;
+ 	private cachedLines?: string[];
+ 
+ 	constructor(text: string = "", paddingX: number = 1, paddingY: number = 1, customBgFn?: (text: string) => string) {
+@@ -51,7 +58,12 @@
+ 
+ 	render(width: number): string[] {
+ 		// Check cache
+-		if (this.cachedLines && this.cachedText === this.text && this.cachedWidth === width) {
++		if (
++			this.cachedLines &&
++			this.cachedText === this.text &&
++			this.cachedWidth === width &&
++			this.cachedCopyTracking === isCopyTrackingEnabled()
++		) {
+ 			return this.cachedLines;
+ 		}
+ 
+@@ -60,6 +72,7 @@
+ 			const result: string[] = [];
+ 			this.cachedText = this.text;
+ 			this.cachedWidth = width;
++			this.cachedCopyTracking = isCopyTrackingEnabled();
+ 			this.cachedLines = result;
+ 			return result;
+ 		}
+@@ -72,7 +85,7 @@
+ 		const contentWidth = Math.max(1, width - paddingX * 2);
+ 
+ 		// Wrap text (this preserves ANSI codes but does NOT pad)
+-		const wrappedLines = wrapTextWithAnsi(normalizedText, contentWidth);
++		const wrappedLines = wrapTextWithAnsi(normalizedText, contentWidth, true);
+ 
+ 		// Add margins and background to each line
+ 		const leftMargin = " ".repeat(paddingX);
+@@ -108,6 +121,7 @@
+ 		// Update cache
+ 		this.cachedText = this.text;
+ 		this.cachedWidth = width;
++		this.cachedCopyTracking = isCopyTrackingEnabled();
+ 		this.cachedLines = result;
+ 
+ 		return result.length > 0 ? result : [""];
+--- a/packages/tui/src/components/markdown.ts
++++ b/packages/tui/src/components/markdown.ts
+@@ -3,7 +3,14 @@
+ import { renderLatex } from "../latex.ts";
+ import { getCapabilities, hyperlink, isImageLine } from "../terminal-image.ts";
+ import type { Component } from "../tui.ts";
+-import { applyBackgroundToLine, cjkPunctuationRegex, flattenLines, visibleWidth, wrapTextWithAnsi } from "../utils.ts";
++import {
++	applyBackgroundToLine,
++	cjkPunctuationRegex,
++	flattenLines,
++	isCopyTrackingEnabled,
++	visibleWidth,
++	wrapTextWithAnsi,
++} from "../utils.ts";
+ 
+ const STRICT_STRIKETHROUGH_REGEX = /^(~~)(?=[^\s~])((?:\\.|[^\\])*?(?:\\.|[^\s~\\]))\1(?=[^~]|$)/;
+ 
+@@ -318,6 +325,7 @@
+ 	// Cache for rendered output
+ 	private cachedText?: string;
+ 	private cachedWidth?: number;
++	private cachedCopyTracking = false;
+ 	private cachedLines?: string[];
+ 	// Parsed tokens depend only on the source, so they survive theme and width invalidation. Held weakly: a token tree is
+ 	// about ten times the size of its source, and every message of a long transcript keeps a Markdown component. The
+@@ -367,7 +375,12 @@
+ 
+ 	render(width: number): string[] {
+ 		// Check cache
+-		if (this.cachedLines && this.cachedText === this.text && this.cachedWidth === width) {
++		if (
++			this.cachedLines &&
++			this.cachedText === this.text &&
++			this.cachedWidth === width &&
++			this.cachedCopyTracking === isCopyTrackingEnabled()
++		) {
+ 			return this.cachedLines;
+ 		}
+ 
+@@ -382,6 +395,7 @@
+ 			// Update cache
+ 			this.cachedText = this.text;
+ 			this.cachedWidth = width;
++			this.cachedCopyTracking = isCopyTrackingEnabled();
+ 			this.cachedLines = result;
+ 			return result;
+ 		}
+@@ -411,7 +425,11 @@
+ 			const nextTokenType = tokens[i + 1]?.type;
+ 			const reused = reuseBlocks ? (blocks.get(token.raw) ?? previousBlocks?.get(token.raw)) : undefined;
+ 			const block = reused ?? { width: -1, nextTokenType, lines: [], highlightedCode: new Map() };
+-			if (block.width !== width || block.nextTokenType !== nextTokenType) {
++			if (
++				block.width !== width ||
++				block.nextTokenType !== nextTokenType ||
++				this.cachedCopyTracking !== isCopyTrackingEnabled()
++			) {
+ 				this.renderBlock(block, token, nextTokenType, width, contentWidth);
+ 			}
+ 			if (reuseBlocks) blocks.set(token.raw, block);
+@@ -436,6 +454,7 @@
+ 		// Update cache
+ 		this.cachedText = this.text;
+ 		this.cachedWidth = width;
++		this.cachedCopyTracking = isCopyTrackingEnabled();
+ 		this.cachedLines = result;
+ 
+ 		return result.length > 0 ? result : [""];
+@@ -459,7 +478,7 @@
+ 				lines.push(line);
+ 				continue;
+ 			}
+-			for (const wrappedLine of wrapTextWithAnsi(line, contentWidth)) {
++			for (const wrappedLine of wrapTextWithAnsi(line, contentWidth, true)) {
+ 				const lineWithMargins = leftMargin + wrappedLine + rightMargin;
+ 				if (bgFn) {
+ 					lines.push(applyBackgroundToLine(lineWithMargins, width, bgFn));
+@@ -727,7 +746,7 @@
+ 
+ 				for (const quoteLine of renderedQuoteLines) {
+ 					const styledLine = applyQuoteStyle(quoteLine);
+-					const wrappedLines = wrapTextWithAnsi(styledLine, quoteContentWidth);
++					const wrappedLines = wrapTextWithAnsi(styledLine, quoteContentWidth, true);
+ 					for (const wrappedLine of wrappedLines) {
+ 						lines.push(this.theme.quoteBorder("│ ") + wrappedLine);
+ 					}
+@@ -931,7 +950,7 @@
+ 
+ 				const itemLines = this.renderToken(itemToken, itemWidth, undefined, styleContext);
+ 				for (const line of itemLines) {
+-					for (const wrappedLine of wrapTextWithAnsi(line, itemWidth)) {
++					for (const wrappedLine of wrapTextWithAnsi(line, itemWidth, true)) {
+ 						const linePrefix = renderedAnyLine ? continuationPrefix : firstPrefix;
+ 						lines.push(linePrefix + wrappedLine);
+ 						renderedAnyLine = true;
+@@ -973,7 +992,7 @@
+ 	 * consistently with the rest of the renderer.
+ 	 */
+ 	private wrapCellText(text: string, maxWidth: number, stylePrefix = ""): string[] {
+-		const lines = wrapTextWithAnsi(text, Math.max(1, maxWidth));
++		const lines = wrapTextWithAnsi(text, Math.max(1, maxWidth), true);
+ 		return lines.map((line, index) => {
+ 			// Reset text styles after each non-final fragment, then restore the surrounding style before padding and borders.
+ 			const styleReset = index < lines.length - 1 ? "\x1b[22;23;24;25;27;28;29;39m" : "";
+@@ -1004,7 +1023,7 @@
+ 		const availableForCells = availableWidth - borderOverhead;
+ 		if (availableForCells < numCols) {
+ 			// Too narrow to render a stable table. Fall back to raw markdown.
+-			const fallbackLines = token.raw ? wrapTextWithAnsi(token.raw, availableWidth) : [];
++			const fallbackLines = token.raw ? wrapTextWithAnsi(token.raw, availableWidth, true) : [];
+ 			if (nextTokenType && nextTokenType !== "space") {
+ 				fallbackLines.push("");
+ 			}
+--- a/packages/tui/src/tui-alt-screen.ts
++++ b/packages/tui/src/tui-alt-screen.ts
+@@ -49,6 +49,8 @@
+ 	type ViewportTUI,
+ } from "./tui.ts";
+ import {
++	getCopySpan,
++	withCopyTracking,
+ 	extractAnsiCode,
+ 	getGraphemeCellRange,
+ 	getOsc8LinkAtColumn,
+@@ -1534,17 +1536,22 @@
+ 			if (!box?.scrollContentLines) return undefined;
+ 			sourceLines = box.scrollContentLines;
+ 		}
+-		const lines: string[] = [];
++		let text = "";
++		let previous: ReturnType<typeof getCopySpan>;
+ 		for (let row = selection.start.row; row <= selection.end.row; row++) {
+ 			const line = sourceLines[row] ?? "";
+-			const columns = this.getSelectionColumns(line, row, selection);
+-			lines.push(
+-				stripTerminalSequences(
+-					sliceByColumn(line, columns.start, Math.max(0, columns.end - columns.start), true),
+-				).trimEnd(),
++			const span = getCopySpan(line);
++			const columns = this.getSelectionColumns(line, row, selection, span?.start, span?.end);
++			const fragment = stripTerminalSequences(
++				sliceByColumn(line, columns.start, Math.max(0, columns.end - columns.start), true),
+ 			);
+-		}
+-		const text = lines.join("\n");
++			if (row > selection.start.row) {
++				const consecutive = span && previous && span.source === previous.source && span.row === previous.row + 1;
++				text += previous && span && (consecutive || previous.separator.includes("\n")) ? previous.separator : "\n";
++			}
++			text += span ? fragment : fragment.trimEnd();
++			previous = span;
++		}
+ 		return text.length === 0 ? undefined : text;
+ 	}
+ 
+@@ -1804,9 +1811,9 @@
+ 		const width = Math.max(1, this.terminal.columns);
+ 		const height = Math.max(1, this.terminal.rows);
+ 		const root = this.layoutRoot ?? this.implicitScrollView;
+-		let nextLayout = renderLayoutFrame(root, width, height, () => this.requestRender());
++		let nextLayout = withCopyTracking(() => renderLayoutFrame(root, width, height, () => this.requestRender()));
+ 		if (this.refreshSearch(nextLayout)) {
+-			nextLayout = renderLayoutFrame(root, width, height, () => this.requestRender());
++			nextLayout = withCopyTracking(() => renderLayoutFrame(root, width, height, () => this.requestRender()));
+ 		}
+ 		// Resolve fake cursors before highlighting and compositing, which only track SGR codes
+ 		let screen = this.resolveFakeCursors(nextLayout.lines.map((line) => line.replace(OSC133_ZONE_PREFIX, "")));
+--- a/packages/tui/test/tui-alt-screen.test.ts
++++ b/packages/tui/test/tui-alt-screen.test.ts
+@@ -9,6 +9,7 @@
+ import { Editor } from "../src/components/editor.ts";
+ import { HStack } from "../src/components/h-stack.ts";
+ import { Image } from "../src/components/image.ts";
++import { Markdown } from "../src/components/markdown.ts";
+ import { MouseRegion } from "../src/components/mouse-region.ts";
+ import { ScrollView } from "../src/components/scroll-view.ts";
+ import { SelectList } from "../src/components/select-list.ts";
+@@ -25,7 +26,7 @@
+ import { CURSOR_MARKER, renderFakeCursor, type TuiMouseEvent } from "../src/tui.ts";
+ import { TuiAltScreen } from "../src/tui-alt-screen.ts";
+ import { stripTerminalSequences, visibleWidth } from "../src/utils.ts";
+-import { defaultEditorTheme } from "./test-themes.ts";
++import { defaultEditorTheme, defaultMarkdownTheme } from "./test-themes.ts";
+ import { VirtualTerminal } from "./virtual-terminal.ts";
+ 
+ const OSC133_ZONE_START = "\x1b]133;A\x07";
+@@ -65,6 +66,35 @@
+ }
+ 
+ describe("TuiAltScreen", () => {
++	for (const kind of ["text", "markdown"] as const) {
++		it(`copies soft-wrapped ${kind} URLs through mouse selection without adding whitespace`, async () => {
++			const url =
++				"https://auth.example.test/authorize?client_id=pi&code_challenge_method=S256&scope=openid%20profile";
++			const terminal = new VirtualTerminal(24, 12);
++			const copied: string[] = [];
++			const tui = new TuiAltScreen(terminal, undefined, undefined, {
++				copySelection: async (text) => {
++					copied.push(text);
++					return true;
++				},
++			});
++			const component = kind === "text" ? new Text(url, 2, 0) : new Markdown(url, 2, 0, defaultMarkdownTheme);
++			const lastRow = component.render(24).length;
++			tui.setLayoutRoot(new ScrollView(component, { primary: true }));
++			tui.start();
++			try {
++				await terminal.waitForRender();
++				terminal.sendInput("\x1b[<0;3;1M");
++				terminal.sendInput(`\x1b[<32;22;${lastRow}M`);
++				terminal.sendInput(`\x1b[<0;22;${lastRow}m`);
++				await terminal.waitForRender();
++				assert.strictEqual(copied.at(-1), url);
++			} finally {
++				tui.stop();
++			}
++		});
++	}
++
+ 	it("does not leak cursor markers while selecting after the caret", async () => {
+ 		const terminal = new RecordingTerminal(20, 4);
+ 		const tui = new TuiAltScreen(terminal, undefined, undefined, { copyOnSelect: false });

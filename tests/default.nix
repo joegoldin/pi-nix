@@ -17,6 +17,7 @@ in
   mcp-adapter = import ./mcp-adapter-test.nix args;
   queued-messages = import ./queued-messages-test.nix args;
   editor-input = import ./editor-input-test.nix args;
+  selection-copy = import ./selection-copy-test.nix args;
   program-status = import ./program-status-test.nix args;
   sidebar = import ./sidebar-test.nix args;
   extension-dialogs = import ./extension-dialogs-test.nix args;
@@ -35,7 +36,9 @@ in
   prompt-fragment-inventory = import ./prompt-lint.nix args;
   # The modules install the Bun build with pi-patches.nix on top; options-test
   # only sees a stub, so apply the --replace-fail patterns to the real build.
-  pi-patches = import ../coding-agent/pi-patches.nix { inherit (pkgs) lib; } self.packages.${pkgs.stdenv.hostPlatform.system}.coding-agent-bun;
+  pi-patches = import ../coding-agent/pi-patches.nix {
+    inherit (pkgs) lib;
+  } self.packages.${pkgs.stdenv.hostPlatform.system}.coding-agent-bun;
 }
 // import ./extension-tests.nix args
 // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {

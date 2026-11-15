@@ -87,6 +87,7 @@
               ./coding-agent/program-status.patch
               ./coding-agent/input-dock-height.patch
               ./coding-agent/panel-mouse-focus.patch
+              ./coding-agent/selection-copy.patch
             ];
           };
 

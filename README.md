@@ -16,6 +16,7 @@ sandbox wiring, and `lib.mkCodingAgent`. This fork adds, all additively:
 | `extensionPackages` | Enable a pinned extension by listing its derivation; entrypoints, skills, prompts, and settings follow from its `passthru`. |
 | `statusline` | Wires the [agent-statusline](https://github.com/joegoldin/agent-statusline) pi extension and its config JSON. |
 | `notifications` | Option surface for the first-party `pi-notify` extension. |
+| Fullscreen selection | Copying text and Markdown removes display-only wrapping and padding, while preserving genuine spaces and explicit line breaks. |
 | Fullscreen navigation | A top-edge “Jump to previous user message” button when scrolled away from the bottom and an earlier user message is above the viewport. Uses prompt markers, preserves scroll position during streaming, and leaves the bottom jump-to-latest button intact. |
 | `lib/` | `mkPiSkill` / `mkPiPromptTemplate` / `mkPiPlugin`, the builders `agent-skills` imports as `piLib`. |
 | `nix run .#update` | Bumps `VERSION.json` *and* every extension pin in `extensions.json`. |
