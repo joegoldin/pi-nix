@@ -17,6 +17,7 @@ export interface Todo {
 	description?: string;
 	acceptanceCriteria?: string;
 	evidence?: string;
+	completedAt?: number;
 	activeForm?: string;
 	status: TodoStatus;
 	blockedBy?: number[];
@@ -187,11 +188,11 @@ function validateGrouping(tasks: Todo[]): string | undefined {
 	}
 }
 
-export function reduce(state: TodoState, input: TodoParams): Outcome {
+export function reduce(state: TodoState, input: TodoParams, now = Date.now()): Outcome {
 	const normalized = numericParams(input);
 	if ("error" in normalized) return fail(state, normalized.error);
 	const p = normalized.params;
-	const outcome = reduceAction(state, p);
+	const outcome = reduceAction(state, p, now);
 	if (outcome.error || outcome.state === state) return outcome;
 	const error = validateGrouping(outcome.state.tasks);
 	if (error) return fail(state, error);
@@ -212,7 +213,7 @@ export function reduce(state: TodoState, input: TodoParams): Outcome {
 	return { ...outcome, state: deriveGroups(outcome.state) };
 }
 
-function reduceAction(state: TodoState, p: NumericTodoParams): Outcome {
+function reduceAction(state: TodoState, p: NumericTodoParams, now: number): Outcome {
 	const find = (id: number) => state.tasks.find((t) => t.id === id);
 	switch (p.action) {
 		case "create": {
@@ -292,6 +293,8 @@ function reduceAction(state: TodoState, p: NumericTodoParams): Outcome {
 			if (p.evidence !== undefined) next.evidence = p.evidence.trim();
 			if (p.activeForm !== undefined) next.activeForm = p.activeForm;
 			if (p.status !== undefined) next.status = p.status;
+			// Only the original transition makes a completion recent, not edits or replay.
+			if (next.status === "completed" && current.status !== "completed") next.completedAt = now;
 			if (p.owner !== undefined) next.owner = p.owner;
 			if (p.metadata !== undefined) {
 				const merged = { ...(current.metadata ?? {}) };
@@ -407,9 +410,39 @@ export interface TodoWidgetRow {
 	groupId?: number;
 }
 
+export const RECENT_COMPLETED_MS = 5 * 60_000;
+export const RECENT_COMPLETED_LIMIT = 3;
+
+export function recentCompleted(state: TodoState, now: number): Todo[] {
+	return state.tasks.filter(t => t.kind !== "group" && t.status === "completed" &&
+		typeof t.completedAt === "number" && Number.isFinite(t.completedAt) &&
+		t.completedAt <= now && now - t.completedAt < RECENT_COMPLETED_MS)
+		.sort((a, b) => b.completedAt! - a.completedAt! || b.id - a.id)
+		.slice(0, RECENT_COMPLETED_LIMIT);
+}
+
+function recentWidgetRows(state: TodoState, tasks: Todo[], theme: WidgetTheme, width?: number, compact = false): TodoWidgetRow[] {
+	if (!tasks.length) return [];
+	const rows: TodoWidgetRow[] = [{ text: theme.fg("muted", "Recently completed · last 5m") }];
+	for (const [index, task] of tasks.entries()) {
+		const parent = state.tasks.find(t => t.id === task.parentId && t.kind === "group");
+		// Compact rows prioritize the completed child's identity over its group label.
+		const context = parent ? `#${formatTodoId(parent.id)}${compact ? "" : ` ${sanitize(parent.subject)}`} -> ` : "";
+		const text = theme.fg("dim", `${context}#${formatTodoId(task.id)} ${sanitize(task.subject)}`);
+		const last = index === tasks.length - 1;
+		const prefix = theme.fg("dim", last ? "└─ " : "├─ ") + theme.fg("success", "✓ ");
+		if (compact) rows.push({ text: truncateToWidth(prefix + text, width!, "…") });
+		else {
+			const parts = width === undefined ? [text] : wrapTextWithAnsi(text, Math.max(1, width - 5));
+			parts.forEach((part, i) => rows.push({ text: (i === 0 ? prefix : theme.fg("dim", last ? "     " : "│    ")) + part }));
+		}
+	}
+	return rows;
+}
+
 /** Compact views keep parent context without spending extra rows on headers. */
 export function compactWidgetRows(
-	state: TodoState, hidden: Set<number>, theme: WidgetTheme, width: number, view: "minimal" | "preview",
+	state: TodoState, hidden: Set<number>, theme: WidgetTheme, width: number, view: "minimal" | "preview", now = Date.now(),
 ): TodoWidgetRow[] {
 	const live = state.tasks.filter(t => t.status !== "deleted");
 	const tasks = live.filter(t => t.kind !== "group");
@@ -418,9 +451,11 @@ export function compactWidgetRows(
 	const ranked = tasks.filter(t => t.status !== "completed" && !hidden.has(t.id)).sort((a, b) => rank(a) - rank(b));
 	const active = ranked.filter(t => t.status === "in_progress");
 	const chosen = view === "minimal" ? (active.length ? active.slice(0, 2) : ranked.slice(0, 1)) : ranked.slice(0, 5);
-	if (!chosen.length) return [];
+	const capacity = view === "minimal" ? (ranked.length ? 2 : RECENT_COMPLETED_LIMIT) : 5;
+	const recent = ranked.length === chosen.length ? recentCompleted(state, now).filter(t => !hidden.has(t.id)).slice(0, capacity - chosen.length) : [];
+	if (!chosen.length && !recent.length) return [];
 	const showIds = live.some(t => t.kind === "group" || t.blockedBy?.length);
-	const rows: TodoWidgetRow[] = [{ text: theme.fg("dim", `▸ Todos · ${tasks.filter(t => t.status === "completed").length}/${tasks.length} · ${view === "minimal" ? "focus" : `${chosen.length} shown`}`) }];
+	const rows: TodoWidgetRow[] = [{ text: theme.fg("dim", `▸ Todos · ${tasks.filter(t => t.status === "completed").length}/${tasks.length} · ${view === "minimal" ? "focus" : `${chosen.length} unfinished`}`) }];
 	for (const [index, task] of chosen.entries()) {
 		const parent = live.find(t => t.id === task.parentId && t.kind === "group");
 		const [glyph, slot] = GLYPH[task.status as keyof typeof GLYPH];
@@ -446,6 +481,7 @@ export function compactWidgetRows(
 		}
 		rows.push({ text: text + theme.fg("muted", suffix) });
 	}
+	rows.push(...recentWidgetRows(state, recent, theme, width, true));
 	return rows.map(row => ({ text: truncateToWidth(row.text, width, "…") }));
 }
 
@@ -458,6 +494,7 @@ export function widgetRows(
 	showAll = false,
 	width?: number,
 	collapsedGroups = new Set<number>(),
+	now = Date.now(),
 ): TodoWidgetRow[] {
 	type Row = { task: Todo; parent?: Todo };
 	const live = state.tasks.filter((t) => t.status !== "deleted");
@@ -474,8 +511,9 @@ export function widgetRows(
 		blocks.push([{ task: root }, ...(collapsedGroups.has(root.id) ? [] : visible.map((task) => ({ task, parent: root })))]);
 	}
 	const visible = blocks.flat();
-	if (!visible.length) return [];
-	// History does not occupy working rows, but still contributes to progress.
+	const recent = recentCompleted(state, now).filter(t => !hidden.has(t.id));
+	if (!visible.length && !recent.length) return [];
+	// Full history contributes to progress without occupying working rows.
 	const leaves = live.filter((t) => t.kind !== "group");
 	const done = leaves.filter((t) => t.status === "completed").length;
 	const lines: TodoWidgetRow[] = [{ text: `${theme.fg("accent", "●")} Todos (${done}/${leaves.length}) · ${done} complete · ${leaves.filter((t) => t.status === "in_progress").length} active · ${leaves.filter((t) => t.status === "pending").length} pending` }];
@@ -535,6 +573,9 @@ export function widgetRows(
 		const summary = tasks.length ? `${tasks.length} more unfinished` : `+${groups} more groups`;
 		lines.push({ text: theme.fg("dim", `└─ ${summary}`) });
 	}
+	// Spend only spare compact capacity on recency, after all visible work fits.
+	const recentSlots = showAll ? recent.length : overflow ? 0 : Math.max(0, budget - visible.length - 1);
+	lines.push(...recentWidgetRows(state, recent.slice(0, recentSlots), theme, width));
 	return lines;
 }
 
@@ -546,6 +587,7 @@ export function widgetLines(
 	showAll = false,
 	width?: number,
 	collapsedGroups = new Set<number>(),
+	now = Date.now(),
 ): string[] {
-	return widgetRows(state, hidden, maxLines, theme, showAll, width, collapsedGroups).map((row) => row.text);
+	return widgetRows(state, hidden, maxLines, theme, showAll, width, collapsedGroups, now).map((row) => row.text);
 }

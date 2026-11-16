@@ -172,12 +172,20 @@ explicit `ext-pi-notify` entries from extension lists.
 
 ### Todo working list and history
 
-Completed and archived tasks leave every working view immediately, including
-Ctrl+O expansion and the full Ctrl+Alt+T view. `/todos` shows unfinished work;
-`/todos history` shows the conversation's completed and archived tasks separately.
-The `todo` tool exposes the same split with `list` and `history`; `get` retains
-criteria, evidence and dependency links. History survives compaction, reloads
-and branch navigation. `clear` explicitly resets everything, including history.
+Unfinished tasks take priority in every working view. A separate **Recently
+completed** section shows up to three tasks, newest first, completed within the
+last five minutes. Compact views use only spare task slots for this section;
+Ctrl+O expansion and the full Ctrl+Alt+T view keep the same three-task cap rather
+than revealing the full backlog. Completion times are saved with the tasks, so
+reloads, compaction and branch navigation do not restart the five-minute window.
+Older saved completions without timestamps stay in history. Archived tasks go
+straight to history, never into the recent section.
+
+`/todos` shows unfinished work and recent completions; `/todos history` shows all
+completed and archived tasks. The `todo` tool keeps `list` unfinished-only and
+exposes full `history`; `get` retains criteria, evidence and dependency links.
+Expiry only redraws the widget: it neither deletes history nor starts a model
+turn. `clear` explicitly resets everything, including history.
 
 Task and group references use `a` through `z`, then `aa`, `ab`, and so on.
 For example, update task `ab` with `addBlockedBy: ["z", "aa"]`, or toggle group

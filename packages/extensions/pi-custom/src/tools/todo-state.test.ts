@@ -8,7 +8,8 @@ function run(...steps: Array<Parameters<typeof reduce>[1]>): { state: TodoState;
 	let state = EMPTY;
 	const texts: string[] = [];
 	for (const step of steps) {
-		const out = reduce(state, step);
+		// These history/group fixtures completed long ago; recency tests use explicit clocks.
+		const out = reduce(state, step, 0);
 		state = out.state;
 		texts.push(out.text);
 	}
@@ -610,4 +611,83 @@ it("rejects malformed and overflowing references without mutating legacy state",
 		}
 	}
 	expect(reduce(state, { action: "get", id: "A" }).text).toContain("#a");
+});
+
+describe("durable completion recency", () => {
+	it("records completion once and never refreshes it during updates or replay", () => {
+		let state = reduce(EMPTY, { action: "create", subject: "Check", acceptanceCriteria: "Verified" }, 1_000).state;
+		expect(reduce(state, { action: "update", id: "a", status: "completed" }, 2_000).error).toContain("evidence");
+		expect(state.tasks[0].completedAt).toBeUndefined();
+		state = reduce(state, { action: "update", id: "a", status: "completed", evidence: "Passed" }, 3_000).state;
+		expect(state.tasks[0].completedAt).toBe(3_000);
+		state = reduce(state, { action: "update", id: "a", status: "completed", evidence: "Still passed" }, 9_000).state;
+		state = reduce(state, { action: "update", id: "a", description: "More context" }, 12_000).state;
+		for (const entry of [
+			{ type: "custom", customType: "pi-custom:todo-state", data: state },
+			{ type: "message", message: { role: "toolResult", toolName: "todo", details: state } },
+		]) expect(replay([entry]).tasks[0].completedAt).toBe(3_000);
+	});
+	it("does not invent a timestamp for legacy completed tasks", () => {
+		const state: TodoState = { nextId: 2, tasks: [{ id: 1, subject: "Legacy", status: "completed", evidence: "Passed" }] };
+		const restored = replay([{ type: "custom", customType: "pi-custom:todo-state", data: state }]);
+		expect(reduce(restored, { action: "update", id: "a", description: "Historical detail" }, 20_000).state.tasks[0].completedAt).toBeUndefined();
+	});
+});
+
+describe("recent completion section", () => {
+	const now = 1_000_000;
+	const state: TodoState = { nextId: 10, tasks: [
+		{ id: 1, subject: "Batch", kind: "group", status: "in_progress" },
+		{ id: 2, parentId: 1, subject: "Oldest recent", status: "completed", completedAt: now - 4_000 },
+		{ id: 3, parentId: 1, subject: "Recent third", status: "completed", completedAt: now - 3_000 },
+		{ id: 4, subject: "Recent second", status: "completed", completedAt: now - 2_000 },
+		{ id: 5, subject: "Recent first", status: "completed", completedAt: now - 1_000 },
+		{ id: 6, subject: "Expired", status: "completed", completedAt: now - 300_000 },
+		{ id: 7, subject: "Archived", status: "deleted", completedAt: now - 500 },
+		{ id: 8, subject: "Legacy", status: "completed" },
+		{ id: 9, parentId: 1, subject: "Still working", status: "in_progress" },
+	] };
+	it("shows only the three newest recent tasks below work, even in full expansion", () => {
+		for (const expanded of [false, true]) {
+			const text = widgetLines(state, new Set(), 12, plain, expanded, 120, new Set(), now).join("\n");
+			expect(text).toContain("Recently completed");
+			for (const name of ["Recent first", "Recent second", "Recent third"]) expect(text).toContain(name);
+			for (const name of ["Oldest recent", "Expired", "Archived", "Legacy"]) expect(text).not.toContain(name);
+			expect(text.indexOf("Still working")).toBeLessThan(text.indexOf("Recently completed"));
+			expect(text.indexOf("Recent first")).toBeLessThan(text.indexOf("Recent second"));
+			expect(text.indexOf("Recent second")).toBeLessThan(text.indexOf("Recent third"));
+			expect(text).toContain("#a Batch");
+			expect(text).toContain("6/7");
+		}
+	});
+	it("never displaces unfinished preview rows or overflows its logical budget", () => {
+		const crowded: TodoState = { nextId: 30, tasks: [...state.tasks, ...Array.from({ length: 10 }, (_, i) => ({ id: i + 10, subject: `Pending ${i}`, status: "pending" as const }))] };
+		const preview = compactWidgetRows(crowded, new Set(), plain, 80, "preview", now);
+		expect(preview).toHaveLength(6);
+		expect(preview.map(row => row.text).join("\n")).not.toContain("Recently completed");
+		const compact = widgetRows(crowded, new Set(), 4, plain, false, 80, new Set(), now);
+		expect(compact.length).toBeLessThanOrEqual(4);
+		expect(compact.map(row => row.text).join("\n")).not.toContain("Recently completed");
+	});
+	it("keeps expired and untimed records in history and ignores future timestamps", () => {
+		const future: TodoState = { nextId: 11, tasks: [...state.tasks, { id: 10, subject: "Future", status: "completed", completedAt: now + 1 }] };
+		const text = widgetLines(future, new Set(), 12, plain, true, 100, new Set(), now + 300_000).join("\n");
+		expect(text).not.toContain("Recent first");
+		expect(widgetLines(future, new Set(), 12, plain, true, 100, new Set(), now).join("\n")).not.toContain("Future");
+		expect(reduce(future, { action: "history" }).text).toContain("Expired");
+		expect(reduce(future, { action: "get", id: "f" }).state.tasks[5].completedAt).toBe(now - 300_000);
+	});
+});
+
+it("keeps a recent child's identity visible when its parent has a long subject", () => {
+	const state: TodoState = { nextId: 4, tasks: [
+		{ id: 1, kind: "group", subject: "Very long parent context ".repeat(10), status: "in_progress" },
+		{ id: 2, parentId: 1, subject: "Recent child", status: "completed", completedAt: 1_000 },
+		{ id: 3, parentId: 1, subject: "Pending", status: "pending" },
+	] };
+	const rows = compactWidgetRows(state, new Set(), plain, 60, "preview", 2_000);
+	const recent = rows.slice(rows.findIndex(row => row.text.includes("Recently completed"))).map(row => row.text).join("\n");
+	expect(recent).toContain("#b Recent child");
+	expect(recent).toContain("#a");
+	for (const row of rows) expect(visibleWidth(row.text)).toBeLessThanOrEqual(60);
 });

@@ -10,7 +10,7 @@ import { Text, truncateToWidth } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { reportActivity } from "../program-status.ts";
 import {
-	compactWidgetRows, formatTodoId, groupProgress, parseTodoId, pauseActive, reduce, replay,
+	compactWidgetRows, formatTodoId, groupProgress, parseTodoId, pauseActive, recentCompleted, RECENT_COMPLETED_MS, reduce, replay,
 	type Todo, type TodoParams, type TodoState, type TodoWidgetRow,
 	widgetLines, widgetRows,
 } from "./todo-state.ts";
@@ -23,13 +23,21 @@ const REVIEW_MS = 120_000;
 
 export interface TodoClock {
 	now(): number;
+	schedule(callback: () => void, delay: number): () => void;
 }
 
-const CLOCK: TodoClock = { now: Date.now };
+const CLOCK: TodoClock = {
+	now: Date.now,
+	schedule(callback, delay) {
+		const timer = setTimeout(callback, delay);
+		timer.unref();
+		return () => clearTimeout(timer);
+	},
+};
 
 const GUIDELINES = [
 	"New tasks require acceptanceCriteria: a bounded, observable completion check. Keep that contract stable; discovery adds a separate task rather than expanding an existing outcome. Use description for changing progress, blockers and next actions. Completion requires evidence naming the check and observed result; populated text is not itself proof. Do not invent criteria or evidence merely to satisfy validation.",
-	"Task bookkeeping is not a new user request. Completed and archived tasks immediately leave every working view, including expanded lists. Retain their evidence and dependencies in history, accessible with history, list status=completed or get. Do not delete tasks merely to shorten the display. Reconcile statuses while continuing authorized work, never start another run solely for bookkeeping.",
+	"Task bookkeeping is not a new user request. Completed tasks leave the unfinished list; widgets may show up to 3 recent completions from the last 5 minutes in a separate section, even when expanded. Archived tasks go straight to history. Retain all evidence and dependencies in history, accessible with history, list status=completed or get. Do not delete tasks merely to shorten the display. Reconcile statuses while continuing authorized work, never start another run solely for bookkeeping.",
 	"When a Todo review due checkpoint appears (after 6 model turns or 2 minutes without a full-list review, or on resume/compaction), call todo list without a status filter before further substantive work. Reconcile the whole unfinished list against observed results: complete verified outcomes with evidence, correct stale activity, and record blockers/next actions. Do not delete older tasks just because they are old, resume unrelated work, or treat the reminder as permission to expand scope. A list read acknowledges the checkpoint; it does not itself verify any outcome.",
 	"Use `todo` proactively for substantial multi-step work: multiple deliverables, platforms, implementation stages, or verification gates. Do not wait to be asked. After enough initial inspection to identify the work, populate the list before substantive implementation. Skip single-step edits, quick lookups, and conversation; respect an explicit request not to use todos.",
 	"Each task must describe one independently verifiable outcome, not the whole request. Split implementation, distinct platform/feature acceptance checks, and authorized release work when they can succeed or fail separately. For example, use 'Verify Linux packaging' and 'Verify Mac clipboard' rather than 'Implement everything and verify Linux and Mac'. When an umbrella goal helps organize the work, convert it to a group (kind: group) and attach concrete child tasks with parentId. Otherwise replace it with the milestones; never keep a duplicate whole-goal task active alongside them. Avoid one task per shell command.",
@@ -61,6 +69,7 @@ export function registerTodo(pi: ExtensionAPI, clock: TodoClock = CLOCK): void {
 	const cycleView = () => { view = view === "minimal" ? "preview" : view === "preview" ? "full" : "minimal"; };
 	let ctxRef: ExtensionContext | undefined;
 	let requestRender: (() => void) | undefined;
+	let cancelExpiry: (() => void) | undefined;
 	let turnsSinceReview = 0;
 	let lastReviewAt = clock.now();
 	let restoredReview = false;
@@ -90,6 +99,8 @@ export function registerTodo(pi: ExtensionAPI, clock: TodoClock = CLOCK): void {
 	}
 
 	function show(ctx: ExtensionContext | undefined): void {
+		cancelExpiry?.();
+		cancelExpiry = undefined;
 		if (!ctx || ctx.mode !== "tui") return;
 		const tasks = state.tasks.filter(task => task.kind !== "group" && task.status !== "deleted");
 		const completed = tasks.filter(task => task.status === "completed").length;
@@ -99,11 +110,17 @@ export function registerTodo(pi: ExtensionAPI, clock: TodoClock = CLOCK): void {
 			title: "Tasks", message: `${completed}/${tasks.length} tasks completed`,
 			...(active ? { progress: Math.floor(completed * 100 / tasks.length) } : {}),
 		} : undefined);
-		const anything = state.tasks.some((t) => t.status === "pending" || t.status === "in_progress");
+		const recent = recentCompleted(state, clock.now());
+		const anything = recent.length || state.tasks.some((t) => t.status === "pending" || t.status === "in_progress");
 		if (!anything) {
 			ctx.ui.setWidget(WIDGET_KEY, undefined);
 			requestRender = undefined;
 			return;
+		}
+		if (recent.length) {
+			// Expiry only redraws the UI; it never edits history or wakes the model.
+			const deadline = Math.min(...recent.map(t => t.completedAt! + RECENT_COMPLETED_MS));
+			cancelExpiry = clock.schedule(() => show(ctxRef), Math.max(1, deadline - clock.now()));
 		}
 		if (requestRender) {
 			requestRender();
@@ -118,8 +135,8 @@ export function registerTodo(pi: ExtensionAPI, clock: TodoClock = CLOCK): void {
 					render: (width: number) => {
 						const global = ctxRef?.ui.getToolsExpanded() ?? false;
 						const full = view === "full" || global;
-						if (full) rows = widgetRows(state, new Set(), MAX_WIDGET_LINES, theme as never, true, width, global ? undefined : collapsedGroups);
-						else rows = compactWidgetRows(state, new Set(), theme as never, width, view === "minimal" ? "minimal" : "preview");
+						if (full) rows = widgetRows(state, new Set(), MAX_WIDGET_LINES, theme as never, true, width, global ? undefined : collapsedGroups, clock.now());
+						else rows = compactWidgetRows(state, new Set(), theme as never, width, view === "minimal" ? "minimal" : "preview", clock.now());
 						return rows.map(row => truncateToWidth(row.text, width, "…"));
 					},
 					invalidate() {},
@@ -176,7 +193,7 @@ export function registerTodo(pi: ExtensionAPI, clock: TodoClock = CLOCK): void {
 			),
 		}),
 		async execute(_id, params) {
-			const outcome = reduce(state, params as TodoParams);
+			const outcome = reduce(state, params as TodoParams, clock.now());
 			state = outcome.state;
 			// Updating one task must not suppress a review of the rest of the backlog.
 			if (!outcome.error && (params.action === "clear" || (params.action === "list" && !params.status))) acknowledgeReview();
@@ -241,14 +258,14 @@ export function registerTodo(pi: ExtensionAPI, clock: TodoClock = CLOCK): void {
 			show(ctx);
 			return;
 		}
-		if (working.length === 0) {
+		if (working.length === 0 && !recentCompleted(state, clock.now()).length) {
 			ctx.ui.notify(state.tasks.length ? "No unfinished todos. Use /todos history for completed and archived tasks." : "No todos yet. Ask the agent to add some!", "info");
 			return;
 		}
-		ctx.ui.notify(widgetLines(state, new Set(), MAX_WIDGET_LINES, { fg: (_slot, text) => text }, true).join("\n"), "info");
+		ctx.ui.notify(widgetLines(state, new Set(), MAX_WIDGET_LINES, { fg: (_slot, text) => text }, true, undefined, undefined, clock.now()).join("\n"), "info");
 	};
 	pi.registerCommand("todos", {
-		description: "Show unfinished todos; /todos history shows completed/archived tasks; /todos <alphabetical-group-id> toggles a group",
+		description: "Show unfinished todos and up to 3 recent completions (last 5m); /todos history shows all history; /todos <alphabetical-group-id> toggles a group",
 		handler: showTodos,
 	});
 	pi.registerCommand("todo", {
@@ -334,6 +351,8 @@ export function registerTodo(pi: ExtensionAPI, clock: TodoClock = CLOCK): void {
 	});
 
 	pi.on("session_shutdown", () => {
+		cancelExpiry?.();
+		cancelExpiry = undefined;
 		ctxRef = undefined;
 		requestRender = undefined;
 	});
