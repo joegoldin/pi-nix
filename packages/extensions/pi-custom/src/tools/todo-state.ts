@@ -7,7 +7,7 @@
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 
 export type TodoStatus = "pending" | "in_progress" | "completed" | "deleted";
-export type TodoAction = "create" | "update" | "list" | "get" | "delete" | "clear";
+export type TodoAction = "create" | "update" | "list" | "history" | "get" | "delete" | "clear";
 
 export interface Todo {
 	id: number;
@@ -29,26 +29,78 @@ export interface TodoState {
 	nextId: number;
 }
 
+export type TodoRef = string | number;
+
 export interface TodoParams {
 	action: TodoAction;
 	subject?: string;
 	kind?: "task" | "group";
-	parentId?: number | null;
+	parentId?: TodoRef | null;
 	description?: string;
 	acceptanceCriteria?: string;
 	evidence?: string;
 	activeForm?: string;
 	status?: TodoStatus;
-	blockedBy?: number[];
-	addBlockedBy?: number[];
-	removeBlockedBy?: number[];
+	blockedBy?: TodoRef[];
+	addBlockedBy?: TodoRef[];
+	removeBlockedBy?: TodoRef[];
 	owner?: string;
 	metadata?: Record<string, unknown>;
-	id?: number;
+	id?: TodoRef;
 	includeDeleted?: boolean;
 }
 
 export const EMPTY: TodoState = { tasks: [], nextId: 1 };
+
+// Keep stored numeric keys stable: old branches and their dependency edges
+// replay unchanged, while every public reference uses spreadsheet-style letters.
+export function formatTodoId(id: number): string {
+	let label = "";
+	for (let n = id; n > 0; n = Math.floor((n - 1) / 26)) label = String.fromCharCode(97 + (n - 1) % 26) + label;
+	return label;
+}
+
+export function parseTodoId(value: TodoRef): number | undefined {
+	if (typeof value === "number") return Number.isSafeInteger(value) && value > 0 ? value : undefined;
+	if (!/^[a-z]+$/i.test(value)) return undefined;
+	let id = 0;
+	for (const letter of value.toLowerCase()) {
+		id = id * 26 + letter.charCodeAt(0) - 96;
+		if (!Number.isSafeInteger(id)) return undefined;
+	}
+	return id;
+}
+
+type NumericTodoParams = Omit<TodoParams, "id" | "parentId" | "blockedBy" | "addBlockedBy" | "removeBlockedBy"> & {
+	id?: number;
+	parentId?: number | null;
+	blockedBy?: number[];
+	addBlockedBy?: number[];
+	removeBlockedBy?: number[];
+};
+
+function numericParams(p: TodoParams): { params: NumericTodoParams } | { error: string } {
+	const { id, parentId, blockedBy, addBlockedBy, removeBlockedBy, ...rest } = p;
+	const params: NumericTodoParams = rest;
+	for (const [field, value] of [["id", id], ["parentId", parentId]] as const) {
+		if (field === "parentId" && value === null) { params.parentId = null; continue; }
+		if (value === undefined) continue;
+		const key = value === null ? undefined : parseTodoId(value);
+		if (key === undefined) return { error: `${field}: use an alphabetical task id (a..z, aa, ab, ...)` };
+		params[field] = key;
+	}
+	for (const [field, values] of [["blockedBy", blockedBy], ["addBlockedBy", addBlockedBy], ["removeBlockedBy", removeBlockedBy]] as const) {
+		if (values === undefined) continue;
+		const keys: number[] = [];
+		for (const value of values) {
+			const key = parseTodoId(value);
+			if (key === undefined) return { error: `${field}: use alphabetical task ids (a..z, aa, ab, ...)` };
+			keys.push(key);
+		}
+		params[field] = keys;
+	}
+	return { params };
+}
 
 const TRANSITIONS: Record<TodoStatus, TodoStatus[]> = {
 	pending: ["in_progress", "completed", "deleted"],
@@ -128,14 +180,17 @@ function validateGrouping(tasks: Todo[]): string | undefined {
 		if (t.kind === "group" && t.parentId !== undefined) return "groups must be top-level; only one level of nesting is allowed";
 		if (t.parentId !== undefined) {
 			const parent = tasks.find((p) => p.id === t.parentId);
-			if (!parent || parent.kind !== "group" || parent.status === "deleted") return `parentId: #${t.parentId} must be a live group`;
+			if (!parent || parent.kind !== "group" || parent.status === "deleted") return `parentId: #${formatTodoId(t.parentId)} must be a live group`;
 		}
 		if (t.kind === "group" && t.blockedBy?.length) return "dependencies belong to tasks, not groups";
 		if (t.blockedBy?.some((id) => tasks.find((dep) => dep.id === id)?.kind === "group")) return "dependencies must reference tasks, not groups";
 	}
 }
 
-export function reduce(state: TodoState, p: TodoParams): Outcome {
+export function reduce(state: TodoState, input: TodoParams): Outcome {
+	const normalized = numericParams(input);
+	if ("error" in normalized) return fail(state, normalized.error);
+	const p = normalized.params;
 	const outcome = reduceAction(state, p);
 	if (outcome.error || outcome.state === state) return outcome;
 	const error = validateGrouping(outcome.state.tasks);
@@ -153,11 +208,11 @@ export function reduce(state: TodoState, p: TodoParams): Outcome {
 			}),
 		};
 	}
-	if (paused.length) outcome.text += `; returned ${paused.map((id) => `#${id}`).join(", ")} to pending`;
+	if (paused.length) outcome.text += `; returned ${paused.map((id) => `#${formatTodoId(id)}`).join(", ")} to pending`;
 	return { ...outcome, state: deriveGroups(outcome.state) };
 }
 
-function reduceAction(state: TodoState, p: TodoParams): Outcome {
+function reduceAction(state: TodoState, p: NumericTodoParams): Outcome {
 	const find = (id: number) => state.tasks.find((t) => t.id === id);
 	switch (p.action) {
 		case "create": {
@@ -165,8 +220,8 @@ function reduceAction(state: TodoState, p: TodoParams): Outcome {
 			if (p.kind !== "group" && !p.acceptanceCriteria?.trim()) return fail(state, "acceptanceCriteria required for create: state the observable completion check");
 			for (const b of p.blockedBy ?? []) {
 				const dep = find(b);
-				if (!dep) return fail(state, `blockedBy: #${b} not found`);
-				if (dep.status === "deleted") return fail(state, `blockedBy: #${b} is deleted`);
+				if (!dep) return fail(state, `blockedBy: #${formatTodoId(b)} not found`);
+				if (dep.status === "deleted") return fail(state, `blockedBy: #${formatTodoId(b)} is deleted`);
 			}
 			const task: Todo = { id: state.nextId, subject: p.subject, status: "pending" };
 			if (p.kind === "group") task.kind = "group";
@@ -179,13 +234,13 @@ function reduceAction(state: TodoState, p: TodoParams): Outcome {
 			if (p.metadata && Object.keys(p.metadata).length) task.metadata = p.metadata;
 			return {
 				state: { tasks: [...state.tasks, task], nextId: state.nextId + 1 },
-				text: `Created #${task.id}: ${sanitize(task.subject)} (pending)`,
+				text: `Created #${formatTodoId(task.id)}: ${sanitize(task.subject)} (pending)`,
 			};
 		}
 		case "update": {
 			if (p.id === undefined) return fail(state, "id required for update");
 			const current = find(p.id);
-			if (!current) return fail(state, `#${p.id} not found`);
+			if (!current) return fail(state, `#${formatTodoId(p.id)} not found`);
 			const mutable =
 				p.kind !== undefined ||
 				p.parentId !== undefined ||
@@ -217,10 +272,10 @@ function reduceAction(state: TodoState, p: TodoParams): Outcome {
 			if (p.status === "completed" && current.status !== "completed" && !p.evidence?.trim()) return fail(state, "evidence required when completing a task: record the check and observed result");
 			let blockedBy = (current.blockedBy ?? []).filter((b) => !(p.removeBlockedBy ?? []).includes(b));
 			for (const b of p.addBlockedBy ?? []) {
-				if (b === current.id) return fail(state, `cannot block #${b} on itself`);
+				if (b === current.id) return fail(state, `cannot block #${formatTodoId(b)} on itself`);
 				const dep = find(b);
-				if (!dep) return fail(state, `addBlockedBy: #${b} not found`);
-				if (dep.status === "deleted") return fail(state, `addBlockedBy: #${b} is deleted`);
+				if (!dep) return fail(state, `addBlockedBy: #${formatTodoId(b)} not found`);
+				if (dep.status === "deleted") return fail(state, `addBlockedBy: #${formatTodoId(b)} is deleted`);
 			}
 			const adding = (p.addBlockedBy ?? []).filter((b) => !blockedBy.includes(b));
 			if (adding.length && wouldCycle(state.tasks, current.id, adding)) {
@@ -252,28 +307,30 @@ function reduceAction(state: TodoState, p: TodoParams): Outcome {
 			const changed = !sameJson(current, next);
 			const tasks = state.tasks.map((t) => (t.id === current.id ? next : t));
 			const text = !changed
-				? `No change: #${current.id} already matches the requested values (status: ${current.status})`
+				? `No change: #${formatTodoId(current.id)} already matches the requested values (status: ${current.status})`
 				: next.status !== current.status
-					? `Updated #${current.id} (${current.status} → ${next.status})`
-					: `Updated #${current.id}`;
+					? `Updated #${formatTodoId(current.id)} (${current.status} → ${next.status})`
+					: `Updated #${formatTodoId(current.id)}`;
 			return { state: { ...state, tasks }, text };
 		}
-		case "list": {
+		case "list":
+		case "history": {
+			const history = p.action === "history";
 			const shown = state.tasks
-				.filter((t) => p.includeDeleted === true || t.status !== "deleted")
-				.filter((t) => p.status ? t.status === p.status : t.status !== "completed");
-			if (shown.length === 0) return { state, text: "No tasks" };
+				.filter((t) => history ? t.status === "completed" || t.status === "deleted" : p.includeDeleted === true || t.status !== "deleted")
+				.filter((t) => p.status ? t.status === p.status : history || t.status !== "completed");
+			if (shown.length === 0) return { state, text: history ? "No task history" : "No tasks" };
 			return {
 				state,
 				text: shown
 					.map((t) => {
 						const progress = groupProgress(state, t.id);
 						let line = t.kind === "group"
-							? `[group ${t.status}] #${t.id} ${sanitize(t.subject)} (${progress.done}/${progress.total})`
-							: `[${t.status}] #${t.id} ${sanitize(t.subject)}`;
-						if (t.parentId !== undefined) line += ` (parent: #${t.parentId})`;
+							? `[group ${t.status}] #${formatTodoId(t.id)} ${sanitize(t.subject)} (${progress.done}/${progress.total})`
+							: `[${t.status}] #${formatTodoId(t.id)} ${sanitize(t.subject)}`;
+						if (t.parentId !== undefined) line += ` (parent: #${formatTodoId(t.parentId)})`;
 						if (t.kind !== "group" && t.status === "in_progress" && t.activeForm) line += ` (${sanitize(t.activeForm)})`;
-						if (t.blockedBy?.length) line += ` ⛓ ${t.blockedBy.map((b) => `#${b}`).join(",")}`;
+						if (t.blockedBy?.length) line += ` ⛓ ${t.blockedBy.map((b) => `#${formatTodoId(b)}`).join(",")}`;
 						return line;
 					})
 					.join("\n"),
@@ -282,19 +339,19 @@ function reduceAction(state: TodoState, p: TodoParams): Outcome {
 		case "get": {
 			if (p.id === undefined) return fail(state, "id required for get");
 			const t = find(p.id);
-			if (!t) return fail(state, `#${p.id} not found`);
-			const blocks = state.tasks.filter((o) => o.blockedBy?.includes(t.id)).map((o) => `#${o.id}`);
-			const lines = [`#${t.id} [${t.status}] ${sanitize(t.subject)}`];
+			if (!t) return fail(state, `#${formatTodoId(p.id)} not found`);
+			const blocks = state.tasks.filter((o) => o.blockedBy?.includes(t.id)).map((o) => `#${formatTodoId(o.id)}`);
+			const lines = [`#${formatTodoId(t.id)} [${t.status}] ${sanitize(t.subject)}`];
 			if (t.kind === "group") {
 				const { done, total } = groupProgress(state, t.id);
-				lines.push(`  group: ${done}/${total} completed (derived)`, `  children: ${state.tasks.filter((c) => c.parentId === t.id && c.status !== "deleted").map((c) => `#${c.id}`).join(", ") || "none"}`);
+				lines.push(`  group: ${done}/${total} completed (derived)`, `  children: ${state.tasks.filter((c) => c.parentId === t.id && c.status !== "deleted").map((c) => `#${formatTodoId(c.id)}`).join(", ") || "none"}`);
 			}
-			if (t.parentId !== undefined) lines.push(`  parent: #${t.parentId}`);
+			if (t.parentId !== undefined) lines.push(`  parent: #${formatTodoId(t.parentId)}`);
 			if (t.acceptanceCriteria) lines.push(`  acceptanceCriteria: ${sanitize(t.acceptanceCriteria)}`);
 			if (t.evidence) lines.push(`  evidence: ${sanitize(t.evidence)}`);
 			if (t.description) lines.push(`  description: ${sanitize(t.description)}`);
 			if (t.activeForm) lines.push(`  activeForm: ${sanitize(t.activeForm)}`);
-			if (t.blockedBy?.length) lines.push(`  blockedBy: ${t.blockedBy.map((b) => `#${b}`).join(", ")}`);
+			if (t.blockedBy?.length) lines.push(`  blockedBy: ${t.blockedBy.map((b) => `#${formatTodoId(b)}`).join(", ")}`);
 			if (blocks.length) lines.push(`  blocks: ${blocks.join(", ")}`);
 			if (t.owner) lines.push(`  owner: ${sanitize(t.owner)}`);
 			return { state, text: lines.join("\n") };
@@ -302,11 +359,11 @@ function reduceAction(state: TodoState, p: TodoParams): Outcome {
 		case "delete": {
 			if (p.id === undefined) return fail(state, "id required for delete");
 			const t = find(p.id);
-			if (!t) return fail(state, `#${p.id} not found`);
-			if (t.status === "deleted") return fail(state, `#${p.id} is already deleted`);
+			if (!t) return fail(state, `#${formatTodoId(p.id)} not found`);
+			if (t.status === "deleted") return fail(state, `#${formatTodoId(p.id)} is already deleted`);
 			return {
 				state: { ...state, tasks: state.tasks.map((o) => (o.id === t.id ? { ...o, status: "deleted" as const } : o)) },
-				text: `Deleted #${t.id}: ${sanitize(t.subject)}`,
+				text: `Deleted #${formatTodoId(t.id)}: ${sanitize(t.subject)}`,
 			};
 		}
 		case "clear": {
@@ -337,7 +394,6 @@ export function replay(entries: Array<{ type?: string; customType?: string; data
 
 export interface WidgetTheme {
 	fg(slot: string, text: string): string;
-	strikethrough?(text: string): string;
 }
 
 const GLYPH: Record<Exclude<TodoStatus, "deleted">, [string, string]> = {
@@ -358,8 +414,8 @@ export function compactWidgetRows(
 	const live = state.tasks.filter(t => t.status !== "deleted");
 	const tasks = live.filter(t => t.kind !== "group");
 	const unresolved = (t: Todo) => (t.blockedBy ?? []).filter(id => live.find(dep => dep.id === id)?.status !== "completed");
-	const rank = (t: Todo) => t.status === "in_progress" ? 0 : t.status === "completed" ? 3 : unresolved(t).length ? 2 : 1;
-	const ranked = tasks.filter(t => !hidden.has(t.id)).sort((a, b) => rank(a) - rank(b));
+	const rank = (t: Todo) => t.status === "in_progress" ? 0 : unresolved(t).length ? 2 : 1;
+	const ranked = tasks.filter(t => t.status !== "completed" && !hidden.has(t.id)).sort((a, b) => rank(a) - rank(b));
 	const active = ranked.filter(t => t.status === "in_progress");
 	const chosen = view === "minimal" ? (active.length ? active.slice(0, 2) : ranked.slice(0, 1)) : ranked.slice(0, 5);
 	if (!chosen.length) return [];
@@ -369,20 +425,20 @@ export function compactWidgetRows(
 		const parent = live.find(t => t.id === task.parentId && t.kind === "group");
 		const [glyph, slot] = GLYPH[task.status as keyof typeof GLYPH];
 		const prefix = theme.fg("dim", index === chosen.length - 1 ? "└─ " : "├─ ") + theme.fg(slot, `${glyph} `);
-		const id = showIds ? `#${task.id} ` : "";
+		const id = showIds ? `#${formatTodoId(task.id)} ` : "";
 		const blockers = unresolved(task);
-		const suffix = blockers.length ? ` ⛓ ${blockers.map(id => `#${id}`).join(",")}` : "";
+		const suffix = blockers.length ? ` ⛓ ${blockers.map(id => `#${formatTodoId(id)}`).join(",")}` : "";
 		const subject = sanitize(task.subject);
 		const parentSubject = parent ? sanitize(parent.subject) : "";
 		const progress = parent ? groupProgress(state, parent.id) : undefined;
-		const parentId = parent ? `#${parent.id} ` : "";
+		const parentId = parent ? `#${formatTodoId(parent.id)} ` : "";
 		const link = progress ? ` (${progress.done}/${progress.total}) -> ` : "";
 		const available = Math.max(0, width - visibleWidth(prefix + parentId + link + id + suffix));
 		// Share scarce columns between subjects; unused space goes to the longer one.
 		const parentBudget = parent ? Math.min(visibleWidth(parentSubject), Math.max(Math.floor(available / 2), available - visibleWidth(subject))) : 0;
 		const parentText = parent ? theme.fg("dim", parentId) + theme.fg("text", truncateToWidth(parentSubject, parentBudget, "…")) + theme.fg("muted", link) : "";
 		const label = truncateToWidth(subject, Math.max(0, available - parentBudget), "…");
-		const body = task.status === "completed" ? theme.fg("muted", theme.strikethrough ? theme.strikethrough(label) : label) : theme.fg(task.status === "in_progress" ? "accent" : "text", label);
+		const body = theme.fg(task.status === "in_progress" ? "accent" : "text", label);
 		let text = prefix + parentText + theme.fg("dim", id) + body;
 		if (task.status === "in_progress" && task.activeForm) {
 			const room = width - visibleWidth(text + suffix);
@@ -406,25 +462,24 @@ export function widgetRows(
 	type Row = { task: Todo; parent?: Todo };
 	const live = state.tasks.filter((t) => t.status !== "deleted");
 	const blocks: Row[][] = [];
-	for (const root of live.filter((t) => t.parentId === undefined)) {
+	for (const root of live.filter((t) => t.parentId === undefined && t.status !== "completed")) {
 		if (root.kind !== "group") {
 			if (showAll || !hidden.has(root.id)) blocks.push([{ task: root }]);
 			continue;
 		}
-		const children = live.filter((t) => t.parentId === root.id);
+		const children = live.filter((t) => t.parentId === root.id && t.status !== "completed");
 		const visible = children.filter((t) => showAll || !hidden.has(t.id));
 		if (children.length && !visible.length) continue;
-		if (!showAll && hidden.has(root.id) && !visible.some((t) => t.status !== "completed")) continue;
+		if (!showAll && hidden.has(root.id) && !visible.length) continue;
 		blocks.push([{ task: root }, ...(collapsedGroups.has(root.id) ? [] : visible.map((task) => ({ task, parent: root })))]);
 	}
 	const visible = blocks.flat();
 	if (!visible.length) return [];
-	// Completion fading changes the visible rows, not overall progress.
+	// History does not occupy working rows, but still contributes to progress.
 	const leaves = live.filter((t) => t.kind !== "group");
 	const done = leaves.filter((t) => t.status === "completed").length;
-	const open = visible.some(({ task }) => task.status !== "completed");
-	const lines: TodoWidgetRow[] = [{ text: `${theme.fg(open ? "accent" : "dim", open ? "●" : "○")} Todos (${done}/${leaves.length}) · ${done} complete · ${leaves.filter((t) => t.status === "in_progress").length} active · ${leaves.filter((t) => t.status === "pending").length} pending` }];
-	if (width !== undefined && width < 70) lines[0].text = `${theme.fg(open ? "accent" : "dim", open ? "●" : "○")} Todos (${done}/${leaves.length})`;
+	const lines: TodoWidgetRow[] = [{ text: `${theme.fg("accent", "●")} Todos (${done}/${leaves.length}) · ${done} complete · ${leaves.filter((t) => t.status === "in_progress").length} active · ${leaves.filter((t) => t.status === "pending").length} pending` }];
+	if (width !== undefined && width < 70) lines[0].text = `${theme.fg("accent", "●")} Todos (${done}/${leaves.length})`;
 	const budget = showAll ? visible.length : Math.max(3, maxLines) - 1;
 	const overflow = visible.length > budget;
 	const selected: Row[] = [];
@@ -434,18 +489,15 @@ export function widgetRows(
 		return !dep || dep.status !== "completed";
 	});
 	const rank = (t: Todo): number => t.kind === "group"
-		? Math.min(3, ...live.filter((child) => child.parentId === t.id).map(rank))
-		: t.status === "completed" ? 3 : t.status === "in_progress" ? 0 : unresolved(t).length ? 2 : 1;
+		? Math.min(3, ...live.filter((child) => child.parentId === t.id && child.status !== "completed").map(rank))
+		: t.status === "in_progress" ? 0 : unresolved(t).length ? 2 : 1;
 	const workFirst = (a: Row, b: Row) => rank(a.task) - rank(b.task);
 	const ordered = [...blocks].sort((a, b) => workFirst(a[0], b[0]));
 	for (const block of ordered) {
 		// A group header always precedes its children, even when the budget cuts the block.
 		if (!remaining) break;
 		const sorted = block.length > 1 ? [block[0], ...block.slice(1).sort(workFirst)] : block;
-		// When compact space is scarce, finished children must not displace
-		// unfinished tasks in a later group or at the top level.
-		const rows = overflow ? sorted.filter(({ task }) => task.status !== "completed") : sorted;
-		const taken = rows.slice(0, remaining);
+		const taken = sorted.slice(0, remaining);
 		selected.push(...taken);
 		remaining -= taken.length;
 	}
@@ -459,20 +511,17 @@ export function widgetRows(
 		const last = row.parent ? siblings.at(-1) === row : lastRoot;
 		const branch = row.parent ? (lastRoot ? "   " : "│  ") : "";
 		const group = t.kind === "group";
-		const completed = t.status === "completed";
-		const [glyph, slot] = group ? [collapsedGroups.has(t.id) ? "▸" : "▾", completed ? "muted" : "accent"] : GLYPH[t.status as keyof typeof GLYPH];
+		const [glyph, slot] = group ? [collapsedGroups.has(t.id) ? "▸" : "▾", "accent"] : GLYPH[t.status as keyof typeof GLYPH];
 		const subject = sanitize(t.subject);
-		const body = completed ? theme.fg("muted", theme.strikethrough ? theme.strikethrough(subject) : subject)
-			: group || t.status === "in_progress" ? theme.fg("accent", subject)
-			: theme.fg("text", subject);
-		let text = `${group && completed ? theme.fg("success", "✓ ") : ""}${showIds ? theme.fg("dim", `#${t.id} `) : ""}${body}`;
+		const body = theme.fg(group || t.status === "in_progress" ? "accent" : "text", subject);
+		let text = `${showIds ? theme.fg("dim", `#${formatTodoId(t.id)} `) : ""}${body}`;
 		if (group) {
 			const { done, total } = groupProgress(state, t.id);
 			text += theme.fg("muted", ` (${done}/${total})`);
 		} else {
 			if (t.status === "in_progress" && t.activeForm) text += theme.fg("muted", ` (${sanitize(t.activeForm)})`);
 			const blockers = unresolved(t);
-			if (blockers.length) text += theme.fg("muted", ` ⛓ ${blockers.map((b) => `#${b}`).join(",")}`);
+			if (blockers.length) text += theme.fg("muted", ` ⛓ ${blockers.map((b) => `#${formatTodoId(b)}`).join(",")}`);
 		}
 		const prefix = `${theme.fg("dim", branch + (last ? "└─" : "├─"))} ${theme.fg(slot, glyph)} `;
 		const indent = theme.fg("dim", branch + (last ? " " : "│") + "    ");
@@ -483,8 +532,7 @@ export function widgetRows(
 		const rest = visible.filter((row) => !selected.includes(row));
 		const tasks = rest.filter(({ task }) => task.kind !== "group");
 		const groups = rest.length - tasks.length;
-		const completed = tasks.filter(({ task }) => task.status === "completed").length;
-		const summary = tasks.length ? `${tasks.length - completed} more unfinished${completed ? ` · ${completed} completed outside view` : ""}` : `+${groups} more groups`;
+		const summary = tasks.length ? `${tasks.length} more unfinished` : `+${groups} more groups`;
 		lines.push({ text: theme.fg("dim", `└─ ${summary}`) });
 	}
 	return lines;

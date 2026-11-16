@@ -21,8 +21,7 @@ not merge across definitions.
 | --- | --- |
 | `network` | Model API access. |
 | `mount-cwd` | The working directory, read-write. |
-| `notifications` | dbus talk on `org.freedesktop.Notifications`, without which pi-notify is silently inert inside the jail. |
-| `add-pkg-deps [...]` | The toolchain pi shells out to: git, openssh, make, jq, node, python3, ripgrep, fd, gh, libnotify. |
+| `add-pkg-deps [...]` | The toolchain pi shells out to: git, openssh, make, jq, node, python3, ripgrep, fd, gh. |
 | `try-readonly ~/.1password/agent.sock` | Agent-backed SSH and commit signing. |
 | `try-readonly ~/.ssh/known_hosts`, `known_hosts2`, `config` | Host-key verification and per-host config. |
 | `try-fwd-env SSH_AUTH_SOCK` | So git finds the agent. |
@@ -56,26 +55,17 @@ Permission denied`) and the fix is one line:
 Change that line only. The three `~/.ssh` entries are read-only data and must
 stay read-only.
 
-## `with combinators` is a trap in this file
+## Terminal status and config files
 
-`coding-agent/extra-options.nix` binds `notifications = cfg.notifications` in
-the same `let`. A `with combinators;` inside that scope loses to the enclosing
-binding, so `notifications` resolves to the option submodule and jail.nix is
-handed an attrset where it expects a function. It fails late, at
-`finalPackage`, with `attempt to call something which is not a function but a
-set`. Every combinator in that list is written `combinators.x` for this reason.
+Program status travels through the existing terminal connection as OSC 7501.
+The default jail grants no notification D-Bus access and adds no desktop-notifier
+binaries. Rex owns its alerts; there is no parallel Pi desktop-notification path.
 
-## Config files
-
-`pi-automode.json` and `pi-notify.json` are store paths interpolated into the
-launcher script, so they enter its runtime closure and jail.nix binds them with
-the rest of the store closure. Verified:
-
-    nix path-info -r "$(…agent.package)" | grep -E 'pi-automode\.json|pi-notify\.json'
-
-prints both. The auto-mode one is read by `$(cat …)` into
-`PI_AUTOMODE_SETTINGS_JSON` before pi starts, so the bind has to be there even
-though nothing opens the file after launch.
+`pi-automode.json` is a store path interpolated into the launcher script, so it
+enters the runtime closure and jail.nix binds it with the rest of the store
+closure. It is read by `$(cat …)` into `PI_AUTOMODE_SETTINGS_JSON` before Pi
+starts, so the bind has to be there even though nothing opens the file after
+launch.
 
 ## Verifying a change
 

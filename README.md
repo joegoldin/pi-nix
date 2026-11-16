@@ -15,7 +15,6 @@ sandbox wiring, and `lib.mkCodingAgent`. This fork adds, all additively:
 | `packages.ext-*` | Ecosystem extensions, fully pinned and built from npm tarballs with `bun2nix`. |
 | `extensionPackages` | Enable a pinned extension by listing its derivation; entrypoints, skills, prompts, and settings follow from its `passthru`. |
 | `statusline` | Wires the [agent-statusline](https://github.com/joegoldin/agent-statusline) pi extension and its config JSON. |
-| `notifications` | Option surface for the first-party `pi-notify` extension. |
 | Fullscreen selection | Copying text and Markdown removes display-only wrapping and padding, while preserving genuine spaces and explicit line breaks. |
 | Fullscreen navigation | A top-edge “Jump to previous user message” button when scrolled away from the bottom and an earlier user message is above the viewport. Uses prompt markers, preserves scroll position during streaming, and leaves the bottom jump-to-latest button intact. |
 | `lib/` | `mkPiSkill` / `mkPiPromptTemplate` / `mkPiPlugin`, the builders `agent-skills` imports as `piLib`. |
@@ -116,13 +115,6 @@ This fork adds:
 | `extensionPackages` | `[package]` | `[ ]` | Enable pinned extensions. Entrypoints, skills, prompts, and settings all follow from each derivation's `passthru`. |
 | `statusline.*` | submodule | `{ }` | The shared agent-statusline schema, mounted under pi's namespace. |
 | `statusline.extension` | package | this flake's `pi-extension` | The extension package handed to `--extension`. |
-| `notifications.enable` | bool | `false` | Desktop notifications via the first-party `pi-notify` extension. |
-| `notifications.package` | `null \| package` | `ext-pi-notify` | The `pi-notify` derivation. Enabling with a null one is an error, not a no-op. |
-| `notifications.notifierCommand` | str | `notify-send` / `terminal-notifier` | Absolute path to the notifier, resolved at build time so it survives the jail. |
-| `notifications.style` | enum | `notify-send` / `terminal-notifier` | Which argv contract `notifierCommand` speaks. Change the two together: a mismatch is silent. |
-| `notifications.appName` | str | `pi` | Title, and the `--app-name` the desktop groups by. |
-| `notifications.events` | `[enum]` | all three | `needs_input`, `settled`, `long_running_tool`. |
-| `notifications.longRunningToolSeconds` | int | `30` | Threshold for `long_running_tool`. |
 | `autoMode.enable` | bool | `false` | The auto-mode guardrail and the permission system, in pi-permissions; see `docs/assumption-a2.md`. |
 | `autoMode.package` | package | `ext-pi-permissions` | The auto-mode extension derivation. The default carries the permission system too. |
 | `autoMode.allow` | `[str]` | `[ ]` | Exceptions to `soft_deny`, as plain sentences for the classifier. A non-empty list replaces the package's built-ins; add `$defaults` to keep them. |
@@ -161,13 +153,37 @@ This fork adds:
 | `voice.configFile` | `null \| str` | `null` | audiomemo's config file, bound read-only into the jail. Without it `record` tries to onboard and dies on `/dev/tty`. |
 | `voice.jailPermissions` | function | read-only | The jail entries voice needs, for a consumer who replaces `jail.permissions` outright. |
 
-### Desktop notifications
+### Terminal-owned alerts
 
-Linux desktop notices use `notify-send` and the desktop notification service,
-with normal urgency for input prompts, a native dismiss-on-click action and
-transient lifetime. Answering a tracked prompt also closes its notice. The click
-listener does not block the session while waiting for dismissal. macOS keeps its
-existing notifier behavior.
+Pi reports working, blocked, done and error states through OSC 7501, including
+independent goals, background jobs, questions, permissions and side conversations.
+Rex uses these reports for activity indicators and its own notification policy.
+Pi does not run `notify-send`, `terminal-notifier` or a separate desktop-alert
+extension, and its default jail does not grant notification D-Bus access.
+
+Program status is not itself a notification request. Ghostty supports OSC 9/777
+notifications, but its app does not currently turn OSC 7501 reports into alerts.
+The default configuration does not emit an extra OSC notification stream
+alongside program status: that would risk duplicate alerts in terminals such as Rex. See
+[program-status behavior and verification](docs/PROGRAM-STATUS.md).
+
+When updating older configurations, remove `notifications.*` settings and any
+explicit `ext-pi-notify` entries from extension lists.
+
+### Todo working list and history
+
+Completed and archived tasks leave every working view immediately, including
+Ctrl+O expansion and the full Ctrl+Alt+T view. `/todos` shows unfinished work;
+`/todos history` shows the conversation's completed and archived tasks separately.
+The `todo` tool exposes the same split with `list` and `history`; `get` retains
+criteria, evidence and dependency links. History survives compaction, reloads
+and branch navigation. `clear` explicitly resets everything, including history.
+
+Task and group references use `a` through `z`, then `aa`, `ab`, and so on.
+For example, update task `ab` with `addBlockedBy: ["z", "aa"]`, or toggle group
+`a` with `/todos a`. Saved numeric keys remain stable internally, and legacy
+numeric calls still resolve to the same tasks. Progress counts include completed
+tasks even though they no longer occupy working-list rows.
 
 ### Fast mode
 
@@ -365,9 +381,7 @@ classified and the first stage is one token wide to keep that cheap.
 The rules reach the extension as `PI_AUTOMODE_SETTINGS_JSON`, exported from a
 store file the launcher `cat`s, never through `settings.json`, which the
 package does not read. That variable is its highest-precedence source, so a
-stale `~/.pi/agent/automode.json` cannot outrank the declared policy. pi-notify
-takes the same shape for the same reason, as `PI_NOTIFY_CONFIG`: pi's
-`ExtensionContext` exposes no settings reader.
+stale `~/.pi/agent/automode.json` cannot outrank the declared policy.
 
 Auto mode and the permission system both gate `tool_call`, and pi stops at the
 first extension that blocks, so on their own they contend rather than compose.
@@ -442,7 +456,6 @@ rather than from a pin:
 | Attribute | Source | What it adds |
 | --- | --- | --- |
 | `ext-pi-custom` | `packages/extensions/pi-custom` | Claude Code-style tool cards, /ui, /context, @ references and FFF search; the prompt stash and chords; background tasks, todos, structured questions, /goal and /btw; intercom messaging with pi and Claude Code sessions |
-| `ext-pi-notify` | `packages/extensions/pi-notify` | Desktop notifications on prompts, settle, and long tool calls |
 | `ext-pi-voice` | `packages/extensions/pi-voice` | Push-to-talk dictation into the editor |
 | `ext-pi-foreign-skills` | `packages/extensions/pi-foreign-skills` | Skills from other agents' directories |
 | `ext-pi-permissions` | `packages/extensions/pi-permissions` | Permissions and auto mode in one extension: policy rules, the classifier as a chain link that asks before it blocks, permission gates for /btw editing |

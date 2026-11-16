@@ -379,12 +379,7 @@ let
   # not merge (F802), so replacement is the only composition available either
   # way.
   #
-  # Every combinator is written `combinators.x` rather than pulled in with
-  # `with combinators;`. `with` loses to an enclosing let binding, and this file
-  # already binds `notifications = cfg.notifications`, so `with combinators; [
-  # notifications ]` silently hands jail.nix an option submodule instead of a
-  # permission. It fails late, at finalPackage, with "attempt to call something
-  # which is not a function but a set".
+  # Keep combinators explicitly qualified so feature names cannot shadow them.
 
   # `nix` is not in the generic list above, and that is the deliberate half of
   # this option. Every pi-nix consumer is a Nix user, which argues for shipping
@@ -420,10 +415,6 @@ let
     [
       combinators.network
       combinators.mount-cwd
-      # pi-notify shells out to notify-send, which needs a talk permission on
-      # org.freedesktop.Notifications. Without this the extension is silently
-      # inert inside the jail: exec succeeds, nothing appears.
-      combinators.notifications
       # The messaging broker is a separate process the extension spawns from
       # inside the sandbox, so its interpreter has to be in there with it. That
       # interpreter is bun, the same runtime pi already is, which is why this is
@@ -445,12 +436,6 @@ let
           pkgs.ripgrep
           pkgs.fd
           pkgs.gh
-          pkgs.libnotify
-          # gdbus, for closing a notification once its ask is answered.
-          # CloseNotification is a D-Bus method with no CLI of its own, and the
-          # `notifications` combinator already grants talk on that destination,
-          # so this is the only missing piece.
-          pkgs.glib.bin
           # The shell pi's bash tool actually runs, and the one a person types
           # into. pi resolves its shell as /bin/bash, then bash on PATH, then
           # bare `sh` (pi-coding-agent's dist/utils/shell.js). Inside
@@ -829,58 +814,6 @@ let
 
   foreignSkillsEntrypoints = lib.optionals cfg.foreignSkills.enable cfg.foreignSkills.package.passthru.piEntrypoint;
 
-  notifications = cfg.notifications;
-
-  notificationsPackage =
-    if !notifications.enable then
-      null
-    else if notifications.package == null then
-      throw ''
-        pi.coding-agent.notifications.enable is set, but
-        pi.coding-agent.notifications.package is null.
-
-        The option defaults to this flake's packages.ext-pi-notify, so a null
-        here is an explicit choice. Set it to an extension package or leave
-        notifications.enable off: "notifications are on" with no notifier is
-        exactly the state a user would not notice.
-      ''
-    else
-      notifications.package;
-
-  notificationEntrypoints = lib.optionals (notificationsPackage != null) (
-    notificationsPackage.passthru.piEntrypoint or [ ]
-  );
-
-  hasEvent = name: lib.elem name notifications.events;
-
-  # Read by pi-notify at runtime through PI_NOTIFY_CONFIG. Not settings.json:
-  # ExtensionContext exposes no settings reader (F6), so a piNotify block there
-  # would be config the extension cannot see. The notifier path is resolved at
-  # build time so nothing searches PATH inside the jail.
-  notifyConfigFile =
-    if notificationsPackage == null then
-      null
-    else
-      pkgs.writeText "pi-notify.json" (
-        builtins.toJSON {
-          enabled = true;
-          notifier = notifications.notifierCommand;
-          inherit (notifications) style appName;
-          longToolCallThresholdMs = notifications.longRunningToolSeconds * 1000;
-          inherit (notifications) dismissOnResolve;
-          dismisser = notifications.dismisserCommand;
-          events = {
-            permissionPrompt = hasEvent "needs_input";
-            agentSettled = hasEvent "settled";
-            longToolCall = hasEvent "long_running_tool";
-          };
-        }
-      );
-
-  notifyEnv = lib.optionalAttrs (notifyConfigFile != null) {
-    PI_NOTIFY_CONFIG.value = "${notifyConfigFile}";
-  };
-
   # One definition of `environment`, assembled from every feature that needs a
   # variable. Merging them here rather than contributing three separate
   # definitions keeps the "defined multiple times" failure that F206 describes
@@ -889,7 +822,6 @@ let
     lib.optionalAttrs statusline.enable statuslineEnv
     // autoModeEnv
     // permissionSystemEnv
-    // notifyEnv
     // messagingEnv
     // voiceEnv
     // minimapEnv
@@ -1299,9 +1231,8 @@ in
           default = false;
           description = ''
             Before a classifier block stands, ask: a prompt names the call and
-            the classifier's reason and offers Allow or Deny, raised on the
-            permission prompt channel so pi-notify sends a notification. Allow
-            runs the call; Deny or Esc refuses it. With no answer within
+            the classifier's reason and offers Allow or Deny. Program status
+            reports the required user action to the terminal. Allow runs the call; Deny or Esc refuses it. With no answer within
             `timeoutSeconds` the block stands, so an unattended run carries
             on, and the agent is told nobody answered, so a later go-ahead in
             the conversation can clear it. Only classifier blocks ask:
@@ -1477,144 +1408,6 @@ in
           The store file whose contents the launcher exports as
           PI_AUTOMODE_SETTINGS_JSON.
         '';
-      };
-    };
-
-    notifications = {
-      enable = lib.mkEnableOption "desktop notifications for pi via the first-party pi-notify extension";
-
-      package = lib.mkOption {
-        type = lib.types.nullOr lib.types.package;
-        default = self.packages.${system}.ext-pi-notify;
-        defaultText = lib.literalExpression "pi-nix's packages.ext-pi-notify";
-        description = ''
-          The `pi-notify` extension derivation. Setting `enable` with a null
-          package is an error rather than a silent no-op, because
-          "notifications on, no notifier" is precisely the state a user would
-          not notice.
-        '';
-      };
-
-      style = lib.mkOption {
-        type = lib.types.enum [
-          "notify-send"
-          "terminal-notifier"
-          "osascript"
-        ];
-        default = if pkgs.stdenv.hostPlatform.isDarwin then "terminal-notifier" else "notify-send";
-        defaultText = lib.literalExpression ''if pkgs.stdenv.hostPlatform.isDarwin then "terminal-notifier" else "notify-send"'';
-        description = ''
-          Which command-line contract `notifierCommand` speaks. The three differ
-          in argument shape, not in capability: `notify-send` takes
-          `--app-name`/`--urgency` then title and body, `terminal-notifier` takes
-          `-title`/`-message`/`-group`, and `osascript` takes one `-e` statement
-          with the text escaped into it.
-
-          Change this together with `notifierCommand`. A mismatch is silent:
-          the wrong binary gets a well-formed argv it does not understand.
-        '';
-      };
-
-      appName = lib.mkOption {
-        type = lib.types.str;
-        default = "pi";
-        description = ''
-          Notification title, and on Linux the `--app-name` value the desktop
-          groups notifications by.
-        '';
-      };
-
-      notifierCommand = lib.mkOption {
-        type = lib.types.str;
-        default =
-          if pkgs.stdenv.hostPlatform.isDarwin then
-            "${pkgs.terminal-notifier}/bin/terminal-notifier"
-          else
-            "${pkgs.libnotify}/bin/notify-send";
-        defaultText = lib.literalExpression ''
-          if pkgs.stdenv.hostPlatform.isDarwin then
-            "''${pkgs.terminal-notifier}/bin/terminal-notifier"
-          else
-            "''${pkgs.libnotify}/bin/notify-send"
-        '';
-        description = ''
-          Absolute path to the notifier binary pi-notify shells out to.
-          Resolved at build time so the path survives inside the jail, where
-          the host PATH is not available.
-        '';
-      };
-
-      events = lib.mkOption {
-        type = lib.types.listOf (
-          lib.types.enum [
-            "needs_input"
-            "settled"
-            "long_running_tool"
-          ]
-        );
-        default = [
-          "needs_input"
-          "settled"
-          "long_running_tool"
-        ];
-        description = ''
-          Which events raise a notification.
-
-          - `needs_input` — a permission prompt or blocking Pi UI dialog
-          - `settled` — the agent finished its turn (pi's `agent_settled`)
-          - `long_running_tool` — a tool ran longer than
-            `longRunningToolSeconds` (pi's `tool_execution_start`/`_end`)
-        '';
-      };
-
-      longRunningToolSeconds = lib.mkOption {
-        type = lib.types.int;
-        default = 30;
-        description = ''
-          Duration a tool must exceed before `long_running_tool` fires.
-        '';
-      };
-
-      dismissOnResolve = lib.mkOption {
-        type = lib.types.bool;
-        default = true;
-        description = ''
-          Close the `needs_input` notification once the question or permission ask has been
-          answered, rather than leaving it up until it times out. It is raised
-          at critical urgency, which on most Linux desktops means it never
-          times out at all.
-
-          Permission asks use the `permissions:decision` broadcast, correlated
-          by `requestId`. Other dialogs use Pi's native `ui_prompt_end` event.
-          A permission dialog does not also raise a generic notification.
-        '';
-      };
-
-      dismisserCommand = lib.mkOption {
-        type = lib.types.str;
-        default = if pkgs.stdenv.hostPlatform.isDarwin then "" else "${pkgs.glib.bin}/bin/gdbus";
-        defaultText = lib.literalExpression ''
-          if pkgs.stdenv.hostPlatform.isDarwin then "" else "''${pkgs.glib.bin}/bin/gdbus"
-        '';
-        description = ''
-          Absolute path to the D-Bus client that closes a notify-send
-          notification, resolved at build time for the same reason
-          `notifierCommand` is. `org.freedesktop.Notifications.CloseNotification`
-          is a D-Bus method with no CLI of its own, so without a client here a
-          notify-send notification is left to time out.
-
-          Unused by the `terminal-notifier` and `osascript` styles:
-          terminal-notifier removes by group through its own binary, and
-          Notification Center exposes no way to close an osascript notification
-          at all. Empty is the correct value on Darwin.
-        '';
-      };
-
-      configFile = lib.mkOption {
-        type = lib.types.nullOr lib.types.path;
-        internal = true;
-        readOnly = true;
-        description = "Rendered config handed to pi-notify as PI_NOTIFY_CONFIG.";
       };
     };
 
@@ -2168,7 +1961,6 @@ in
     autoMode.settings = autoModeSettings;
     autoMode.configFile = autoModeConfigFile;
     autoMode.permissionSystem.configFile = if chainActive then permissionSystemSettings else null;
-    notifications.configFile = notifyConfigFile;
     sandbox.profile = if sandbox.enable then sandboxProfile else null;
     installedPackage = sandboxedPackage;
 
@@ -2180,7 +1972,6 @@ in
       # it into an ask, so the chain link reviews the real input.
       autoModeEntrypoints
       ++ extEntrypoints
-      ++ notificationEntrypoints
       ++ voiceEntrypoints
       ++ foreignSkillsEntrypoints
       ++ customEntrypoints

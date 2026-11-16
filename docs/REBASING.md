@@ -13,7 +13,7 @@ touches them:
   one `bun.lock` plus one generated `bun.nix` per unbundled pin
 - `extensions.json` — the extension pin file
 - `coding-agent/extra-options.nix` — `systemPrompt`, `extensionPackages`,
-  `statusline`, `notifications`
+  `statusline`, terminal integration
 - `tests/`, `update-extensions.nix`, `docs/REBASING.md`, `garnix.yaml`
 
 ## What we edit upstream

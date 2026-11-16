@@ -40,6 +40,25 @@ check("all report fields, Unicode bounds, and state-specific metadata", () => {
 	const idle = reports(protocol.formatProgramStatus({ state: "idle", kind: "auth", progress: 25 }))[0];
 	assert.equal(idle.kind, undefined); assert.equal(idle.progress, undefined);
 });
+check("terminal-owned alerts retain lifecycle status without a desktop notifier", () => {
+	const terminal = new ProcessTerminal();
+	terminal.programStatusSupported = true;
+	const reporter = new ProgramStatusReporter(() => terminal, () => "Session");
+	const write = process.stdout.write; let output = "";
+	process.stdout.write = chunk => { output += chunk; return true; };
+	try {
+		reporter.handleEvent({ type: "agent_start" });
+		reporter.setBlocked("approval", { kind: "permission", message: "Permission required" });
+		reporter.setBlocked("approval", undefined);
+		reporter.handleEvent({ type: "agent_settled", aborted: false });
+	} finally { process.stdout.write = write; }
+	const states = reports(output);
+	assert(states.some(row => row.state === "working"));
+	assert(states.some(row => row.state === "blocked" && row.kind === "permission"));
+	assert.equal(states.at(-1).state, "done");
+	assert(!output.includes("\x1b]9;"), "Do not add a duplicate OSC 9 alert channel");
+	assert(!output.includes("\x1b]777;"), "Do not add a duplicate OSC 777 alert channel");
+});
 check("invalid ids never address root; invalid values cannot inject reports", () => {
 	for (const id of ["", "/bad", "bad/", "a//b", "x".repeat(33), Array(9).fill("a").join("/"), "a:" , "a".repeat(32) + "/" + "b".repeat(32) + "/" + "c".repeat(32) + "/" + "d".repeat(32)]) {
 		assert.equal(protocol.formatProgramStatus({ state: "working", id }), "");

@@ -19,7 +19,6 @@ let
       coding-agent-bun = pkgs.cowsay;
       inherit (self.packages.${system})
         ext-pi-permissions
-        ext-pi-notify
         ext-pi-custom
         ext-pi-fast
         ext-pi-minimap

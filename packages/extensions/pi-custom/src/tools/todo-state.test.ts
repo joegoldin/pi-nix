@@ -27,18 +27,18 @@ describe("compact parent context", () => {
 	] };
 	it("uses the full parent count even when siblings are hidden", () => {
 		const rows = compactWidgetRows(state, new Set([3, 7]), plain, 160, "preview");
-		expect(rows.map(row => row.text).join("\n")).toContain("#1 Implement supervisor and notification input (1/3) -> #2 Bind supervisor questions to durable human input ⛓ #4,#5,#6");
+		expect(rows.map(row => row.text).join("\n")).toContain("#a Implement supervisor and notification input (1/3) -> #b Bind supervisor questions to durable human input ⛓ #d,#e,#f");
 		expect(rows[0].text).toContain("1/6");
 	});
 	it("truncates both subjects before the parent count or dependency suffix", () => {
 		const row = compactWidgetRows(state, new Set([3, 7]), plain, 85, "preview").find(row => row.text.includes("->"))!.text;
-		expect(stripTerminalSequences(row)).toMatch(/#1 Implement supervisor.*… \(1\/3\) -> #2 Bind supervisor.*… ⛓ #4,#5,#6/);
+		expect(stripTerminalSequences(row)).toMatch(/#a Implement supervisor.*… \(1\/3\) -> #b Bind supervisor.*… ⛓ #d,#e,#f/);
 		expect(visibleWidth(row)).toBeLessThanOrEqual(85);
 	});
 	it("retains parent context in focus mode, status and activity when space permits", () => {
 		const rows = compactWidgetRows(state, new Set(), plain, 180, "minimal");
 		expect(rows).toHaveLength(2);
-		expect(rows[1].text).toContain("◐ #1 Implement supervisor and notification input (1/3) -> #7 Active child (wiring the controller)");
+		expect(rows[1].text).toContain("◐ #a Implement supervisor and notification input (1/3) -> #g Active child (wiring the controller)");
 	});
 	it("truncates ungrouped rows in preview and focus but keeps expanded text wrapped", () => {
 		const subject = "Standalone acceptance task ".repeat(10);
@@ -48,7 +48,7 @@ describe("compact parent context", () => {
 		] };
 		for (const view of ["minimal", "preview"] as const) {
 			const rows = compactWidgetRows(standalone, new Set(), plain, 50, view);
-			expect(stripTerminalSequences(rows[1].text)).toMatch(/◐ #1 Standalone.*… ⛓ #2$/);
+			expect(stripTerminalSequences(rows[1].text)).toMatch(/◐ #a Standalone.*… ⛓ #b$/);
 			for (const row of rows) expect(visibleWidth(row.text)).toBeLessThanOrEqual(50);
 		}
 		const expanded = widgetRows(standalone, new Set(), 12, plain, true, 50);
@@ -66,9 +66,9 @@ describe("compact parent context", () => {
 });
 
 describe("create", () => {
-	it("numbers tasks from 1 and reports them", () => {
+	it("reports alphabetical ids while preserving stored numeric keys", () => {
 		const { state, texts } = run({ action: "create", acceptanceCriteria: "The named outcome is verified", subject: "Write tests" }, { action: "create", acceptanceCriteria: "The named outcome is verified", subject: "Ship" });
-		expect(texts).toEqual(["Created #1: Write tests (pending)", "Created #2: Ship (pending)"]);
+		expect(texts).toEqual(["Created #a: Write tests (pending)", "Created #b: Ship (pending)"]);
 		expect(state.nextId).toBe(3);
 	});
 
@@ -77,19 +77,19 @@ describe("create", () => {
 	});
 
 	it("refuses dependencies that do not exist", () => {
-		expect(reduce(EMPTY, { action: "create", acceptanceCriteria: "The named outcome is verified", subject: "x", blockedBy: [9] }).text).toBe("Error: blockedBy: #9 not found");
+		expect(reduce(EMPTY, { action: "create", acceptanceCriteria: "The named outcome is verified", subject: "x", blockedBy: [9] }).text).toBe("Error: blockedBy: #i not found");
 	});
 });
 
 describe("update", () => {
 	it("reports a status change", () => {
 		const { texts } = run({ action: "create", acceptanceCriteria: "The named outcome is verified", subject: "a" }, { action: "update", id: 1, status: "in_progress", activeForm: "doing a" });
-		expect(texts[1]).toBe("Updated #1 (pending → in_progress)");
+		expect(texts[1]).toBe("Updated #a (pending → in_progress)");
 	});
 
 	it("says when nothing changed", () => {
 		const { texts } = run({ action: "create", acceptanceCriteria: "The named outcome is verified", subject: "a" }, { action: "update", id: 1, status: "pending" });
-		expect(texts[1]).toBe("No change: #1 already matches the requested values (status: pending)");
+		expect(texts[1]).toBe("No change: #a already matches the requested values (status: pending)");
 	});
 
 	it("rejects an update with nothing to change", () => {
@@ -116,7 +116,7 @@ describe("update", () => {
 		);
 		expect(state.tasks[1].blockedBy).toEqual([1]);
 		expect(texts[3]).toBe("Error: addBlockedBy would create a cycle in the blockedBy graph");
-		expect(texts[4]).toBe("Error: cannot block #1 on itself");
+		expect(texts[4]).toBe("Error: cannot block #a on itself");
 	});
 
 	it("merges metadata and deletes keys set to null", () => {
@@ -138,19 +138,19 @@ describe("reading", () => {
 	).state;
 
 	it("lists live tasks with their active form and dependencies", () => {
-		expect(reduce(base, { action: "list" }).text).toBe("[in_progress] #1 a (doing a)\n[pending] #2 b ⛓ #1");
+		expect(reduce(base, { action: "list" }).text).toBe("[in_progress] #a a (doing a)\n[pending] #b b ⛓ #a");
 	});
 
 	it("shows tombstones only when asked", () => {
-		expect(reduce(base, { action: "list", includeDeleted: true }).text).toContain("[deleted] #3 c");
+		expect(reduce(base, { action: "list", includeDeleted: true }).text).toContain("[deleted] #c c");
 	});
 
 	it("gets one task with its edges both ways", () => {
-		expect(reduce(base, { action: "get", id: 1 }).text).toBe("#1 [in_progress] a\n  acceptanceCriteria: The named outcome is verified\n  activeForm: doing a\n  blocks: #2");
+		expect(reduce(base, { action: "get", id: 1 }).text).toBe("#a [in_progress] a\n  acceptanceCriteria: The named outcome is verified\n  activeForm: doing a\n  blocks: #b");
 	});
 
 	it("refuses to delete twice", () => {
-		expect(reduce(base, { action: "delete", id: 3 }).text).toBe("Error: #3 is already deleted");
+		expect(reduce(base, { action: "delete", id: 3 }).text).toBe("Error: #c is already deleted");
 	});
 
 	it("clears everything and counts what it cleared", () => {
@@ -285,9 +285,9 @@ describe("one-level groups", () => {
 
 	it("lists groups and parent context even with a status filter", () => {
 		const state = grouped();
-		expect(reduce(state, { action: "list" }).text).toContain("[group pending] #1 Mac acceptance (0/2)");
-		expect(reduce(state, { action: "list", status: "pending" }).text).toContain("parent: #1");
-		expect(reduce(state, { action: "get", id: 2 }).text).toContain("parent: #1");
+		expect(reduce(state, { action: "list" }).text).toContain("[group pending] #a Mac acceptance (0/2)");
+		expect(reduce(state, { action: "list", status: "pending" }).text).toContain("parent: #a");
+		expect(reduce(state, { action: "get", id: 2 }).text).toContain("parent: #a");
 	});
 
 	it("replays both flat legacy lists and grouped state", () => {
@@ -307,7 +307,7 @@ describe("active task ownership", () => {
 			{ action: "update", id: 1, status: "in_progress" }, { action: "update", id: 2, status: "in_progress" },
 		);
 		expect(state.tasks.map(t => t.status)).toEqual(["pending", "in_progress"]);
-		expect(texts.at(-1)).toContain("#1");
+		expect(texts.at(-1)).toContain("#a");
 	});
 
 	it("allows parallel work only for distinct explicit owners", () => {
@@ -332,14 +332,14 @@ describe("grouped widget", () => {
 	).state;
 	it("renders a group header and indented children without an active-task glyph on the group", () => {
 		const lines = widgetLines(state(), new Set(), 12, plain);
-		expect(lines).toContain("├─ ▾ #1 Mac acceptance (0/2)");
-		expect(lines).toContain("│  ├─ ○ #2 Clipboard");
-		expect(lines).toContain("│  └─ ○ #3 Notifications");
+		expect(lines).toContain("├─ ▾ #a Mac acceptance (0/2)");
+		expect(lines).toContain("│  ├─ ○ #b Clipboard");
+		expect(lines).toContain("│  └─ ○ #c Notifications");
 		expect(lines[0]).toBe("● Todos (0/3) · 0 complete · 0 active · 3 pending");
 	});
 	it("collapses individual groups without changing progress or standalone tasks", () => {
 		const lines = widgetLines(state(), new Set(), 12, plain, false, undefined, new Set([1]));
-		expect(lines.join("\n")).toContain("▸ #1 Mac acceptance (0/2)");
+		expect(lines.join("\n")).toContain("▸ #a Mac acceptance (0/2)");
 		expect(lines.join("\n")).not.toContain("Clipboard");
 		expect(lines.join("\n")).toContain("Publish");
 		expect(lines[0]).toBe("● Todos (0/3) · 0 complete · 0 active · 3 pending");
@@ -356,7 +356,7 @@ describe("grouped widget", () => {
 		expect(lines.join("\n")).toContain("Mac acceptance");
 		expect(lines.join("\n")).toContain("Clipboard");
 	});
-	it("keeps derived group counts when completed children fade", () => {
+	it("keeps derived group counts when completed children enter history", () => {
 		const s = reduce(state(), { action: "update", id: 2, evidence: "Verified the named outcome", status: "completed" }).state;
 		const lines = widgetLines(s, new Set([2]), 12, plain);
 		expect(lines.join("\n")).toContain("Mac acceptance (1/2)");
@@ -393,11 +393,13 @@ describe("completed todo ordering", () => {
 		{ action: "create", acceptanceCriteria: "The named outcome is verified", subject: "Open child", parentId: 2 },
 		{ action: "create", acceptanceCriteria: "The named outcome is verified", subject: "Open root" },
 	).state;
-	for (const expanded of [false, true]) it(`puts completed roots and children last (${expanded ? "expanded" : "small compact"})`, () => {
+	for (const expanded of [false, true]) it(`keeps completed roots and children in history only (${expanded ? "expanded" : "small compact"})`, () => {
 		const state = mixed(); const before = JSON.stringify(state);
 		const text = widgetLines(state, new Set(), 12, plain, expanded).join("\n");
-		expect(text.indexOf("Open child")).toBeLessThan(text.indexOf("Finished child"));
-		expect(text.indexOf("Open root")).toBeLessThan(text.indexOf("Finished root"));
+		expect(text).toContain("Open child");
+		expect(text).toContain("Open root");
+		expect(text).not.toContain("Finished child");
+		expect(text).not.toContain("Finished root");
 		expect(JSON.stringify(state)).toBe(before);
 	});
 	it("does not let completed children consume slots before later unfinished roots", () => {
@@ -407,13 +409,13 @@ describe("completed todo ordering", () => {
 		expect(lines.join("\n")).not.toContain("Finished child");
 		expect(lines.join("\n")).not.toContain("Finished root");
 		expect(lines[0]).toContain("2/4");
-		expect(lines.at(-1)).toContain("2 completed");
+		expect(lines).toHaveLength(4);
 		expect(lines.length).toBeLessThanOrEqual(5);
 	});
-	it("lets expansion reveal faded completions without losing group progress", () => {
+	it("keeps expansion work-only without losing group progress", () => {
 		const text = widgetLines(mixed(), new Set([1, 3]), 12, plain, true).join("\n");
-		expect(text).toContain("Finished root");
-		expect(text).toContain("Finished child");
+		expect(text).not.toContain("Finished root");
+		expect(text).not.toContain("Finished child");
 		expect(text).toContain("Group (1/2)");
 	});
 });
@@ -426,25 +428,22 @@ describe("completed group headers", () => {
 		{ action: "update", id: 2, evidence: "Verified the named outcome", status: "completed" },
 	).state;
 	const styled = { fg: (slot: string, text: string) => `<${slot}>${text}</${slot}>`, strikethrough: (text: string) => `<strike>${text}</strike>` };
-	for (const collapsed of [false, true]) it(`marks the completed group without losing its ${collapsed ? "collapsed" : "expanded"} arrow`, () => {
-		const rows = widgetRows(completed(), new Set(), 12, styled, true, undefined, new Set(collapsed ? [1] : []));
-		const header = rows.find(row => row.groupId === 1)!;
-		expect(header.text).toContain(collapsed ? "▸" : "▾");
-		expect(header.text).toContain("<success>✓ </success>");
-		expect(header.text).toContain("<muted><strike>Finished acceptance group</strike></muted>");
-		expect(header.text).toContain("(1/1)");
-	});
-	it("keeps wrapped completed headers clickable and restores open styling when a child is added", () => {
+	for (const collapsed of [false, true]) it(`archives completed groups regardless of ${collapsed ? "collapsed" : "expanded"} state`, () => {
 		const state = completed();
-		const rows = widgetRows(state, new Set(), 12, plain, true, 24);
-		expect(rows.filter(row => row.groupId === 1).length).toBeGreaterThan(1);
-		expect(rows.every(row => row.text.length <= 24)).toBe(true);
-		const reopened = reduce(state, { action: "create", acceptanceCriteria: "The named outcome is verified", parentId: 1, subject: "Another check" }).state;
-		const header = widgetRows(reopened, new Set(), 12, styled, true).find(row => row.groupId === 1)!;
+		expect(widgetRows(state, new Set(), 12, styled, true, undefined, new Set(collapsed ? [1] : []))).toEqual([]);
+		expect(reduce(state, { action: "history" }).text).toContain("Finished acceptance group (1/1)");
+	});
+	it("restores a group to the working list only when new work is added", () => {
+		const state = completed();
+		expect(widgetRows(state, new Set(), 12, plain, true, 24)).toEqual([]);
+		const reopened = reduce(state, { action: "create", acceptanceCriteria: "The named outcome is verified", parentId: "a", subject: "Another check" }).state;
+		const rows = widgetRows(reopened, new Set(), 12, styled, true);
+		const header = rows.find(row => row.groupId === 1)!;
 		expect(header.text).toContain("<accent>Finished acceptance group</accent>");
 		expect(header.text).not.toContain("<strike>");
 		expect(header.text).not.toContain("✓");
 		expect(header.text).toContain("(1/2)");
+		expect(rows.map(row => row.text).join("\n")).not.toContain("#b Check");
 	});
 });
 
@@ -513,8 +512,8 @@ describe("completed history leaves the working list", () => {
 	).state;
 
 	it("lists unfinished tasks by default without deleting evidence or dependencies", () => {
-		expect(reduce(state, { action: "list" }).text).toBe("[pending] #2 Next ⛓ #1");
-		expect(reduce(state, { action: "list", status: "completed" }).text).toBe("[completed] #1 Finished");
+		expect(reduce(state, { action: "list" }).text).toBe("[pending] #b Next ⛓ #a");
+		expect(reduce(state, { action: "list", status: "completed" }).text).toBe("[completed] #a Finished");
 		expect(reduce(state, { action: "get", id: 1 }).text).toContain("evidence: Tests passed");
 		expect(reduce(state, { action: "list" }).state).toBe(state);
 	});
@@ -523,14 +522,15 @@ describe("completed history leaves the working list", () => {
 		expect(reduce({ ...state, tasks: state.tasks.slice(0, 1) }, { action: "list" }).text).toBe("No tasks");
 	});
 
-	it("keeps compact and expanded counts identical while retaining expanded history", () => {
+	it("keeps compact and expanded counts identical while history stays separate", () => {
 		const compact = widgetLines(state, new Set([1]), 12, plain).join("\n");
 		expect(compact).toContain("Todos (1/2)");
 		expect(compact).not.toContain("Finished");
 		expect(compact).not.toContain("⛓");
 		const expanded = widgetLines(state, new Set([1]), 12, plain, true).join("\n");
 		expect(expanded).toContain("Todos (1/2)");
-		expect(expanded).toContain("Finished");
+		expect(expanded).not.toContain("Finished");
+		expect(reduce(state, { action: "history" }).text).toContain("Finished");
 	});
 
 	it("hides completed groups and children from default lists", () => {
@@ -542,4 +542,72 @@ describe("completed history leaves the working list", () => {
 		expect(reduce(grouped, { action: "list" }).text).toBe("No tasks");
 		expect(reduce(grouped, { action: "list", status: "completed" }).text).toContain("[group completed]");
 	});
+});
+
+// Expanded working views must not turn the conversation's task history back
+// into a backlog, even when the user expands every tool globally.
+describe("separate working list and conversation history", () => {
+	const state: TodoState = { nextId: 45, tasks: [
+		{ id: 1, subject: "Batch", kind: "group", status: "in_progress" },
+		...Array.from({ length: 40 }, (_, i) => ({ id: i + 2, subject: `Finished check ${i}`, parentId: 1, status: "completed" as const, evidence: `Check ${i} passed` })),
+		{ id: 42, subject: "Remaining check", parentId: 1, status: "pending", blockedBy: [41] },
+		{ id: 43, subject: "Archived experiment", status: "deleted", description: "Superseded" },
+		{ id: 44, subject: "Finished standalone", status: "completed", evidence: "Verified standalone" },
+	] };
+	it("never reintroduces completed rows in expanded working views", () => {
+		for (const expanded of [false, true]) {
+			const text = widgetLines(state, new Set(), 12, plain, expanded).join("\n");
+			expect(text).not.toContain("Finished check");
+			expect(text).not.toContain("Finished standalone");
+			expect(text).not.toContain("Archived experiment");
+			expect(text).toContain("Remaining check");
+			expect(text).toContain("Batch (40/41)");
+			expect(text).toContain("41/42");
+		}
+	});
+	it("keeps completions, tombstones and their evidence in an explicit history list", () => {
+		const history = reduce(state, { action: "history" });
+		expect(history.text).toContain("Finished check 39");
+		expect(history.text).toContain("Archived experiment");
+		expect(history.text).not.toContain("Remaining check");
+		expect(history.state).toBe(state);
+		const restored = replay([{ type: "custom", customType: "pi-custom:todo-state", data: state }]);
+		expect(reduce(restored, { action: "get", id: 41 }).text).toContain("Check 39 passed");
+		expect(restored.tasks.find(task => task.id === 42)?.blockedBy).toEqual([41]);
+	});
+});
+
+describe("alphabetical public task ids", () => {
+	it("uses spreadsheet-style letters, including rollover, without renumbering history", () => {
+		for (const [id, label] of [[1, "a"], [26, "z"], [27, "aa"], [28, "ab"], [52, "az"], [53, "ba"], [702, "zz"], [703, "aaa"]] as const) {
+			const result = reduce({ tasks: [], nextId: id }, { action: "create", subject: "Check", acceptanceCriteria: "Verified" });
+			expect(result.text).toBe(`Created #${label}: Check (pending)`);
+		}
+	});
+	it("resolves alphabetical dependencies and parent links against numeric legacy state", () => {
+		let state: TodoState = { nextId: 29, tasks: [
+			{ id: 1, subject: "Batch", kind: "group", status: "pending" },
+			{ id: 26, subject: "Dependency", status: "pending" },
+			{ id: 27, subject: "Follow-up", status: "pending" },
+		] };
+		const linked = reduce(state, { action: "update", id: "aa", parentId: "a", addBlockedBy: ["z"] });
+		expect(linked.error).toBeUndefined(); state = linked.state;
+		expect(state.tasks[2].parentId).toBe(1);
+		expect(state.tasks[2].blockedBy).toEqual([26]);
+		expect(reduce(state, { action: "get", id: "aa" } as never).text).toContain("blockedBy: #z");
+		expect(reduce(state, { action: "update", id: "z", addBlockedBy: ["aa"] } as never).error).toContain("cycle");
+		expect(reduce(state, { action: "update", id: "aa", removeBlockedBy: ["z"], parentId: null } as never).state.tasks[2].blockedBy).toBeUndefined();
+	});
+});
+
+it("rejects malformed and overflowing references without mutating legacy state", () => {
+	const state = reduce(EMPTY, { action: "create", subject: "Work", acceptanceCriteria: "Verified" }).state;
+	for (const id of ["", "1", "a-b", "a\n", "a".repeat(100), 0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+		for (const params of [{ action: "get", id }, { action: "update", id: "a", addBlockedBy: [id] }, { action: "create", subject: "Child", acceptanceCriteria: "Verified", parentId: id }] as const) {
+			const out = reduce(state, params as never);
+			expect(out.error).toContain("alphabetical");
+			expect(out.state).toBe(state);
+		}
+	}
+	expect(reduce(state, { action: "get", id: "A" }).text).toContain("#a");
 });

@@ -161,100 +161,70 @@ test("clear resets group collapse state when ids are reused", async () => {
 
 function fakeTodoClock() {
 	let now = 0;
-	const jobs = new Map<() => void, number>();
-	const clock: TodoClock = { now: () => now, schedule: (fn, ms) => { jobs.set(fn, now + ms); return () => { jobs.delete(fn); }; } };
-	return { clock, jobs, advance(ms: number) { now += ms; for (const [fn, at] of [...jobs]) if (at <= now) { jobs.delete(fn); fn(); } } };
+	const clock: TodoClock = { now: () => now };
+	return { clock, advance(ms: number) { now += ms; } };
 }
 
-test("completed rows expire during a long run without changing overall progress", async () => {
+test("completion immediately leaves every working view without changing overall progress", async () => {
 	const timer = fakeTodoClock(); const h = uiHarness(timer.clock);
-	await h.act({ action: "create", acceptanceCriteria: "The named outcome is verified", subject: "Finished work" });
-	await h.act({ action: "create", acceptanceCriteria: "The named outcome is verified", subject: "Next work" });
-	await h.act({ action: "update", id: 1, evidence: "Verified the named outcome", status: "completed" });
-	expect(h.widget().render(80).join("\n")).toContain("Finished work");
-	timer.advance(30_000);
-	await h.act({ action: "list" });
-	h.emit("session_compact");
-	timer.advance(30_001);
-	const text = h.widget().render(80).join("\n");
-	expect(text).not.toContain("Finished work");
-	expect(text).toContain("Next work");
-	expect(text).toContain("1/2");
-	expect((await h.act({ action: "get", id: 1 })).details.tasks[0].status).toBe("completed");
-	expect(h.widget().render(80).join("\n")).not.toContain("Finished work");
-	await h.shortcuts.get("ctrl+alt+t").handler();
-	expect(h.widget().render(80).join("\n")).toContain("Finished work");
+	await h.act({ action: "create", subject: "Finished work", acceptanceCriteria: "Verified" });
+	await h.act({ action: "create", subject: "Next work", acceptanceCriteria: "Verified" });
+	await h.act({ action: "update", id: "a", status: "completed", evidence: "Passed" });
+	for (let view = 0; view < 3; view++) {
+		const text = h.widget().render(100).join("\n");
+		expect(text).not.toContain("Finished work");
+		expect(text).toContain("Next work");
+		expect(text).toContain("1/2");
+		await h.shortcuts.get("ctrl+alt+t").handler();
+	}
+	timer.advance(600_001); h.emit("session_compact");
+	expect(h.widget().render(100).join("\n")).not.toContain("Finished work");
+	expect((await h.act({ action: "get", id: "a" })).content[0].text).toContain("evidence: Passed");
 });
 
-test("all-complete and restored lists clean up without a new run; shutdown cancels the timer", async () => {
-	const timer = fakeTodoClock(); const h = uiHarness(timer.clock);
-	await h.act({ action: "create", acceptanceCriteria: "The named outcome is verified", subject: "Done" });
-	await h.act({ action: "update", id: 1, evidence: "Verified the named outcome", status: "completed" });
-	timer.advance(60_001);
-	expect(h.widget()).toBeUndefined();
-	expect(timer.jobs.size).toBe(0);
-	h.emit("session_tree");
-	expect(h.widget().render(80).join("\n")).toContain("Done");
-	expect(timer.jobs.size).toBe(1);
-	timer.advance(60_001);
-	expect(h.widget()).toBeUndefined();
-	h.emit("session_tree"); h.emit("session_shutdown");
-	expect(timer.jobs.size).toBe(0);
-});
-
-test("Ctrl+Alt+T restores archived completed history after the widget disappears", async () => {
-	const timer = fakeTodoClock();
-	const h = uiHarness(timer.clock);
+for (const event of ["session_start", "session_tree", "session_compact"]) test(`${event} keeps completed-only batches out of the widget`, async () => {
+	const h = uiHarness(fakeTodoClock().clock);
 	await h.act({ action: "create", subject: "Done", acceptanceCriteria: "Verified" });
-	await h.act({ action: "update", id: 1, status: "completed", evidence: "Passed" });
-	timer.advance(60_001);
+	await h.act({ action: "update", id: "a", status: "completed", evidence: "Passed" });
 	expect(h.widget()).toBeUndefined();
-	await h.shortcuts.get("ctrl+alt+t").handler();
-	expect(h.widget()?.render(80).join("\n")).toContain("Done");
-	await h.shortcuts.get("ctrl+alt+t").handler();
+	h.emit(event);
 	expect(h.widget()).toBeUndefined();
+	for (let view = 0; view < 3; view++) {
+		await h.shortcuts.get("ctrl+alt+t").handler();
+		expect(h.widget()).toBeUndefined();
+	}
+	await h.commands.get("todos").handler("history", h.ctx);
+	expect(h.notices.at(-1)).toContain("#a Done");
+	expect(h.messages).toHaveLength(0);
 });
 
-test("old deadlines do not hide reused task IDs after clearing", async () => {
+test("clear resets group view state without leaving completion deadlines on reused ids", async () => {
 	const timer = fakeTodoClock(); const h = uiHarness(timer.clock);
-	await h.act({ action: "create", acceptanceCriteria: "The named outcome is verified", subject: "Old" });
-	await h.act({ action: "update", id: 1, evidence: "Verified the named outcome", status: "completed" });
-	timer.advance(30_000);
+	await h.act({ action: "create", subject: "Old", acceptanceCriteria: "Verified" });
+	await h.act({ action: "update", id: "a", status: "completed", evidence: "Passed" });
 	await h.act({ action: "clear" });
-	await h.act({ action: "create", acceptanceCriteria: "The named outcome is verified", subject: "New" });
-	await h.act({ action: "update", id: 1, evidence: "Verified the named outcome", status: "completed" });
-	timer.advance(30_001);
-	expect(h.widget().render(80).join("\n")).toContain("New");
-	timer.advance(30_000);
-	expect(h.widget()).toBeUndefined();
+	await h.act({ action: "create", subject: "New", acceptanceCriteria: "Verified" });
+	timer.advance(600_001);
+	expect(h.widget().render(100).join("\n")).toContain("New");
+	expect((await h.act({ action: "history" })).content[0].text).toBe("No task history");
 });
 
-test("starting the next run hides completions and cancels their pending deadline", async () => {
-	const timer = fakeTodoClock(); const h = uiHarness(timer.clock);
-	await h.act({ action: "create", acceptanceCriteria: "The named outcome is verified", subject: "Done" });
-	await h.act({ action: "update", id: 1, evidence: "Verified the named outcome", status: "completed" });
-	expect(timer.jobs.size).toBe(1);
-	h.emit("agent_start");
-	expect(h.widget()).toBeUndefined();
-	expect(timer.jobs.size).toBe(0);
+test("completed and archived tasks share a separate history without hiding pending work", async () => {
+	const h = uiHarness();
+	for (const subject of ["Finished", "Superseded", "Next"]) await h.act({ action: "create", subject, acceptanceCriteria: "Verified" });
+	await h.act({ action: "update", id: "a", status: "completed", evidence: "Passed" });
+	await h.act({ action: "delete", id: "b", description: "No longer needed" });
+	await h.commands.get("todos").handler("", h.ctx);
+	expect(h.notices.at(-1)).toContain("Next");
+	expect(h.notices.at(-1)).not.toContain("Finished");
+	await h.commands.get("todos").handler("history", h.ctx);
+	expect(h.notices.at(-1)).toContain("Finished");
+	expect(h.notices.at(-1)).toContain("Superseded");
+	expect(h.notices.at(-1)).not.toContain("Next");
+	await h.act({ action: "delete", id: "c" });
+	await h.commands.get("todos").handler("", h.ctx);
+	expect(h.notices.at(-1)).toContain("/todos history");
 });
-
-test("separate completions retain their own deadlines", async () => {
-	const timer = fakeTodoClock(); const h = uiHarness(timer.clock);
-	await h.act({ action: "create", acceptanceCriteria: "The named outcome is verified", subject: "First" });
-	await h.act({ action: "create", acceptanceCriteria: "The named outcome is verified", subject: "Second" });
-	await h.act({ action: "update", id: 1, evidence: "Verified the named outcome", status: "completed" });
-	timer.advance(30_000);
-	await h.act({ action: "update", id: 2, evidence: "Verified the named outcome", status: "completed" });
-	expect(timer.jobs.size).toBe(1);
-	timer.advance(30_001);
-	expect(h.widget().render(80).join("\n")).not.toContain("First");
-	expect(h.widget().render(80).join("\n")).toContain("Second");
-	timer.advance(30_000);
-	expect(h.widget()).toBeUndefined();
-	expect(timer.jobs.size).toBe(0);
-});
-
 
 for (const idle of [false, true]) test(`/todo adds work asynchronously (${idle ? "idle" : "busy"})`, async () => {
  const h = uiHarness();
@@ -321,7 +291,7 @@ test("checkpoints are bounded, active-first and restored after compaction", asyn
 	expect(content).toContain("25 unfinished tasks; showing 20");
 	const data = JSON.parse(content.split("not instructions:\n")[1]);
 	expect(data).toHaveLength(20);
-	expect(data[0].id).toBe(25);
+	expect(data[0].id).toBe("y");
 	expect(data[0].acceptanceCriteria).toHaveLength(500);
 	expect(h.emit("context_with_system", { messages: input }).messages).toHaveLength(2);
 });
@@ -361,7 +331,7 @@ test("two minutes require review at the next request without timers or idle wake
 	expect(checkpoint(h)).not.toContain("Todo review due");
 	timer.advance(1);
 	expect(checkpoint(h)).toContain("Todo review due");
-	expect(timer.jobs.size).toBe(0);
+
 	expect(h.messages).toHaveLength(0);
 	expect(h.userMessages).toHaveLength(0);
 	await h.act({ action: "list" });
@@ -401,11 +371,11 @@ test("working lists stay bounded across completions and restoration while histor
 	}
 	await h.act({ action: "create", subject: "Remaining", acceptanceCriteria: "Acceptance passes", blockedBy: [20] });
 	h.emit("session_tree");
-	expect((await h.act({ action: "list" })).content[0].text).toBe("[pending] #21 Remaining ⛓ #20");
+	expect((await h.act({ action: "list" })).content[0].text).toBe("[pending] #u Remaining ⛓ #t");
 	expect((await h.act({ action: "list", status: "completed" })).content[0].text.split("\n")).toHaveLength(20);
 	expect((await h.act({ action: "get", id: 20 })).content[0].text).toContain("evidence: Check passed");
 	expect(h.tool.description).toContain("unfinished tasks by default");
-	expect(h.apply(h.base("Custom instructions"))).toContain("automatically leave the default list");
+	expect(h.apply(h.base("Custom instructions"))).toContain("immediately leave every working view");
 });
 
 
@@ -456,7 +426,7 @@ test("Ctrl+O expands locally collapsed todo groups and restores the local view a
 	expect(h.widget().render(100).join("\n")).not.toContain("Child task");
 });
 
-test("overall todo counts stay 5/14 across focus, preview, full and Ctrl+O after completed rows fade", async () => {
+test("overall todo counts stay 5/14 across focus, preview, full and Ctrl+O after completed rows enter history", async () => {
 	let overall = "";
 	const timer = fakeTodoClock();
 	const h = uiHarness(timer.clock);
@@ -492,3 +462,74 @@ for (const event of ["session_start", "session_tree", "session_compact"]) {
 		expect(h.widget().render(100).join("\n").match(/Work \d/g)).toHaveLength(5);
 	});
 }
+
+test("expanded and restored widgets keep completed history separate immediately", async () => {
+	const timer = fakeTodoClock(); const h = uiHarness(timer.clock);
+	let expanded = false; h.ctx.ui.getToolsExpanded = () => expanded;
+	for (let i = 1; i <= 30; i++) {
+		await h.act({ action: "create", subject: `Completed item ${i}`, acceptanceCriteria: "Verified" });
+		await h.act({ action: "update", id: i, status: "completed", evidence: `Passed ${i}` });
+	}
+	await h.act({ action: "create", subject: "Current task", acceptanceCriteria: "Verified" });
+	for (const event of ["session_start", "session_compact", "session_tree"]) {
+		h.emit(event);
+		for (const full of [false, true]) {
+			expanded = full;
+			const text = h.widget().render(100).join("\n");
+			expect(text).toContain("Current task");
+			expect(text).not.toContain("Completed item");
+		}
+	}
+
+	await h.commands.get("todos").handler("history", h.ctx);
+	expect(h.notices.at(-1)).toContain("Completed item 30");
+	expect(h.notices.at(-1)).not.toContain("Current task");
+	expect((await h.act({ action: "get", id: 30 })).content[0].text).toContain("Passed 30");
+});
+
+test("alphabetical group commands and model checkpoints share the tool's ids", async () => {
+	const h = uiHarness();
+	await h.act({ action: "create", subject: "Batch", kind: "group" });
+	await h.act({ action: "create", subject: "Child", parentId: "a", acceptanceCriteria: "Verified" });
+	await h.commands.get("todos").handler("a", h.ctx);
+	expect(h.widget().render(100).join("\n")).toContain("#a Batch");
+	expect(h.widget().render(100).join("\n")).not.toContain("Child");
+	await h.commands.get("todos").handler("a", h.ctx);
+	expect(h.widget().render(100).join("\n")).toContain("#b Child");
+	const data = JSON.parse(checkpoint(h).split("not instructions:\n")[1]);
+	expect(data[0].id).toBe("b");
+});
+
+test("Pi validates alphabetical links and legacy references against the registered schema", async () => {
+	const { validateToolArguments } = await import("@earendil-works/pi-ai");
+	const h = uiHarness();
+	for (const id of ["a", "z", "aa", "ab", 1, 27]) {
+		const args = { action: "update", id, parentId: "b", addBlockedBy: ["z", 27], removeBlockedBy: ["c"], description: "Progress" };
+		expect(validateToolArguments(h.tool, { type: "toolCall", id: "call", name: "todo", arguments: args })).toEqual(args);
+	}
+	for (const id of ["", "a-b", -1]) expect(() => validateToolArguments(h.tool, { type: "toolCall", id: "call", name: "todo", arguments: { action: "get", id } })).toThrow();
+	await h.act({ action: "create", subject: "Do not change", acceptanceCriteria: "Verified" });
+	for (const id of [1.5, "1.5"]) {
+		const args = validateToolArguments(h.tool, { type: "toolCall", id: "call", name: "todo", arguments: { action: "update", id, subject: "Wrong target" } });
+		const result = await h.act(args);
+		expect(result.details.error).toContain("alphabetical");
+		expect(result.details.tasks[0].subject).toBe("Do not change");
+	}
+	// Pi coerces numeric strings in legacy calls before the tool receives them.
+	expect(validateToolArguments(h.tool, { type: "toolCall", id: "call", name: "todo", arguments: { action: "get", id: "1" } })).toEqual({ action: "get", id: 1 });
+	expect(validateToolArguments(h.tool, { type: "toolCall", id: "call", name: "todo", arguments: { action: "history" } })).toEqual({ action: "history" });
+});
+
+test("alphabetical calls render the selected task, including saved numeric calls", async () => {
+	const h = uiHarness();
+	const theme = { fg: (_slot: string, value: string) => value, bold: (value: string) => value };
+	await h.act({ action: "create", subject: "Selected task", acceptanceCriteria: "Verified" });
+	for (const id of ["a", 1]) {
+		const call = h.tool.renderCall({ action: "update", id }, theme);
+		expect(call.render(100).join("\n")).toContain("Selected task");
+		const result = await h.act({ action: "update", id, status: "completed", evidence: "Passed" });
+		expect(h.tool.renderResult(result, { expanded: false }, theme).render(100).join("\n")).toContain("completed");
+	}
+	const history = await h.act({ action: "history" });
+	expect(h.tool.renderResult(history, { expanded: true }, theme).render(100).join("\n")).toContain("#a Selected task");
+});

@@ -19,6 +19,7 @@ in
   editor-input = import ./editor-input-test.nix args;
   selection-copy = import ./selection-copy-test.nix args;
   program-status = import ./program-status-test.nix args;
+  terminal-notifications = import ./terminal-notifications-test.nix args;
   sidebar = import ./sidebar-test.nix args;
   extension-dialogs = import ./extension-dialogs-test.nix args;
   install-lock-sync = import ./install-lock-sync-test.nix args;

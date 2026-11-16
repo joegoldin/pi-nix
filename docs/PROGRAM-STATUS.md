@@ -2,6 +2,20 @@
 
 Pi reports OSC 7501 revision 0.4, the [Program Status Protocol supported by Rex](https://www.superlogical.com/rex/docs/build/program-status). This is terminal metadata, separate from Pi's footer, window title, notifications, and OSC 9;4 progress indicator.
 
+## Notification ownership
+
+Program-status reporting remains independent of desktop notifications. Rex
+consumes OSC 7501 and decides whether to show indicators or alerts, when to
+suppress them for a focused pane, and where a click should navigate. Pi does not
+spawn a desktop notifier or request notification D-Bus access. The default
+configuration emits no duplicate OSC 9/777 alerts alongside these reports.
+Explicitly configured permission-prompt terminal channels remain opt-in.
+
+Ghostty supports OSC 9/777 notifications, but its app does not currently use OSC
+7501 reports for alerts. Keeping program status does not promise desktop alerts
+in a terminal that does not consume it. The protocol and all Pi activity
+producers remain enabled regardless of that terminal's presentation support.
+
 ## State ownership
 
 The native `ProgramStatusReporter` owns the root record (`app=pi`). Extensions publish independent records through `ctx.ui.setProgramStatus(key, status)`, under `pi/<key>`. They never write competing root escape sequences.

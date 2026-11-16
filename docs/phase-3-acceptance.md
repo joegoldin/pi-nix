@@ -1,5 +1,9 @@
 # Phase 3 acceptance run (historical)
 
+> Historical acceptance record: the separate `pi-notify` extension described
+> below has since been removed. Current alerts are terminal-owned; OSC 7501
+> reporting is preserved. See [program status](PROGRAM-STATUS.md).
+
 **Superseded.** This run tested the first-party `pi-auto-mode` extension, which
 was retired on 2026-08-19 in favour of the pinned `@czottmann/pi-automode`. It
 is kept because the harness it describes is the one the replacement was tested

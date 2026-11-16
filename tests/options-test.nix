@@ -37,7 +37,6 @@ let
       coding-agent-bun = piStub;
       inherit (self.packages.${system})
         ext-pi-permissions
-        ext-pi-notify
         ext-pi-voice
         ext-pi-foreign-skills
         ext-pi-custom
@@ -163,32 +162,6 @@ let
       e = c.environment;
     in
     if e == null then null else (e.${name} or null);
-
-  notifyExt = fakeExt "notify" {
-    piEntrypoint = [ "/nix/store/fake-notify/index.ts" ];
-    piSkills = [ ];
-    piPrompts = [ ];
-    settings = { };
-    promptFragment = null;
-  };
-
-  notifyOff = evalPi { };
-
-  notifyOn = evalPi {
-    pi.coding-agent.notifications = {
-      enable = true;
-      package = notifyExt;
-      events = [
-        "settled"
-        "needs_input"
-      ];
-      longRunningToolSeconds = 45;
-    };
-  };
-
-  # The option default is the real first-party extension, so `enable = true`
-  # alone must be enough.
-  notifyDefaults = evalPi { pi.coding-agent.notifications.enable = true; };
 
   autoOff = evalPi { };
 
@@ -395,16 +368,6 @@ let
     };
   };
 
-  notifyUnpackaged = builtins.tryEval (
-    lib.deepSeq
-      (evalPi {
-        pi.coding-agent.notifications = {
-          enable = true;
-          package = null;
-        };
-      }).finalArgs
-      "unreachable"
-  );
 in
 # The fork ships the Bun build by default, with pi-patches.nix applied on top.
 # Upstream's option declares `default = coding-agent`; a mkDefault from
@@ -460,22 +423,12 @@ assert envValue slOn "AGENT_STATUSLINE_BIN" != null;
 assert envValue slOn "AGENT_STATUSLINE_CONFIG" != null;
 # The shared schema is mounted verbatim, so every option claude-nix has is here.
 assert slOn.statusline.padding == 2;
-# Disabled contributes nothing at all.
-assert notifyOff.notifications.configFile == null;
-assert envValue notifyOff "PI_NOTIFY_CONFIG" == null;
-assert !(notifyOff.settings ? piNotify);
-# Enabled wires the extension and the config env var.
-assert lib.elem "/nix/store/fake-notify/index.ts" (flagValues notifyOn.finalArgs "--extension");
-assert envValue notifyOn "PI_NOTIFY_CONFIG" != null;
-assert (envValue notifyOn "PI_NOTIFY_CONFIG").value == "${notifyOn.notifications.configFile}";
-# Config reaches the extension through the environment, never settings.json:
-# pi hands extensions no settings reader, so a piNotify block there would be
-# config nothing can read.
-assert !(notifyOn.settings ? piNotify);
-# The default package is this flake's own pi-notify, so enable alone works.
-assert
-  flagValues notifyDefaults.finalArgs "--extension"
-  == selfStub.packages.${system}.ext-pi-notify.passthru.piEntrypoint;
+# Desktop alerts are terminal-owned, not a second subprocess/D-Bus channel.
+assert !(bare ? notifications);
+assert envValue bare "PI_NOTIFY_CONFIG" == null;
+assert !(bare.settings ? piNotify);
+assert !(lib.any (lib.hasInfix "pi-notify") bare.extensions);
+assert !(lib.elem "notifications" defaultPermissions);
 # Disabled contributes no extension, no environment, and no config file.
 assert autoOff.autoMode.configFile == null;
 assert envValue autoOff "PI_AUTOMODE_SETTINGS_JSON" == null;
@@ -711,18 +664,15 @@ assert lib.any (lib.hasPrefix "set-env:SHELL=") defaultPermissions;
 # A count, not a list, because the point is that the toolchain does not shrink
 # by accident: --clearenv means a package dropped here is not a degraded PATH
 # but a "command not found" the model reports as a broken task. Bump it
-# deliberately when adding a tool, never to make this pass.
-assert lib.elem "add-pkg-deps:30" defaultPermissions;
+# deliberately when adding a tool, never to make this pass. The two removed
+# notifier-only entries were libnotify (notify-send) and glib.bin (gdbus).
+assert lib.elem "add-pkg-deps:28" defaultPermissions;
 # nix is opt-in, and it is three binds rather than one package: without the
 # store and the daemon socket the binary is present and useless.
 assert !(lib.elem "try-readonly:/nix/store" defaultPermissions);
 assert lib.elem "try-readonly:/nix/store" nixPermissions;
 assert lib.elem "try-readwrite:/nix/var/nix/daemon-socket/socket" nixPermissions;
-assert lib.elem "add-pkg-deps:31" nixPermissions;
-# Enabled without a package must fail loudly rather than silently doing
-# nothing, because "notifications are on" and "no notifier exists" is exactly
-# the state a user would not notice.
-assert notifyUnpackaged.success == false;
+assert lib.elem "add-pkg-deps:29" nixPermissions;
 # Disabled contributes no extension, no environment, and no permission.
 assert !(lib.any (lib.hasInfix "pi-voice") (flagValues voiceOff.finalArgs "--extension"));
 assert envValue voiceOff "PI_VOICE_RECORD_BIN" == null;
@@ -785,18 +735,6 @@ assert envValue autoWithPermissionSystem "PI_PERMISSION_DELEGATION_EXCLUDED_SURF
 assert envValue autoChainNarrowedNoLink "PI_PERMISSION_DELEGATION_EXCLUDED_SURFACES" == null;
 pkgs.runCommand "pi-nix-options-tests" { nativeBuildInputs = [ pkgs.jq ]; } ''
   set -euo pipefail
-
-  # The event list becomes the extension's three booleans, and the threshold
-  # crosses from seconds to milliseconds exactly once.
-  jq -e '
-    .enabled == true
-    and .events.agentSettled == true
-    and .events.permissionPrompt == true
-    and .events.longToolCall == false
-    and .longToolCallThresholdMs == 45000
-    and (.notifier | startswith("/nix/store/"))
-    and .appName == "pi"
-  ' ${notifyOn.notifications.configFile} > /dev/null
 
   jq -e --slurpfile expected ${pkgs.writeText "pi-automode-expected.json" (builtins.toJSON autoJson)} \
     '. == $expected[0]' ${autoOn.autoMode.configFile} > /dev/null

@@ -51,7 +51,6 @@ let
   # copies the tree and stops. They are named the same way as the pinned ones so
   # `extensionPackages` treats every extension alike.
   firstParty = {
-    ext-pi-notify = bunPkgs.callPackage ./pi-notify { inherit mkPiExtension; };
     ext-pi-fast = bunPkgs.callPackage ./pi-fast { inherit mkPiExtension; };
     ext-pi-minimap = bunPkgs.callPackage ./pi-minimap { inherit mkPiExtension; };
     ext-pi-voice = bunPkgs.callPackage ./pi-voice { inherit mkPiExtension; };
