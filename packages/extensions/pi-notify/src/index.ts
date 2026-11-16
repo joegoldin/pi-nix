@@ -12,6 +12,7 @@
 import { readFileSync } from "node:fs";
 import type { NotifyConfig } from "./config.ts";
 import { loadConfig } from "./config.ts";
+import { sendLinuxNotification } from "./send.ts";
 import {
 	createToolClock,
 	dismissCommand,
@@ -37,7 +38,7 @@ export interface NotifyHost {
 	exec(command: string, args: string[]): Promise<unknown>;
 }
 
-export function registerHandlers(pi: NotifyHost, config: NotifyConfig, now: () => number = Date.now): void {
+export function registerHandlers(pi: NotifyHost, config: NotifyConfig, now: () => number = Date.now, sendNative?: (command: string, args: string[]) => Promise<string | null>): void {
 	if (!config.enabled || config.notifier === "") return;
 
 	// Null distinguishes "the command failed" from "it ran and said nothing",
@@ -54,7 +55,7 @@ export function registerHandlers(pi: NotifyHost, config: NotifyConfig, now: () =
 	};
 
 	const send = async (note: Notification, dismissible = false): Promise<string | null> =>
-		run(config.notifier, notifierArgs(config, note, dismissible));
+		(config.style === "notify-send" && sendNative ? sendNative : run)(config.notifier, notifierArgs(config, note, dismissible));
 
 	if (config.events.agentSettled) {
 		pi.on("agent_settled", async () => {
@@ -90,7 +91,7 @@ export function registerHandlers(pi: NotifyHost, config: NotifyConfig, now: () =
 			const dismissible = config.dismissOnResolve && requestId !== null;
 			const pending = (async () => {
 				const stdout = await send(
-					{ title: config.appName, body: userInput ? "Needs your input" : `Needs your decision on ${tool}`, urgency: "critical" },
+					{ title: config.appName, body: userInput ? "Needs your input" : `Needs your decision on ${tool}`, urgency: "normal" },
 					dismissible,
 				);
 				return stdout === null ? null : notificationHandle(config, stdout);
@@ -157,5 +158,5 @@ export function registerHandlers(pi: NotifyHost, config: NotifyConfig, now: () =
 }
 
 export default function (pi: NotifyHost) {
-	registerHandlers(pi, loadConfig((path) => readFileSync(path, "utf8"), process.env));
+	registerHandlers(pi, loadConfig((path) => readFileSync(path, "utf8"), process.env), Date.now, sendLinuxNotification);
 }

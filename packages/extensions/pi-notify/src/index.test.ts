@@ -60,13 +60,13 @@ describe("registerHandlers", () => {
 		expect(args).toContain("pi");
 	});
 
-	it("raises a permission prompt at critical urgency", async () => {
+	it("raises an ordinary, expiring permission notification", async () => {
 		const h = host();
 		registerHandlers(h as never, config, () => 0);
 		h.emit(PERMISSIONS_UI_PROMPT_CHANNEL, { requestId: "r1", surface: "bash", value: "rm -rf /" });
 		await settle();
 		expect(h.exec).toHaveBeenCalledTimes(1);
-		expect(h.exec.mock.calls[0]![1]).toContain("critical");
+		expect(h.exec.mock.calls[0]![1]).toContain("normal");
 		expect((h.exec.mock.calls[0]![1] as string[]).join(" ")).toContain("bash");
 	});
 
@@ -208,7 +208,8 @@ describe("dismissing a permission notification once the ask is answered", () => 
 		await raise(h);
 		await resolve(h);
 		expect(h.exec).toHaveBeenCalledTimes(1);
-		expect(h.exec.mock.calls[0]![1]).not.toContain("--print-id");
+		// IDs are also needed to return before the native click listener exits.
+		expect(h.exec.mock.calls[0]![1]).toContain("--print-id");
 	});
 
 	it("degrades silently under osascript, which has no close API", async () => {
@@ -324,4 +325,17 @@ test("native permission dialogs do not duplicate the named notification, even wi
 		await settle();
 		expect(h.exec.mock.calls.at(-1)![1]).toContain("Needs your input");
 	}
+});
+
+it("returns from native send before resolution, then closes that ID through the configured client", async () => {
+	const h = host();
+	const native = mock(async () => "42\n");
+	registerHandlers(h as never, { ...config, dismisser: "/bin/gdbus" }, () => 0, native);
+	h.emit(PERMISSIONS_UI_PROMPT_CHANNEL, { requestId: "native", surface: "bash" });
+	await settle();
+	expect(native).toHaveBeenCalledTimes(1);
+	expect(h.exec).not.toHaveBeenCalled();
+	h.emit(PERMISSIONS_DECISION_CHANNEL, { requestId: "native" });
+	await settle();
+	expect(h.exec.mock.calls[0]).toEqual(["/bin/gdbus", expect.arrayContaining(["org.freedesktop.Notifications.CloseNotification", "42"])]);
 });

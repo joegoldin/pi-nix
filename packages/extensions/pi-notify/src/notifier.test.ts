@@ -100,6 +100,10 @@ describe("notifierArgs", () => {
 			"pi",
 			"--urgency",
 			"normal",
+			"--transient",
+			"--action",
+			"default=Dismiss",
+			"--print-id",
 			"pi",
 			"done",
 		]);
@@ -127,6 +131,12 @@ describe("notifierArgs", () => {
 		expect(notifierArgs({ ...base, style: "notify-send" }, { ...note, urgency: "critical" })).toContain("critical");
 	});
 
+	it("makes Linux notifications dismissible by the desktop without retaining them in history", () => {
+		const args = notifierArgs({ ...base, style: "notify-send" }, note);
+		expect(args).toContain("--transient");
+		expect(args).toContain("default=Dismiss");
+	});
+
 	it("never lets a title or body become another flag, because both are argv-separated", () => {
 		const args = notifierArgs({ ...base, style: "notify-send" }, { ...note, body: "--urgency critical" });
 		expect(args[args.length - 1]).toBe("--urgency critical");
@@ -143,6 +153,9 @@ describe("notifierArgs for a dismissible notification", () => {
 			"pi",
 			"--urgency",
 			"normal",
+			"--transient",
+			"--action",
+			"default=Dismiss",
 			"--print-id",
 			"pi",
 			"done",

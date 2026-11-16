@@ -1,3 +1,5 @@
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import { BtwTranscript, type TranscriptOptions, type PartialToolResult } from "./btw-transcript.ts";
 import { getMarkdownTheme } from "@earendil-works/pi-coding-agent";
 import {
 	Input,
@@ -20,6 +22,11 @@ export interface Thread {
 	id: string;
 	sessionId: string;
 	turns: Turn[];
+	messages?: AgentMessage[];
+	streaming?: boolean;
+	partialResults?: Map<string, PartialToolResult>;
+	transcript?: BtwTranscript;
+	error?: string;
 	busy?: AbortController;
 	draft?: string;
 }
@@ -53,6 +60,9 @@ ${content}
 
 export class BtwView {
 	private input = new Input();
+	private transcript: BtwTranscript;
+	private historyHeight = 0;
+	private historyPadding = 0;
 	get focused(): boolean { return this.input.focused; }
 	set focused(value: boolean) { this.input.focused = value; }
 	private get busy(): AbortController | undefined {
@@ -85,7 +95,9 @@ export class BtwView {
 			mode(): void;
 			stop(): void;
 		},
+		transcriptOptions: TranscriptOptions = {},
 	) {
+		this.transcript = thread.transcript ??= new BtwTranscript(transcriptOptions, rerender);
 		this.input.focused = true;
 		this.input.setValue(thread.draft ?? "");
 	}
@@ -105,6 +117,7 @@ export class BtwView {
 	}
 
 	handleInput(data: string): void {
+		if (this.transcript.handleInput(data)) return;
 		for (const [key, action] of [
 			["alt+f", "fork"],
 			["alt+n", "fresh"],
@@ -173,6 +186,11 @@ export class BtwView {
 	}
 
 	handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+		if (this.thread.messages && event.y >= this.historyPadding && event.y < this.historyPadding + this.historyHeight) {
+			const result = this.transcript.handleMouse({ ...event, y: event.y - this.historyPadding + this.top });
+			if (result?.handled) return { ...result, focus: event.button === "left" || result.focus, render: true };
+		}
+		if (event.type === "move" || event.type === "wheel") this.transcript.clearHover();
 		if ((event.type === "press" || event.type === "click") && event.button === "left")
 			return { handled: true, focus: true, render: true };
 		if (event.type !== "wheel") return;
@@ -183,7 +201,11 @@ export class BtwView {
 	render(width: number): string[] {
 		const { theme } = this;
 		const transcript: string[] = [];
-		for (const turn of this.thread.turns) {
+		if (this.thread.messages) {
+			this.transcript.update(this.thread.messages, this.thread.streaming, this.thread.partialResults);
+			transcript.push(...this.transcript.render(width));
+		}
+		for (const turn of this.thread.messages ? [] : this.thread.turns) {
 			transcript.push(
 				...wrapTextWithAnsi(turn.question, Math.max(1, width - 2)).map(
 					(line, i) => (i ? "  " : theme.fg("accent", "❯ ")) + theme.bold(line),
@@ -203,6 +225,7 @@ export class BtwView {
 					"",
 				);
 		}
+		if (this.thread.error) transcript.push(...wrapTextWithAnsi(`Error: ${this.thread.error}`, Math.max(1, width)).map(line => theme.fg("error", line)));
 		const height = Math.max(1, Math.floor(this.height()));
 		// Keep the composer separate and readable; only history scrolls.
 		const input = this.input.render(width)[0] ?? "";
@@ -223,6 +246,8 @@ export class BtwView {
 		];
 		const padding = height >= 4 ? 1 : 0;
 		const historyHeight = Math.max(0, height - footer.length - padding);
+		this.historyHeight = historyHeight;
+		this.historyPadding = padding;
 		this.pageSize = Math.max(1, historyHeight);
 		this.maxTop = Math.max(0, transcript.length - historyHeight);
 		this.top = this.followTail ? this.maxTop : Math.min(this.top, this.maxTop);
@@ -241,5 +266,5 @@ export class BtwView {
 		);
 	}
 
-	invalidate(): void {}
+	invalidate(): void { this.transcript.invalidate(); this.input.invalidate(); }
 }

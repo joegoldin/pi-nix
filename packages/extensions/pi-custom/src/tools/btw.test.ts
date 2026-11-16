@@ -22,6 +22,7 @@ it("brings an answer back as discussion, not as done work", () => {
 });
 
 const { BtwView } = await import("./btw.ts");
+const { stripTerminalSequences } = await import("@earendil-works/pi-tui");
 const { initTheme } = await import(
 	new URL(
 		"./modes/interactive/theme/theme.js",
@@ -624,4 +625,93 @@ it("rejects /btw while a panel is open without changing it or creating another t
 	expect(h.component()).not.toBe(panel);
 	h.component().handleInput("\x1b");
 	await reopened;
+});
+
+it("renders native thinking and tool cards with persistent mouse and keyboard toggles", () => {
+	const thread = { id: "native", sessionId: "s", turns: [], messages: [
+		{ role: "user", content: "Native question", timestamp: 1 },
+		{ role: "assistant", content: [
+			{ type: "thinking", thinking: "PRIVATE_DETAIL" },
+			{ type: "text", text: "Native answer" },
+			{ type: "toolCall", id: "call", name: "lookup", arguments: { query: "x" } },
+		], stopReason: "toolUse", timestamp: 2 },
+		{ role: "toolResult", toolCallId: "call", toolName: "lookup", content: [{ type: "text", text: Array.from({length: 20}, (_, i) => `output ${i}`).join("\n") }], isError: false, timestamp: 3 },
+	] };
+	const view = new BtwView(thread as never, plainTheme, async () => {}, () => {}, () => {}, () => {}, () => 100);
+	const shown = () => view.render(100).join("\n");
+	expect(shown()).toContain("Native answer");
+	expect(shown()).toContain("PRIVATE_DETAIL");
+	view.handleInput("\x14");
+	expect(shown()).not.toContain("PRIVATE_DETAIL");
+	const thinkingRow = view.render(100).findIndex(line => line.includes("Thinking"));
+	expect(thinkingRow).toBeGreaterThanOrEqual(0);
+	view.handleMouse({ type: "click", button: "left", x: 3, y: thinkingRow, width: 100 } as never);
+	expect(shown()).toContain("PRIVATE_DETAIL");
+	view.invalidate();
+	expect(shown()).toContain("PRIVATE_DETAIL");
+	view.handleInput("\x0f");
+	expect(shown()).toContain("output 19");
+	view.invalidate();
+	expect(shown()).toContain("output 19");
+	view.handleInput("\x0f");
+	expect(shown()).not.toContain("output 19");
+});
+
+it("keeps native card clicks across streamed updates, panel reopen and resize", () => {
+	const thread = { id: "click", sessionId: "s", turns: [], messages: [
+		{ role: "assistant", content: [{ type: "toolCall", id: "c", name: "lookup", arguments: { query: "x" } }], stopReason: "toolUse", timestamp: 1 },
+		{ role: "toolResult", toolCallId: "c", toolName: "lookup", isError: false, content: [{ type: "text", text: Array.from({ length: 25 }, (_, i) => `result ${i}`).join("\n") }], timestamp: 2 },
+	] };
+	const create = () => new BtwView(thread as never, plainTheme, async () => {}, () => {}, () => {}, () => {}, () => 100);
+	let view = create();
+	expect(view.render(100).join("\n")).not.toContain("result 24");
+	const y = view.render(100).findIndex(line => line.toLowerCase().includes("lookup"));
+	expect(y).toBeGreaterThanOrEqual(0);
+	view.handleMouse({ type: "click", button: "left", x: 3, y, width: 100 } as never);
+	expect(view.render(100).join("\n")).toContain("result 24");
+	thread.messages = JSON.parse(JSON.stringify(thread.messages));
+	view.invalidate();
+	expect(view.render(70).join("\n")).toContain("result 24");
+	view = create();
+	expect(view.render(100).join("\n")).toContain("result 24");
+	view.handleInput("\x0f");
+	view.handleInput("\x0f");
+	expect(view.render(100).join("\n")).not.toContain("result 24");
+});
+
+it("uses normal run grouping and updates native cards from pending to finished", () => {
+	const thread = { id: "group", sessionId: "s", turns: [], streaming: true, partialResults: new Map([
+		["read", { content: [{ type: "text", text: "STREAMING_FILE_CONTENT" }], isError: false }],
+	]), messages: [
+		{ role: "user", content: "Inspect this", timestamp: 1 },
+		{ role: "assistant", content: [{ type: "thinking", thinking: "Inspect file first" }, { type: "toolCall", id: "read", name: "read", arguments: { path: "file.txt" } }], stopReason: "toolUse", timestamp: 2 },
+	] };
+	const view = new BtwView(thread as never, plainTheme, async () => {}, () => {}, () => {}, () => {}, () => 80);
+	let text = view.render(100).join("\n");
+	expect(text).toContain("Reading");
+	expect(text).not.toContain("Tool read: returned");
+	thread.streaming = false;
+	view.render(100);
+	view.handleInput("\x0f");
+	text = view.render(100).join("\n");
+	expect(text).toContain("Inspect file first");
+	expect(stripTerminalSequences(text)).toContain("Read(file.txt)");
+	thread.messages = [...thread.messages, { role: "toolResult", toolCallId: "read", toolName: "read", isError: false, content: [{ type: "text", text: "FINISHED_FILE_CONTENT" }], timestamp: 3 } as never];
+	thread.partialResults.clear();
+	expect(view.render(100).join("\n")).toContain("FINISHED_FILE_CONTENT");
+});
+
+it("honours remapped normal-chat toggles instead of hard-coding Ctrl+T", async () => {
+	const { KeybindingsManager } = await import(new URL("./core/keybindings.js", import.meta.resolve("@earendil-works/pi-coding-agent")).href);
+	const thread = { id: "keys", sessionId: "s", turns: [], messages: [
+		{ role: "assistant", content: [{ type: "thinking", thinking: "REMAPPED_THINKING" }], stopReason: "stop", timestamp: 1 },
+	] };
+	const view = new BtwView(thread as never, plainTheme, async () => {}, () => {}, () => {}, () => {}, () => 40, undefined, {
+		keys: new KeybindingsManager({ "app.thinking.toggle": "ctrl+y" }),
+	});
+	expect(view.render(80).join("\n")).toContain("REMAPPED_THINKING");
+	view.handleInput("\x14");
+	expect(view.render(80).join("\n")).toContain("REMAPPED_THINKING");
+	view.handleInput("\x19");
+	expect(view.render(80).join("\n")).not.toContain("REMAPPED_THINKING");
 });

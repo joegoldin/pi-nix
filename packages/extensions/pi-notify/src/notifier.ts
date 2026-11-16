@@ -34,9 +34,12 @@ export function notifierArgs(config: NotifyConfig, note: Notification, dismissib
 				config.appName,
 				"--urgency",
 				note.urgency,
-				// The printed id is the only handle CloseNotification accepts, so it
-				// has to be asked for at send time or the chance is gone.
-				...(dismissible ? ["--print-id"] : []),
+				// A non-resident default action lets the desktop dismiss on click.
+				// Transient notices do not leave stale prompts in notification history.
+				"--transient",
+				"--action",
+				"default=Dismiss",
+				"--print-id",
 				note.title,
 				note.body,
 			];

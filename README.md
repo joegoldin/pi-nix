@@ -161,6 +161,14 @@ This fork adds:
 | `voice.configFile` | `null \| str` | `null` | audiomemo's config file, bound read-only into the jail. Without it `record` tries to onboard and dies on `/dev/tty`. |
 | `voice.jailPermissions` | function | read-only | The jail entries voice needs, for a consumer who replaces `jail.permissions` outright. |
 
+### Desktop notifications
+
+Linux desktop notices use `notify-send` and the desktop notification service,
+with normal urgency for input prompts, a native dismiss-on-click action and
+transient lifetime. Answering a tracked prompt also closes its notice. The click
+listener does not block the session while waiting for dismissal. macOS keeps its
+existing notifier behavior.
+
 ### Fast mode
 
 The first-party `pi-fast` plugin provides `/fast`, `/fast on`, `/fast off`,
@@ -507,3 +515,9 @@ terminal action; see the [Intercom documentation](packages/extensions/pi-custom/
 `/btw` remains a separate, local side-conversation feature, not a peer launcher.
 Use `/btw` or `/btw list` to reopen one. Edit-mode side conversations still load
 the owner's permission extension and fail closed if that requirement is missing.
+
+Side conversations use the same native user/assistant messages, markdown touches,
+tool cards and folded runs as the main chat. The normal tool-output and thinking
+toggles (Ctrl+O and Ctrl+T by default, including remapped keys) act on the focused
+side panel. Clicking cards, run headers or thinking blocks toggles them in place;
+those choices survive redraws, streaming updates and reopening the panel.

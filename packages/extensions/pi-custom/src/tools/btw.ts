@@ -60,11 +60,7 @@ interface LiveThread extends Thread {
 type SideMessage = ReturnType<
 	SessionManager["buildSessionContext"]
 >["messages"][number];
-export function sideTurns(
-	manager: SessionManager,
-	baseline: string | null,
-	partial?: SideMessage,
-): Turn[] {
+export function sideMessages(manager: SessionManager, baseline: string | null, partial?: SideMessage): SideMessage[] {
 	const branch = manager.getBranch();
 	const start = baseline
 		? branch.findIndex((entry) => entry.id === baseline) + 1
@@ -73,6 +69,15 @@ export function sideTurns(
 		.slice(start)
 		.flatMap((entry) => (entry.type === "message" ? [entry.message] : []));
 	if (partial) messages.push(partial);
+	return messages;
+}
+
+export function sideTurns(
+	manager: SessionManager,
+	baseline: string | null,
+	partial?: SideMessage,
+): Turn[] {
+	const messages = sideMessages(manager, baseline, partial);
 	const turns: Turn[] = [];
 	for (const message of messages) {
 		if (
@@ -142,6 +147,7 @@ export function registerBtw(
 		sessionId: saved.sessionId,
 		draft: saved.draft,
 		turns: sideTurns(manager, saved.baseline),
+		messages: sideMessages(manager, saved.baseline),
 		saved,
 		manager,
 	});
@@ -270,12 +276,17 @@ export function registerBtw(
 		}
 		thread.runtime = created;
 		thread.unsubscribe = thread.runtime.subscribe((event) => {
+			if (event.type === "tool_execution_update")
+				(thread.partialResults ??= new Map()).set(event.toolCallId, { ...event.partialResult, isError: false });
+			else if (event.type === "tool_execution_end") thread.partialResults?.delete(event.toolCallId);
 			const refresh = () => {
 				thread.turns = sideTurns(
 					thread.manager,
 					thread.saved.baseline,
 					event.type === "message_update" ? event.message : undefined,
 				);
+				thread.messages = sideMessages(thread.manager, thread.saved.baseline, event.type === "message_update" ? event.message : undefined);
+				thread.streaming = thread.runtime?.isStreaming;
 				thread.render?.();
 			};
 			// Public message_end listeners run before native session persistence.
@@ -295,6 +306,7 @@ export function registerBtw(
 				? question.slice(0, 70)
 				: thread.saved.name;
 		reportThread(ctx, thread, { state: "working", message: "Side conversation running" });
+		thread.error = undefined;
 		let session: AgentSession | undefined;
 		const abort = () => {
 			void session?.abort();
@@ -304,12 +316,16 @@ export function registerBtw(
 			session = await runtime(ctx, thread);
 			if (!signal.aborted) await session.prompt(question);
 			thread.turns = sideTurns(thread.manager, thread.saved.baseline);
+			thread.messages = sideMessages(thread.manager, thread.saved.baseline);
 		} catch (error) {
 			thread.turns = sideTurns(thread.manager, thread.saved.baseline);
+			thread.messages = sideMessages(thread.manager, thread.saved.baseline);
 			if (thread.turns.at(-1)?.question !== question)
 				thread.turns.push({ question });
-			thread.turns.at(-1)!.error = (error as Error).message;
+			thread.turns.at(-1)!.error = thread.error = (error as Error).message;
 		} finally {
+			thread.streaming = false;
+			thread.partialResults?.clear();
 			reportThread(ctx, thread, { state: signal.aborted ? "idle" : thread.turns.at(-1)?.error ? "error" : "done", message: signal.aborted ? "Side conversation cancelled" : thread.turns.at(-1)?.error ? "Side conversation failed" : "Side conversation finished" });
 			signal.removeEventListener("abort", abort);
 			try {
@@ -404,6 +420,7 @@ export function registerBtw(
 							},
 							stop: () => current.busy?.abort(),
 						},
+						{ tui, cwd: ctx.cwd, keys: typeof _keys.matches === "function" ? _keys : undefined, settings: pi.getSettings?.() },
 					);
 					if (question) {
 						view.start(question);
@@ -423,7 +440,7 @@ export function registerBtw(
 							view.handleInput(data);
 							tui.requestRender();
 						},
-						handleMouse: (event) => view.handleMouse(event),
+						handleMouse: (event) => view.handleMouse({ ...event, x: event.x - 2, y: event.y - 1, width: event.width - 4, height: event.height - 2 }),
 					};
 				},
 				{
