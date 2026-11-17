@@ -134,7 +134,7 @@ if (process.argv[3]) {
   const paintTheme = { fg: (_slot, text) => `\x1b[36m${text}\x1b[39m` };
   const snapshot = parseSnapshot(readFileSync(join(root, "extension/testdata/snapshot-full.json"), "utf8"));
   snapshot.config = { ...snapshot.config, row1: ["model"], row2: [], row3: [], row4: [], activityRows: 0, padding: 0 };
-  snapshot.widgets = { model: { visible: true, spans: [{ kind: "text", text: "GPT-6.1 Sol medium" }] } };
+  snapshot.widgets = { model: { visible: true, spans: [{ kind: "text", text: "GPT-6.2 Sol medium" }] } };
   try {
     for (const lensFirst of [true, false]) {
       let footer;

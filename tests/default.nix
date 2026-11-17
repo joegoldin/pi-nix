@@ -24,6 +24,7 @@ in
   extension-dialogs = import ./extension-dialogs-test.nix args;
   install-lock-sync = import ./install-lock-sync-test.nix args;
   fast-mode = import ./fast-mode-test.nix args;
+  openai-models = import ./openai-models-test.nix args;
   user-message-timestamps = import ./user-message-timestamps-test.nix args;
   pi-lens-grammars = import ./pi-lens-grammars-test.nix args;
   update-app = import ./update-app-test.nix args;

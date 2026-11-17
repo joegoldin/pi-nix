@@ -1,0 +1,111 @@
+--- a/packages/ai/catalog/families/openai.ts
++++ b/packages/ai/catalog/families/openai.ts
+@@ -26,6 +26,8 @@
+ // catalogs catch up.
+ // https://developers.openai.com/api/docs/pricing
+ export const OPENAI_STANDARD_COSTS: Record<string, ModelCost> = {
++	"gpt-6.2-astra": { input: 8, output: 40, cacheRead: 0.4, cacheWrite: 10 },
++	"gpt-6.2-sol": { input: 2, output: 10, cacheRead: 0.1, cacheWrite: 2.5 },
+ 	"gpt-5.6-luna": { input: 0.2, output: 1.2, cacheRead: 0.02, cacheWrite: 0.25 },
+ 	"gpt-5.6-sol": { input: 4, output: 20, cacheRead: 0.4, cacheWrite: 5 },
+ 	"gpt-5.6-terra": { input: 2, output: 12, cacheRead: 0.2, cacheWrite: 2.5 },
+@@ -54,6 +56,8 @@
+ 	"gpt-6-luna",
+ 	"gpt-6.1-sol",
+ 	"gpt-6.1-terra",
++	"gpt-6.2-astra",
++	"gpt-6.2-sol",
+ ]);
+ /** Models that accept mid-conversation developer messages. */
+ export const OPENAI_MID_CONVO_MODEL_IDS = new Set([
+@@ -81,7 +85,7 @@
+ 	);
+ }
+ 
+-const GPT_6_MODEL_IDS = new Set(["gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-6.1-sol", "gpt-6.1-terra"]);
++const GPT_6_MODEL_IDS = new Set(["gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6.2-astra", "gpt-6.2-sol"]);
+ 
+ /** Thinking levels of GPT models on any host. */
+ export function applyOpenAiFamilyRules(model: ChatModel): void {
+@@ -92,7 +96,7 @@
+ 		mergeThinking(model, {
+ 			// GPT-6 Astra and GPT-6.1 Sol reject reasoning.effort "none"; GPT-6.1 Terra accepts it. All reject
+ 			// "minimal" (verified on Codex, October 2026).
+-			off: model.id === "gpt-6-astra" || model.id === "gpt-6.1-sol" ? null : "none",
++			off: model.id === "gpt-6-astra" || model.id === "gpt-6.1-sol" || model.id.startsWith("gpt-6.2-") ? null : "none",
+ 			minimal: null,
+ 			low: "low",
+ 			medium: "medium",
+--- a/packages/ai/catalog/providers/openai.ts
++++ b/packages/ai/catalog/providers/openai.ts
+@@ -35,6 +35,8 @@
+ 	"gpt-6-luna",
+ 	"gpt-6.1-sol",
+ 	"gpt-6.1-terra",
++	"gpt-6.2-astra",
++	"gpt-6.2-sol",
+ ]);
+ const LONG_CONTEXT_PRICING_MODEL_IDS = new Set([...SHORT_CONTEXT_CAPPED_MODEL_IDS, "gpt-5.4-pro", "gpt-5.5-pro"]);
+ 
+@@ -54,7 +56,7 @@
+ ]);
+ // OpenAI documents configuration_update for the GPT-6 family.
+ // https://developers.openai.com/api/docs/guides/reasoning
+-const MID_CONVO_EFFORT_MODEL_IDS = new Set(["gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-6.1-sol", "gpt-6.1-terra"]);
++const MID_CONVO_EFFORT_MODEL_IDS = new Set(["gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6.2-astra", "gpt-6.2-sol"]);
+ 
+ // Not listed by models.dev.
+ const GPT_5_CHAT_LATEST: Model<"openai-responses"> = {
+@@ -69,6 +71,22 @@
+ 	contextWindow: 128000,
+ 	maxTokens: 16384,
+ };
++
++// Keep the launch models available before models.dev catches up.
++// https://developers.openai.com/api/docs/models/gpt-6.2-astra
++// https://developers.openai.com/api/docs/models/gpt-6.2-sol
++const GPT_6_2_MODELS: Model<"openai-responses">[] = ["astra", "sol"].map((family) => ({
++	id: `gpt-6.2-${family}`,
++	name: `GPT-6.2 ${family === "astra" ? "Astra" : "Sol"}`,
++	api: "openai-responses",
++	provider: "openai",
++	baseUrl: BASE_URL,
++	reasoning: true,
++	input: ["text", "image"],
++	cost: withOpenAiLongContextPricing(OPENAI_STANDARD_COSTS[`gpt-6.2-${family}`]),
++	contextWindow: OPENAI_LONG_CONTEXT_INPUT_THRESHOLD,
++	maxTokens: 128000,
++}));
+ 
+ // OpenAI Decisions API (public beta): gpt-6-luna is its only model. It bills input tokens only,
+ // with the same long-context multiplier as chat requests. Only API keys work: Sign in with ChatGPT
+@@ -117,7 +135,7 @@
+ 				include: (source) => !UNSUPPORTED_MODEL_IDS.has(source.id),
+ 				map: correctUpstream,
+ 			}),
+-			[GPT_5_CHAT_LATEST],
++			[GPT_5_CHAT_LATEST, ...GPT_6_2_MODELS],
+ 		),
+ 	classifiers: () => CLASSIFIER_MODELS,
+ 	finalize: (model) => {
+--- a/packages/ai/catalog/providers/openai-codex.ts
++++ b/packages/ai/catalog/providers/openai-codex.ts
+@@ -13,6 +13,9 @@
+ // accounts: GPT-5.5 and GPT-5.3 Codex Spark are rejected with "not supported
+ // when using Codex with a ChatGPT account".
+ const MODELS = [
++	// Retain the existing per-family limits until Codex advertises new defaults.
++	{ id: "gpt-6.2-astra", name: "GPT-6.2 Astra", contextWindow: 272000 },
++	{ id: "gpt-6.2-sol", name: "GPT-6.2 Sol", contextWindow: 500000 },
+ 	// GPT-6.1 uses the 500k default returned by /backend-api/codex/models.
+ 	{ id: "gpt-6.1-sol", name: "GPT-6.1 Sol", contextWindow: 500000 },
+ 	{ id: "gpt-6.1-terra", name: "GPT-6.1 Terra", contextWindow: 500000 },
+@@ -35,6 +38,8 @@
+ 	"gpt-6-luna",
+ 	"gpt-6.1-sol",
+ 	"gpt-6.1-terra",
++	"gpt-6.2-astra",
++	"gpt-6.2-sol",
+ ]);
+ 
+ export default defineProvider({

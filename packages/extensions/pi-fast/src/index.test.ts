@@ -68,7 +68,7 @@ describe("pi-fast", () => {
 	});
 
 	it("supports only the configured OpenAI model and API pairs", async () => {
-		const models = ["gpt-5.4", "gpt-5.5", "gpt-5.6", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-6-astra"];
+		const models = ["gpt-5.4", "gpt-5.5", "gpt-5.6", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-6-astra", "gpt-6.2-astra", "gpt-6.2-sol"];
 		for (const [provider, api] of [["openai", "openai-responses"], ["openai-codex", "openai-codex-responses"]]) {
 			for (const id of models) {
 				const f = fixture();
