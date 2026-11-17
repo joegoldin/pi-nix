@@ -375,7 +375,7 @@ export function registerBtw(
 			let renderCurrent: (() => void) | undefined;
 			let removeInputListener: (() => void) | undefined;
 			let screenRows = () => 0;
-			const availableHeight = () => Math.max(0, screenRows() - ctx.ui.getInputDockHeight());
+			const availableHeight = () => Math.max(0, Math.floor((screenRows() - ctx.ui.getInputDockHeight()) / 2));
 			const action = await ctx.ui.custom<
 				"close" | "fork" | "fresh" | "switch" | "mode"
 			>(
@@ -446,8 +446,8 @@ export function registerBtw(
 				{
 					overlay: true,
 					overlayOptions: {
-						width: "50%",
-						anchor: "top-right",
+						width: "100%",
+						anchor: "top-left",
 						nonCapturing: true,
 						unfocusOnOutsideClick: true,
 						get maxHeight() { return availableHeight(); },

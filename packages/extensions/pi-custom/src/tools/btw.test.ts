@@ -492,22 +492,22 @@ it("reports closed-panel side work and namespaces child status without leaking p
 	await h.shutdown();
 });
 
-it("docks btw in the right half above a resizing main input dock", async () => {
+it("docks btw across the top half above a resizing main input dock", async () => {
 	const { registerBtw } = await import("./btw.ts");
 	const h = commandHarness();
 	registerBtw(h.api as never, h.createRuntime as never);
 	const opened = h.command().handler("new", h.ctx);
 	await flush();
 	const options = h.options().overlayOptions;
-	expect(options.width).toBe("50%");
-	expect(options.anchor).toBe("top-right");
+	expect(options.width).toBe("100%");
+	expect(options.anchor).toBe("top-left");
 	expect(options.nonCapturing).toBe(true);
-	for (const [rows, dock] of [[40, 8], [24, 12], [18, 4]]) {
+	for (const [rows, dock] of [[40, 8], [25, 12], [18, 4]]) {
 		h.tui.terminal.rows = rows;
 		h.dockHeight(dock);
 		expect(options.margin.bottom).toBe(dock);
-		expect(options.maxHeight).toBe(rows - dock);
-		expect(h.component().render(60).length).toBeLessThanOrEqual(rows - dock);
+		expect(options.maxHeight).toBe(Math.floor((rows - dock) / 2));
+		expect(h.component().render(60).length).toBeLessThanOrEqual(Math.floor((rows - dock) / 2));
 	}
 	h.dockHeight(17);
 	expect(options.visible(120, 18)).toBe(false);
@@ -563,20 +563,21 @@ it("routes native mouse clicks and typing between the live main editor and real 
 	registerBtw(h.api as never, h.createRuntime as never);
 	const opened = h.command().handler("new", h.ctx);
 	await flush();
-	const paint = () => tui.compositeOverlays(Array(40).fill("LEFT CONVERSATION"), 120, 40);
+	const paint = () => tui.compositeOverlays(Array(40).fill("MAIN CONVERSATION"), 120, 40);
 	let screen = paint();
-	expect(screen[0].slice(0, 17)).toBe("LEFT CONVERSATION");
-	expect(screen.slice(37)).toEqual(Array(3).fill("LEFT CONVERSATION"));
+	expect(screen.slice(0, 18).join("\n")).toContain("btw");
+	expect(screen[0]).not.toContain("MAIN CONVERSATION");
+	expect(screen.slice(18)).toEqual(Array(22).fill("MAIN CONVERSATION"));
 	const click = (x: number, y: number) => {
 		tui.handleTerminalInput(`\x1b[<0;${x + 1};${y + 1}M`);
 		tui.handleTerminalInput(`\x1b[<0;${x + 1};${y + 1}m`);
 	};
 	tui.handleTerminalInput("side draft");
 	paint();
-	click(5, 5);
+	click(5, 25);
 	expect(tui.getFocusedComponent()).toBe(main);
 	tui.handleTerminalInput(" plus main");
-	for (const y of [1, 34]) {
+	for (const y of [1, 14]) {
 		click(90, y);
 		expect(tui.getFocusedComponent()).not.toBe(main);
 		tui.handleTerminalInput(" side");

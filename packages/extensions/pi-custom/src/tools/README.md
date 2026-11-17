@@ -192,7 +192,7 @@ Use `/btw` or `/btw list` to select and continue a side conversation. Inside it:
   These actions cancel a pending side turn, preserve the main draft, and never
   submit it. Ctrl+Shift+r requires distinct terminal reporting, such as Kitty keys.
 
-The panel occupies only the right half of the terminal, above the live main
+The panel spans the full width of the top half of the space above the live main
 input dock. Click either conversation or its input to focus it; Alt+b also
 switches between main and side input without closing the panel. Both drafts
 remain independent. Escape/Ctrl+c closes the panel instead. A second `/btw`
