@@ -1,17 +1,17 @@
 {
   "pi-web-access": {
-    "version": "0.47.0",
-    "url": "https://registry.npmjs.org/pi-web-access/-/pi-web-access-0.47.0.tgz",
-    "hash": "sha512-Z176wTJjHw9Y+NpZ3WxOmKnh/7Sy3mu4QR05nBS/v6GRd5Cp7g5GnLIzI9LOT1IdR1105qXFS+L3LBUfkOMy8g==",
+    "version": "0.48.0",
+    "url": "https://registry.npmjs.org/pi-web-access/-/pi-web-access-0.48.0.tgz",
+    "hash": "sha512-9+B5e2kLtN0qYs2LZ6D8yOI9TbjQTnf4AKON/Qy2nseE//fH71u60Icul6Ua7Pp7R5Ro1oPJpiDqdUut730UOg==",
     "bundled": false,
     "entrypoints": [],
     "skills": [],
     "prompts": []
   },
   "pi-lens": {
-    "version": "4.4.12",
-    "url": "https://registry.npmjs.org/pi-lens/-/pi-lens-4.4.12.tgz",
-    "hash": "sha512-6bVSQDGT+p5peOnyJRGUhgiOuu6mHtE0klkX8+4hms2ZCW7CtmnPbCEs0TNKWq1k8+lF/Kem+/xmxY0mJQ3TIQ==",
+    "version": "4.5.1",
+    "url": "https://registry.npmjs.org/pi-lens/-/pi-lens-4.5.1.tgz",
+    "hash": "sha512-zuHH/3ce37UTlJGCJzjawrsjOXC8Z9w4BJ/UahtlqE4Q6OB6k6djMwdfCcVrwfJuOcwXLROTVPjyQY9NXpfPcw==",
     "bundled": false,
     "entrypoints": [],
     "skills": [
@@ -29,9 +29,9 @@
     "prompts": []
   },
   "@aliou/pi-synthetic": {
-    "version": "0.31.1",
-    "url": "https://registry.npmjs.org/@aliou/pi-synthetic/-/pi-synthetic-0.31.1.tgz",
-    "hash": "sha512-eNYGKHQ3p+hq6NfwgnQ1sjAkF3Jb2+evupEMZl2ALvZ7FcD+XML9yfWRTc9AiSEY65Y8un9sieqxJAUr+apKdg==",
+    "version": "0.32.1",
+    "url": "https://registry.npmjs.org/@aliou/pi-synthetic/-/pi-synthetic-0.32.1.tgz",
+    "hash": "sha512-JUWBncWeL70zhg5FclZB5cf/gHsDFO83YfcwjdOguktt+BNuqyEWaw1o9rmqF00kSvd2SAY6F2Q/fGUkKtVtIQ==",
     "bundled": false,
     "entrypoints": [],
     "skills": [],

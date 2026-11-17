@@ -21,4 +21,8 @@
     url = "https://registry.npmjs.org/@aliou/pi-utils-ui/-/pi-utils-ui-0.5.1.tgz";
     hash = "sha512-a+m9yo+No2mXBGitWk/sPep+FXam+w3oavpj80WgJRQsnyBzzjlzZFcBikhnweRifL8UASqbWWrHN4NjESIrRw==";
   };
+  "@aliou/pi-utils-ui@0.6.0" = fetchurl {
+    url = "https://registry.npmjs.org/@aliou/pi-utils-ui/-/pi-utils-ui-0.6.0.tgz";
+    hash = "sha512-vIntLJiiz3at40VMJqA4JOcRZMEQt6TWf2UdFI5RnHXo0QTwkDSyV95+OeJUAMKqpCxu7mQQKJOTFS8v062vKQ==";
+  };
 }

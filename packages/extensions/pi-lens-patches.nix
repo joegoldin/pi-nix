@@ -27,8 +27,8 @@ in
   # no detail rows, so clicking it never removes the way to collapse it.
   quietEmptyWidget = ''
     substituteInPlace dist/index.js --replace-fail \
-      ${lib.escapeShellArg "  lines.push(fitLine(header, w));\n  if (totalSuppressed > 0) {"} \
-      ${lib.escapeShellArg "  if (!langStr && !lspChip && !summary && totalSuppressed === 0 && recencySorted.length === 0)\n    return [fitCompactHeader(w, cyan(\"◇ lens\"), \"\", lspChip, summary)];\n  lines.push(fitLine(header, w));\n  if (totalSuppressed > 0) {"}
+      ${lib.escapeShellArg "  lines.push(fitLine(header, w));\n  if (summaryFacts.totalSuppressed > 0) {"} \
+      ${lib.escapeShellArg "  if (!langStr && !lspChip && !summary && summaryFacts.totalSuppressed === 0 && recencySorted.length === 0)\n    return [fitCompactHeader(w, cyan(\"◇ lens\"), \"\", lspChip, summary)];\n  lines.push(fitLine(header, w));\n  if (summaryFacts.totalSuppressed > 0) {"}
   '';
 
   # The dashboard consumes the compact chip when available; the native widget
