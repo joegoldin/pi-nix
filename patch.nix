@@ -9,5 +9,6 @@ pkgs.writeShellApplication {
     ''
       patch --batch --forward -p1 < ${./coding-agent/installer-chord.patch}
       patch --batch --forward -p1 < ${./coding-agent/gpt-6.2-catalog.patch}
+      patch --batch --forward -p1 < ${./coding-agent/retire-openai-codex.patch}
     '';
 }

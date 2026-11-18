@@ -13,6 +13,16 @@ const manifest = JSON.parse(readFileSync(join(agent, "package.json")));
 assert(existsSync(join(agent, manifest.bin.pi)), "Missing package CLI entry");
 execFileSync("npm", ["--version"], { stdio: "pipe" });
 
+const { builtinProviders, getAllBuiltinModels, getBuiltinModel, getBuiltinProviders } = await import(
+  pathToFileURL(join(modules, "@earendil-works/pi-ai/dist/providers/all.js"))
+);
+const providers = builtinProviders();
+assert(!providers.some((provider) => provider.id === "openai-codex"), "Legacy Codex must not register an OAuth login");
+assert(!getBuiltinProviders().includes("openai-codex"), "Legacy Codex must not appear in the static model catalog");
+assert.deepEqual(getAllBuiltinModels("openai-codex"), []);
+assert.equal(providers.find((provider) => provider.id === "openai")?.auth?.oauth?.loginLabel, "Sign in with ChatGPT");
+assert.ok(getBuiltinModel("openai", "gpt-6.2-astra"), "The native OpenAI model remains available");
+
 // Model selection and package filters rely on the upgraded minimatch API.
 const { minimatch } = require("minimatch");
 assert.equal(require("minimatch/package.json").version, "11.0.3");

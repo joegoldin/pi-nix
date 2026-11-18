@@ -8,7 +8,7 @@ function fixture() {
 	const statuses = new Map<string, string>();
 	const notices: string[] = [];
 	const ctx = {
-		model: { provider: "openai-codex", api: "openai-codex-responses", id: "gpt-5.6-sol" },
+		model: { provider: "openai", api: "openai-responses", id: "gpt-5.6-sol" },
 		sessionManager: { getBranch: () => entries },
 		ui: {
 			setStatus: (key: string, value: string | undefined) => {
@@ -69,17 +69,16 @@ describe("pi-fast", () => {
 
 	it("supports only the configured OpenAI model and API pairs", async () => {
 		const models = ["gpt-5.4", "gpt-5.5", "gpt-5.6", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-6-astra", "gpt-6.2-astra", "gpt-6.2-sol"];
-		for (const [provider, api] of [["openai", "openai-responses"], ["openai-codex", "openai-codex-responses"]]) {
-			for (const id of models) {
-				const f = fixture();
-				f.ctx.model = { provider, api, id };
-				await f.command("on");
-				expect(f.request()).toEqual({ model: id, service_tier: "priority" });
-			}
+		for (const id of models) {
+			const f = fixture();
+			f.ctx.model.id = id;
+			await f.command("on");
+			expect(f.request()).toEqual({ model: id, service_tier: "priority" });
 		}
 		for (const change of [
 			{ provider: "anthropic" }, { provider: "openrouter" }, { id: "gpt-4.1" },
 			{ id: "gpt-5.6-sol-unlisted" }, { api: "openai-completions" },
+			{ provider: "openai-codex", api: "openai-codex-responses" },
 		]) {
 			const f = fixture();
 			Object.assign(f.ctx.model, change);
@@ -104,7 +103,7 @@ describe("pi-fast", () => {
 		f.ctx.model.provider = "anthropic";
 		f.emit("model_select");
 		expect(f.statuses.has("pi-fast")).toBe(false);
-		f.ctx.model.provider = "openai-codex";
+		f.ctx.model.provider = "openai";
 		f.emit("model_select");
 		expect(f.statuses.get("pi-fast")).toBe("fast");
 		f.emit("session_shutdown");

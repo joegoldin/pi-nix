@@ -194,6 +194,13 @@ For example, update task `ab` with `addBlockedBy: ["z", "aa"]`, or toggle group
 numeric calls still resolve to the same tasks. Progress counts include completed
 tasks even though they no longer occupy working-list rows.
 
+### OpenAI sign-in
+
+Use `/login openai` and choose **Sign in with ChatGPT**, or use an OpenAI API
+key. The legacy `openai-codex` provider and its model catalog are not bundled.
+Existing saved credentials are not changed. The old `/usage` command depended
+on that legacy login, so Pi no longer displays those subscription quota numbers.
+
 ### Fast mode
 
 The first-party `pi-fast` plugin provides `/fast`, `/fast on`, `/fast off`,
@@ -205,7 +212,7 @@ global setting for future sessions.
 
 When enabled, it adds `service_tier: "priority"` to subsequent requests for
 GPT-5.4, GPT-5.5, GPT-5.6 (including Sol, Terra and Luna), and GPT-6-Astra on
-`openai`/`openai-responses` or `openai-codex`/`openai-codex-responses`.
+`openai`/`openai-responses`.
 Other providers, APIs and models are untouched. The preference stays enabled
 but inactive when switching to an unsupported model. `/fast off` stops adding
 the override; it does not remove settings supplied elsewhere.

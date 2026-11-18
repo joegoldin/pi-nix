@@ -27,11 +27,6 @@ keys.
 - `/clear`: start a new session.
 - `/clone-session`: copy this session into a new one, leaving the original.
 - `/stash`: open the stash list.
-- `/usage`: refresh read-only OpenAI subscription usage. Interactive sessions
-  also refresh every five minutes. Codex uses its account quota windows; native
-  ChatGPT login requires a Codex companion with a matching app registration.
-  API keys and custom origins are not eligible. Missing or failed reports clear
-  stale percentages; shorter windows are never presented as monthly totals.
 
 ## Also
 

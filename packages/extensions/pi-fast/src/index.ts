@@ -32,8 +32,7 @@ function record(value: unknown): value is Record<string, unknown> {
 
 function supportsPriority(model: FastModel | undefined): boolean {
 	if (!model || !MODELS.has(model.id)) return false;
-	return (model.provider === "openai" && model.api === "openai-responses") ||
-		(model.provider === "openai-codex" && model.api === "openai-codex-responses");
+	return model.provider === "openai" && model.api === "openai-responses";
 }
 
 export default function register(pi: FastHost): void {

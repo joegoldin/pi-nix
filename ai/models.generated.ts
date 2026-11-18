@@ -25,7 +25,6 @@ import { MOONSHOTAI_CLASSIFIER_MODELS, MOONSHOTAI_IMAGE_MODELS, MOONSHOTAI_MODEL
 import { MOONSHOTAI_CN_CLASSIFIER_MODELS, MOONSHOTAI_CN_IMAGE_MODELS, MOONSHOTAI_CN_MODELS } from "./providers/moonshotai-cn.models.ts";
 import { NVIDIA_CLASSIFIER_MODELS, NVIDIA_IMAGE_MODELS, NVIDIA_MODELS } from "./providers/nvidia.models.ts";
 import { OPENAI_CLASSIFIER_MODELS, OPENAI_IMAGE_MODELS, OPENAI_MODELS } from "./providers/openai.models.ts";
-import { OPENAI_CODEX_CLASSIFIER_MODELS, OPENAI_CODEX_IMAGE_MODELS, OPENAI_CODEX_MODELS } from "./providers/openai-codex.models.ts";
 import { OPENCODE_CLASSIFIER_MODELS, OPENCODE_IMAGE_MODELS, OPENCODE_MODELS } from "./providers/opencode.models.ts";
 import { OPENCODE_GO_CLASSIFIER_MODELS, OPENCODE_GO_IMAGE_MODELS, OPENCODE_GO_MODELS } from "./providers/opencode-go.models.ts";
 import { OPENROUTER_CLASSIFIER_MODELS, OPENROUTER_IMAGE_MODELS, OPENROUTER_MODELS } from "./providers/openrouter.models.ts";
@@ -70,7 +69,6 @@ export const MODELS: {
 	readonly "moonshotai-cn": typeof MOONSHOTAI_CN_MODELS;
 	readonly "nvidia": typeof NVIDIA_MODELS;
 	readonly "openai": typeof OPENAI_MODELS;
-	readonly "openai-codex": typeof OPENAI_CODEX_MODELS;
 	readonly "opencode": typeof OPENCODE_MODELS;
 	readonly "opencode-go": typeof OPENCODE_GO_MODELS;
 	readonly "openrouter": typeof OPENROUTER_MODELS;
@@ -114,7 +112,6 @@ export const MODELS: {
 	"moonshotai-cn": MOONSHOTAI_CN_MODELS,
 	"nvidia": NVIDIA_MODELS,
 	"openai": OPENAI_MODELS,
-	"openai-codex": OPENAI_CODEX_MODELS,
 	"opencode": OPENCODE_MODELS,
 	"opencode-go": OPENCODE_GO_MODELS,
 	"openrouter": OPENROUTER_MODELS,
@@ -160,7 +157,6 @@ export const IMAGE_MODELS: {
 	readonly "moonshotai-cn": typeof MOONSHOTAI_CN_IMAGE_MODELS;
 	readonly "nvidia": typeof NVIDIA_IMAGE_MODELS;
 	readonly "openai": typeof OPENAI_IMAGE_MODELS;
-	readonly "openai-codex": typeof OPENAI_CODEX_IMAGE_MODELS;
 	readonly "opencode": typeof OPENCODE_IMAGE_MODELS;
 	readonly "opencode-go": typeof OPENCODE_GO_IMAGE_MODELS;
 	readonly "openrouter": typeof OPENROUTER_IMAGE_MODELS;
@@ -204,7 +200,6 @@ export const IMAGE_MODELS: {
 	"moonshotai-cn": MOONSHOTAI_CN_IMAGE_MODELS,
 	"nvidia": NVIDIA_IMAGE_MODELS,
 	"openai": OPENAI_IMAGE_MODELS,
-	"openai-codex": OPENAI_CODEX_IMAGE_MODELS,
 	"opencode": OPENCODE_IMAGE_MODELS,
 	"opencode-go": OPENCODE_GO_IMAGE_MODELS,
 	"openrouter": OPENROUTER_IMAGE_MODELS,
@@ -250,7 +245,6 @@ export const CLASSIFIER_MODELS: {
 	readonly "moonshotai-cn": typeof MOONSHOTAI_CN_CLASSIFIER_MODELS;
 	readonly "nvidia": typeof NVIDIA_CLASSIFIER_MODELS;
 	readonly "openai": typeof OPENAI_CLASSIFIER_MODELS;
-	readonly "openai-codex": typeof OPENAI_CODEX_CLASSIFIER_MODELS;
 	readonly "opencode": typeof OPENCODE_CLASSIFIER_MODELS;
 	readonly "opencode-go": typeof OPENCODE_GO_CLASSIFIER_MODELS;
 	readonly "openrouter": typeof OPENROUTER_CLASSIFIER_MODELS;
@@ -294,7 +288,6 @@ export const CLASSIFIER_MODELS: {
 	"moonshotai-cn": MOONSHOTAI_CN_CLASSIFIER_MODELS,
 	"nvidia": NVIDIA_CLASSIFIER_MODELS,
 	"openai": OPENAI_CLASSIFIER_MODELS,
-	"openai-codex": OPENAI_CODEX_CLASSIFIER_MODELS,
 	"opencode": OPENCODE_CLASSIFIER_MODELS,
 	"opencode-go": OPENCODE_GO_CLASSIFIER_MODELS,
 	"openrouter": OPENROUTER_CLASSIFIER_MODELS,
