@@ -22,6 +22,11 @@ describe("bare URLs", () => {
 		expect(linkUrls("see https://pi.dev now")).toBe("see [https://pi.dev](https://pi.dev) now");
 	});
 
+	it("link bare local file URLs, not file URLs with a remote host", () => {
+		expect(linkUrls("open file:///tmp/my%20folder/")).toBe("open [file:///tmp/my%20folder/](file:///tmp/my%20folder/)");
+		expect(linkUrls("open file://other-host/tmp/folder")).toBe("open file://other-host/tmp/folder");
+	});
+
 	it("drop trailing punctuation from the link but keep it in the text", () => {
 		expect(linkUrls("at https://pi.dev.")).toBe("at [https://pi.dev](https://pi.dev).");
 	});

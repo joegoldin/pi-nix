@@ -1,38 +1,67 @@
 diff --git a/packages/coding-agent/src/utils/open-browser.ts b/packages/coding-agent/src/utils/open-browser.ts
-index 727603a..0a45aa8 100644
 --- a/packages/coding-agent/src/utils/open-browser.ts
 +++ b/packages/coding-agent/src/utils/open-browser.ts
-@@ -1,4 +1,4 @@
+@@ -1,4 +1,33 @@
 -import { spawn } from "node:child_process";
 +import { execFileSync, spawn } from "node:child_process";
++
++/** Recover the desktop for interactive processes in panes that predate graphical login. */
++export function getDesktopEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
++	if (process.platform !== "linux" || !process.stdin.isTTY || !process.stdout.isTTY || env.DISPLAY || env.WAYLAND_DISPLAY) {
++		return env;
++	}
++	const separator = process.argv.indexOf("--", 2);
++	const flags = process.argv.slice(2, separator < 0 ? undefined : separator);
++	if (flags.some((flag, index) => flag === "--print" || flag === "-p" || flag === "--mode=json" || flag === "--mode=rpc" || (flag === "--mode" && flags[index + 1] !== "text"))) {
++		return env;
++	}
++	try {
++		const desktop = JSON.parse(execFileSync("systemctl", ["--user", "show-environment", "--output=json"], {
++			env, encoding: "utf8", timeout: 1500, maxBuffer: 1024 * 1024, stdio: ["ignore", "pipe", "ignore"],
++		}));
++		if (!desktop || (typeof desktop.DISPLAY !== "string" && typeof desktop.WAYLAND_DISPLAY !== "string")) {
++			return env;
++		}
++		// xdg-open needs KDE_SESSION_VERSION to choose kde-open rather than kfmclient.
++		// Never import unrelated variables (for example PATH) from the user manager.
++		const recovered = { ...env };
++		for (const name of ["DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY", "XDG_CURRENT_DESKTOP", "XDG_SESSION_TYPE", "KDE_SESSION_VERSION"]) {
++			if (typeof desktop[name] === "string") recovered[name] = desktop[name];
++		}
++		return recovered;
++	} catch {
++		return env;
++	}
++}
  
  /**
   * Open a URL or file in the platform browser/default handler.
-@@ -18,10 +18,26 @@ export function openBrowser(target: string): void {
- 	// spawn reports launcher failures (for example, missing xdg-open) via an
- 	// error event. Browser launch is best-effort: callers still present the target
- 	// to the user, so keep the launcher failure from becoming a process crash.
-+	let env = process.env;
-+	const flags = process.argv.slice(2, process.argv.indexOf("--") < 0 ? undefined : process.argv.indexOf("--"));
-+	const headless = flags.some((flag, index) => flag === "--print" || flag === "-p" || flag === "--mode=json" || flag === "--mode=rpc" || (flag === "--mode" && flags[index + 1] !== "text"));
-+	if (process.platform === "linux" && process.stdin.isTTY && process.stdout.isTTY && !headless && !env.DISPLAY && !env.WAYLAND_DISPLAY) {
-+		try {
-+			// Multiplexer terminals may predate the graphical login. Import only
-+			// launch variables from this user's manager, never its PATH or policy.
-+			const desktop = JSON.parse(execFileSync("systemctl", ["--user", "show-environment", "--output=json"], { env, encoding: "utf8", timeout: 1500, maxBuffer: 1024 * 1024, stdio: ["ignore", "pipe", "ignore"] }));
-+			if (desktop && typeof desktop === "object" && (typeof desktop.DISPLAY === "string" || typeof desktop.WAYLAND_DISPLAY === "string")) {
-+				env = { ...env };
-+				for (const name of ["DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY", "XDG_CURRENT_DESKTOP", "XDG_SESSION_TYPE"]) {
-+					if (typeof desktop[name] === "string") env[name] = desktop[name];
-+				}
-+			}
-+		} catch { /* A terminal without a graphical user session keeps the normal fallback. */ }
-+	}
+@@ -21,7 +50,7 @@
  	// On WSL, xdg-open launches explorer.exe, which fails when the cwd's
  	// \\wsl.localhost\... path exceeds MAX_PATH (#11592). The target is a URL,
  	// so no launcher needs pi's cwd.
 -	spawn(cmd, args, { stdio: "ignore", detached: true, cwd: "/" })
-+	spawn(cmd, args, { stdio: "ignore", detached: true, cwd: "/", env })
++	spawn(cmd, args, { stdio: "ignore", detached: true, cwd: "/", env: getDesktopEnvironment(process.env) })
  		.on("error", () => {})
  		.unref();
+ }
+diff --git a/packages/coding-agent/src/utils/shell.ts b/packages/coding-agent/src/utils/shell.ts
+--- a/packages/coding-agent/src/utils/shell.ts
++++ b/packages/coding-agent/src/utils/shell.ts
+@@ -2,6 +2,7 @@
+ import { delimiter, join, win32 } from "node:path";
+ import { spawn, spawnSync } from "child_process";
+ import { getBinDir } from "../config.ts";
++import { getDesktopEnvironment } from "./open-browser.ts";
+ 
+ export interface ShellConfig {
+ 	shell: string;
+@@ -177,7 +178,7 @@
+ 	const updatedPath = hasBinDir ? currentPath : [binDir, currentPath].filter(Boolean).join(delimiter);
+ 
+ 	return {
+-		...process.env,
++		...getDesktopEnvironment(process.env),
+ 		[pathKey]: updatedPath,
+ 	};
  }

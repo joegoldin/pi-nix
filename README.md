@@ -51,12 +51,13 @@ That runs upstream's `packages.default`, which is the npm build. The Home
 Manager and NixOS modules default to the Bun build instead; `nix run
 github:joegoldin/pi-nix#coding-agent-bun` runs the same binary they install.
 
-On Linux, links and files open through `xdg-open` and your desktop’s associated
-apps. In an interactive terminal without display variables (for example, a Rex
-pane created before desktop login), Pi recovers only the display, Xauthority,
-desktop and session-type variables from your systemd user manager. It leaves an
-existing display environment alone. Print, JSON, RPC and non-terminal runs do
-not recover desktop variables, even if they inherit multiplexer markers.
+In fullscreen Pi, Ctrl-click a `file:///` link to open the file or folder on
+Pi’s machine. On Linux, Pi uses `xdg-open` and your desktop’s associated apps.
+If an interactive terminal has no display variables (for example, a Rex pane
+created before desktop login), Pi recovers only display, Xauthority and desktop
+session variables from your systemd user manager. Both Pi’s opener and shell
+commands get those variables. Pi leaves an existing display environment alone
+and does not recover desktop variables in print, JSON, RPC or non-terminal runs.
 
 ## Binary cache
 

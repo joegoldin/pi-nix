@@ -73,7 +73,7 @@ export function renderCallouts(markdown: string): string {
 
 // Stops at whitespace, angle brackets and quotes; trailing punctuation is
 // trimmed afterwards, because "see https://x.dev." means the URL, not the dot.
-const URL = /(?<![<\w[])https?:\/\/[^\s<>"'`]+/g;
+const URL = /(?<![<\w[])(?:https?:\/\/|file:\/\/\/)[^\s<>"'`]+/g;
 const TRAILING = /[.,;:!?'"]+$/;
 
 /** Drop trailing punctuation, and closing brackets the URL did not open. */
