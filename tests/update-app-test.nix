@@ -3,13 +3,13 @@
 # enforces that at build time), preserves the two fields that are human
 # decisions rather than registry facts, and carries the normalisation and
 # platform flags whose absence produces failures that only appear later.
-{ pkgs, ... }:
+{ pkgs, self, ... }:
 let
-  updateExtensions = import ../update-extensions.nix { inherit pkgs; };
+  inherit (self.apps.${pkgs.stdenv.hostPlatform.system}.update-extensions) program;
 in
 pkgs.runCommand "pi-nix-update-app-tests" { } ''
   set -euo pipefail
-  script=${updateExtensions}/bin/pi-update-extensions
+  script=${program}
   test -x "$script"
 
   # `bundled` and `entrypoints` are overrides a human sets after inspecting a

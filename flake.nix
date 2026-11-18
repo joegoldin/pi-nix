@@ -7,7 +7,8 @@
     nixpkgs.url = "github:nixos/nixpkgs?ref=nixos-unstable";
 
     bun2nix = {
-      url = "github:nix-community/bun2nix?ref=2.1.0";
+      # 2.1.2 keeps Cargo.lock and deps.nix as source paths during evaluation.
+      url = "github:nix-community/bun2nix?ref=2.1.2";
       inputs = {
         flake-parts.follows = "flake-parts";
         nixpkgs.follows = "nixpkgs";
@@ -17,6 +18,7 @@
     jail-nix.url = "sourcehut:~alexdavid/jail.nix";
     agent-statusline = {
       url = "github:joegoldin/agent-statusline";
+      inputs.bun2nix.follows = "bun2nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
