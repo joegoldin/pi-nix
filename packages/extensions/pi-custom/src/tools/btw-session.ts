@@ -80,11 +80,18 @@ export function forkSideSession(
 	const pending = new Map<string, string>();
 	for (const message of child.buildSessionContext().messages) {
 		if (message.role === "assistant") {
+			pending.clear();
+			// The provider does not replay incomplete assistant turns.
+			if (message.stopReason === "error" || message.stopReason === "aborted") continue;
 			for (const block of message.content) {
 				if (block.type === "toolCall") pending.set(block.id, block.name);
 			}
-		} else if (message.role === "toolResult")
+		} else if (message.role === "toolResult") {
 			pending.delete(message.toolCallId);
+		} else if (message.role !== "system" && !(message.role === "bashExecution" && message.excludeFromContext)) {
+			// Other model-visible entries become user messages, ending the tool turn.
+			pending.clear();
+		}
 	}
 	for (const [toolCallId, toolName] of pending) {
 		child.appendMessage({

@@ -21,7 +21,36 @@ assert(!providers.some((provider) => provider.id === "openai-codex"), "Legacy Co
 assert(!getBuiltinProviders().includes("openai-codex"), "Legacy Codex must not appear in the static model catalog");
 assert.deepEqual(getAllBuiltinModels("openai-codex"), []);
 assert.equal(providers.find((provider) => provider.id === "openai")?.auth?.oauth?.loginLabel, "Sign in with ChatGPT");
-assert.ok(getBuiltinModel("openai", "gpt-6.2-astra"), "The native OpenAI model remains available");
+const openaiModel = getBuiltinModel("openai", "gpt-6.2-astra");
+assert.ok(openaiModel, "The native OpenAI model remains available");
+
+const { convertResponsesMessages } = await import(
+  pathToFileURL(join(modules, "@earendil-works/pi-ai/dist/api/openai-responses-shared.js"))
+);
+const assistantCall = (id, stopReason = "toolUse") => ({
+  role: "assistant", api: openaiModel.api, provider: openaiModel.provider, model: openaiModel.id, stopReason,
+  content: [{ type: "toolCall", id, name: "read", arguments: { path: "example.txt" } }], timestamp: 1,
+});
+const toolResult = (id, text) => ({
+  role: "toolResult", toolCallId: id, toolName: "read", content: [{ type: "text", text }], isError: false, timestamp: 2,
+});
+const replay = convertResponsesMessages(openaiModel, { messages: [
+  toolResult("call_compacted", "result whose call was cut out of history"),
+  assistantCall("call_aborted", "aborted"),
+  toolResult("call_aborted", "parent result after cancellation"),
+  assistantCall("call_valid"),
+  toolResult("call_valid", "real result"),
+  toolResult("call_valid", "duplicate result"),
+  assistantCall("call_failed", "error"),
+  toolResult("call_failed", "output for failed assistant turn"),
+  assistantCall("call_pending"),
+  { role: "user", content: "side question after fork", timestamp: 3 },
+] }, new Set(["openai"]));
+assert.deepEqual(replay.filter((item) => item.type === "function_call").map((item) => item.call_id), ["call_valid", "call_pending"]);
+assert.deepEqual(replay.filter((item) => item.type === "function_call_output").map((item) => [item.call_id, item.output]), [
+  ["call_valid", "real result"],
+  ["call_pending", "No result provided"],
+], "Replaying side context never emits outputs without a surviving call");
 
 // Model selection and package filters rely on the upgraded minimatch API.
 const { minimatch } = require("minimatch");

@@ -50,48 +50,51 @@ test("forks the selected branch to an independent disk session without changing 
 	);
 });
 
-test("a fork records pending parent tools as not executed by the child", () => {
-	const dir = directory();
-	const parent = SessionManager.create(dir, dir);
-	parent.appendMessage({
-		role: "user",
-		content: "main question",
-		timestamp: 1,
-	});
-	parent.appendMessage({
-		role: "assistant",
-		content: [
-			{
-				type: "toolCall",
-				id: "pending",
-				name: "read",
-				arguments: { path: "source.ts" },
+for (const stopReason of ["toolUse", "aborted", "error"] as const) {
+	test(`a fork only adds pending results for complete tool calls (${stopReason})`, () => {
+		const dir = directory();
+		const parent = SessionManager.create(dir, dir);
+		parent.appendMessage({
+			role: "user",
+			content: "main question",
+			timestamp: 1,
+		});
+		parent.appendMessage({
+			role: "assistant",
+			content: [
+				{
+					type: "toolCall",
+					id: "pending",
+					name: "read",
+					arguments: { path: "source.ts" },
+				},
+			],
+			api: "test",
+			provider: "test",
+			model: "test",
+			stopReason,
+			timestamp: 2,
+			usage: {
+				input: 0,
+				output: 0,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 0,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 			},
-		],
-		api: "test",
-		provider: "test",
-		model: "test",
-		stopReason: "toolUse",
-		timestamp: 2,
-		usage: {
-			input: 0,
-			output: 0,
-			cacheRead: 0,
-			cacheWrite: 0,
-			totalTokens: 0,
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-		},
-	} as any);
-	const child = forkSideSession(parent, dir, join(dir, "children"));
-	const last = child.buildSessionContext().messages.at(-1) as any;
-	expect(last.role).toBe("toolResult");
-	expect(last.toolCallId).toBe("pending");
-	expect(last.isError).toBe(true);
-	expect(JSON.stringify(last.content)).toContain(
-		"not executed by this side conversation",
-	);
-	expect(parent.buildSessionContext().messages.at(-1)!.role).toBe("assistant");
-});
+		} as any);
+		const child = forkSideSession(parent, dir, join(dir, "children"));
+		const results = child.buildSessionContext().messages.filter((message) => message.role === "toolResult");
+		if (stopReason === "toolUse") {
+			expect(results).toHaveLength(1);
+			expect(results[0]).toMatchObject({ toolCallId: "pending", isError: true });
+			expect(JSON.stringify(results[0].content)).toContain("not executed by this side conversation");
+		} else {
+			expect(results).toEqual([]);
+		}
+		expect(parent.buildSessionContext().messages.at(-1)!.role).toBe("assistant");
+	});
+}
 
 test("child gates are scoped to the parent and invalid registries fail closed", () => {
 	const key = Symbol.for("pi-custom.required-side-extensions.v1");

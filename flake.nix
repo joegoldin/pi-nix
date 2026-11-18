@@ -76,6 +76,7 @@
             };
             patches = [
               ./coding-agent/open-browser.patch
+              ./coding-agent/tool-result-replay.patch
               ./coding-agent/jump-to-last-user.patch
               ./coding-agent/user-message-timestamps.patch
               ./coding-agent/native-queue-controls.patch

@@ -1,0 +1,14 @@
+--- a/packages/ai/src/api/transform-messages.ts
++++ b/packages/ai/src/api/transform-messages.ts
+@@ -232,6 +232,11 @@
+ 
+ 			result.push(msg);
+ 		} else if (msg.role === "toolResult") {
++			// Forks and compacted histories can retain results after their calls were removed.
++			// Only replay one result for each call in the surviving assistant turn.
++			if (!pendingToolCalls.some((call) => call.id === msg.toolCallId) || existingToolResultIds.has(msg.toolCallId)) {
++				continue;
++			}
+ 			existingToolResultIds.add(msg.toolCallId);
+ 			result.push(msg);
+ 		} else if (msg.role === "system") {
