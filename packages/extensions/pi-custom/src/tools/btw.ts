@@ -231,9 +231,17 @@ export function registerBtw(
 		threads.set(thread.id, thread);
 		return thread;
 	}
+	function reportSideActivity(ctx: ExtensionContext, thread: LiveThread, status: ActivityStatus | undefined, childKey?: string): void {
+		if (shuttingDown) return;
+		const key = activityKey("btw", thread.id);
+		// The terminal sees the side activity directly; mirroring it at the root
+		// would also re-announce the last main turn when side work settles.
+		reportActivity(ctx, childKey === undefined ? key : `${key}/${childKey}`, status && { ...status, aggregate: false });
+	}
+
 	function reportThread(ctx: ExtensionContext, thread: LiveThread, status: ActivityStatus): void {
 		thread.status = { ...status, title: "Side conversation" };
-		reportActivity(ctx, activityKey("btw", thread.id), thread.status);
+		reportSideActivity(ctx, thread, thread.status);
 	}
 
 	async function runtime(
@@ -250,7 +258,7 @@ export function registerBtw(
 				const statuses = thread.childStatuses ??= new Map();
 				if (status) statuses.set(key, status);
 				else for (const saved of statuses.keys()) if (saved === key || saved.startsWith(`${key}/`)) statuses.delete(saved);
-				reportActivity(ctx, `${activityKey("btw", thread.id)}/${key}`, status);
+				reportSideActivity(ctx, thread, status, key);
 			},
 			setWidget() {},
 			setFooter() {},
@@ -490,9 +498,13 @@ export function registerBtw(
 	}
 	pi.on("session_start", (_event, ctx) => {
 		if (ctx.mode !== "tui") return;
+		const active = (status: ActivityStatus | undefined) => status?.state === "working" || status?.state === "blocked";
 		for (const thread of threads.values()) {
-			if (thread.status) reportThread(ctx, thread, thread.status);
-			for (const [key, status] of thread.childStatuses ?? []) reportActivity(ctx, `${activityKey("btw", thread.id)}/${key}`, status);
+			if (thread.sessionId !== ctx.sessionManager.getSessionId()) continue;
+			if (active(thread.status)) reportSideActivity(ctx, thread, thread.status);
+			for (const [key, status] of thread.childStatuses ?? []) {
+				if (active(status)) reportSideActivity(ctx, thread, status, key);
+			}
 		}
 		try {
 			restore(ctx);

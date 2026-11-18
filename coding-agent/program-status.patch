@@ -2,16 +2,17 @@ diff --git a/packages/coding-agent/src/core/extensions/types.ts b/packages/codin
 index 72f365e..8a46ee8 100644
 --- a/packages/coding-agent/src/core/extensions/types.ts
 +++ b/packages/coding-agent/src/core/extensions/types.ts
-@@ -183,6 +183,13 @@ export interface ExtensionUIContext {
+@@ -183,6 +183,14 @@ export interface ExtensionUIContext {
  	/** Set status text in the footer/status bar. Pass undefined to clear. */
  	setStatus(key: string, text: string | undefined): void;
  
 +	/** Report independent terminal activity, not footer text. Keys are id paths under pi/.
 +	 * Use working for autonomous waits, blocked only for required user action, idle for cancellation.
 +	 * Omit progress unless measured. Never put prompts, commands, credentials or output in metadata.
++	 * Use aggregate: false for side activities that should not change the root session status.
 +	 * Undefined clears this record and its descendants. Optional on older/noninteractive hosts.
 +	 */
-+	setProgramStatus?(key: string, status: Omit<ProgramStatus, "id" | "app"> | undefined): void;
++	setProgramStatus?(key: string, status: (Omit<ProgramStatus, "id" | "app"> & { aggregate?: false }) | undefined): void;
 +
  	/** Set the working/loading message shown during streaming. Call with no argument to restore default. */
  	setWorkingMessage(message?: string): void;
@@ -69,13 +70,15 @@ diff --git a/packages/coding-agent/src/modes/interactive/program-status-reporter
 index 4dac611..125e404 100644
 --- a/packages/coding-agent/src/modes/interactive/program-status-reporter.ts
 +++ b/packages/coding-agent/src/modes/interactive/program-status-reporter.ts
-@@ -1,4 +1,4 @@
+@@ -1,4 +1,6 @@
 -import type { ProgramStatus, Terminal } from "@earendil-works/pi-tui";
 +import { findProgramStatusEviction, type ProgramStatus, type Terminal } from "@earendil-works/pi-tui";
  import { APP_NAME } from "../../config.ts";
  import type { AgentSessionEvent } from "../../core/agent-session.ts";
  
-@@ -19,6 +19,8 @@ export class ProgramStatusReporter {
++type ActivityStatus = Omit<ProgramStatus, "id" | "app"> & { aggregate?: false };
++
+@@ -19,6 +21,8 @@ export class ProgramStatusReporter {
  	private readonly getSessionName: () => string | undefined;
  	private runActive = false;
  	private compacting = false;
@@ -84,15 +87,15 @@ index 4dac611..125e404 100644
  	/** Outcome of the current run, reported once it settles. */
  	private runResult: ProgramStatus = { state: "done" };
  	/** Status while no run is active. */
-@@ -26,6 +28,7 @@ export class ProgramStatusReporter {
+@@ -26,6 +30,7 @@ export class ProgramStatusReporter {
  	/** Open dialogs by source, in the order they opened. The most recent one is reported. */
  	private readonly blocked = new Map<string, BlockedStatus>();
  	private lastReport: string | undefined;
-+	private readonly activities = new Map<string, Omit<ProgramStatus, "id" | "app">>();
++	private readonly activities = new Map<string, ActivityStatus>();
  
  	constructor(getTerminal: () => Terminal, getSessionName: () => string | undefined) {
  		this.getTerminal = getTerminal;
-@@ -36,8 +39,22 @@ export class ProgramStatusReporter {
+@@ -36,8 +41,22 @@ export class ProgramStatusReporter {
  		switch (event.type) {
  			case "agent_start":
  				this.runActive = true;
@@ -115,7 +118,7 @@ index 4dac611..125e404 100644
  			case "message_end":
  				// The latest response decides the outcome, so a retried error is replaced by its successful retry.
  				if (event.message.role !== "assistant") return;
-@@ -65,6 +82,8 @@ export class ProgramStatusReporter {
+@@ -65,6 +84,8 @@ export class ProgramStatusReporter {
  				break;
  			case "agent_settled":
  				this.runActive = false;
@@ -124,12 +127,12 @@ index 4dac611..125e404 100644
  				this.restingStatus = event.aborted ? { state: "idle" } : this.runResult;
  				break;
  			case "session_info_changed":
-@@ -83,10 +102,34 @@ export class ProgramStatusReporter {
+@@ -83,10 +104,37 @@ export class ProgramStatusReporter {
  		this.report();
  	}
  
 +	/** Extension-owned work survives agent turn boundaries; clearing one source cannot erase another. */
-+	setActivity(source: string, status: Omit<ProgramStatus, "id" | "app"> | undefined): void {
++	setActivity(source: string, status: ActivityStatus | undefined): void {
 +		const id = `pi/${source}`;
 +		if (id.length > 128 || id.split("/").length > 8 || !id.split("/").every(part => /^[A-Za-z0-9_.+-]{1,32}$/.test(part))) return;
 +		if (status?.state === "clear") status = undefined;
@@ -142,7 +145,10 @@ index 4dac611..125e404 100644
 +			if (this.activities.size >= 256) this.setActivity(findProgramStatusEviction(this.activities)!, undefined);
 +			this.activities.set(source, { ...status });
 +		}
-+		this.getTerminal().setProgramStatus(status ? { ...status, id, app: APP_NAME } : { state: "clear", id });
++		if (status) {
++			const { aggregate: _aggregate, ...wireStatus } = status;
++			this.getTerminal().setProgramStatus({ ...wireStatus, id, app: APP_NAME });
++		} else this.getTerminal().setProgramStatus({ state: "clear", id });
 +		// Child results belong to their own records, never to the agent outcome.
 +		this.report();
 +	}
@@ -159,11 +165,11 @@ index 4dac611..125e404 100644
  		this.runResult = { state: "done" };
  		this.restingStatus = { state: "idle" };
  		this.report();
-@@ -103,7 +146,16 @@ export class ProgramStatusReporter {
+@@ -103,7 +151,16 @@ export class ProgramStatusReporter {
  	private currentStatus(): ProgramStatus {
  		const blocked = [...this.blocked.values()].at(-1);
  		if (blocked) return { state: "blocked", ...blocked };
-+		const activities = [...this.activities.values()];
++		const activities = [...this.activities.values()].filter(status => status.aggregate !== false);
 +		const waiting = activities.filter(status => status.state === "blocked").at(-1);
 +		if (waiting) return { state: "blocked", kind: waiting.kind, message: waiting.message, progress: waiting.progress };
  		if (this.compacting) return { state: "working", message: "Compacting context" };

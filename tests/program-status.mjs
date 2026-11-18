@@ -191,6 +191,28 @@ check("child results never replace the main program outcome", () => {
  reporter.setActivity("background/task", { state: "error", message: "Another result" });
  assert.equal(root().state, "done");
 });
+check("independent side work emits one scoped report per transition without re-announcing main completion", () => {
+	const terminal = new ProcessTerminal();
+	terminal.programStatusSupported = true;
+	const reporter = new ProgramStatusReporter(() => terminal, () => "Main session");
+	capture(() => {
+		reporter.handleEvent({ type: "agent_start" });
+		reporter.handleEvent({ type: "agent_settled", aborted: false });
+	});
+	const output = capture(() => {
+		reporter.setActivity("btw/thread", { state: "working", aggregate: false });
+		reporter.setActivity("btw/thread", { state: "working", aggregate: false });
+		reporter.setActivity("btw/thread/permission", { state: "blocked", kind: "permission", aggregate: false });
+		reporter.setActivity("btw/thread/permission", undefined);
+		reporter.setActivity("btw/thread", { state: "done", aggregate: false });
+	});
+	assert.deepEqual(output.map(row => [row.id, row.state, row.kind]), [
+		["pi/btw/thread", "working", undefined],
+		["pi/btw/thread/permission", "blocked", "permission"],
+		["pi/btw/thread/permission", "clear", undefined],
+		["pi/btw/thread", "done", undefined],
+	]);
+});
 check("worker cancellation preserves the settled agent outcome", () => {
 	const { reporter, root } = reporterFixture();
 	reporter.handleEvent({ type: "agent_start" }); reporter.handleEvent({ type: "agent_settled", aborted: false });

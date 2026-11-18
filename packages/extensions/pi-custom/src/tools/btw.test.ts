@@ -143,6 +143,7 @@ it("mouse scrolling preserves the draft and does not jump to the tail on new con
 
 function commandHarness() {
 	let shutdown: (() => Promise<void>) | undefined;
+	let start: ((event: unknown, ctx: unknown) => void) | undefined;
 	const cwd = mkdtempSync(join(tmpdir(), "btw-command-"));
 	temporaryDirectories.push(cwd);
 	const manager = SessionManager.create(cwd, cwd);
@@ -236,6 +237,7 @@ function commandHarness() {
 		requests,
 		createRuntime,
 		shutdown: () => shutdown?.(),
+		start: () => start?.({}, ctx),
 		options: () => options,
 		listeners,
 		focused: () => focused,
@@ -247,8 +249,9 @@ function commandHarness() {
 		api: {
 			appendEntry: (type: string, data: unknown) =>
 				manager.appendCustomEntry(type, data),
-			on(name: string, callback: () => Promise<void>) {
-				if (name === "session_shutdown") shutdown = callback;
+			on(name: string, callback: (event: unknown, ctx: unknown) => Promise<void>) {
+				if (name === "session_start") start = callback;
+				if (name === "session_shutdown") shutdown = () => callback({}, ctx);
 			},
 			registerCommand: (_name: string, value: unknown) => {
 				command = value;
@@ -480,16 +483,25 @@ it("reports closed-panel side work and namespaces child status without leaking p
 	registerBtw(h.api as never, (async (...args: any[]) => { childUI = args[4]; return h.createRuntime(args[0], args[1], args[2]); }) as never);
 	const opened = h.command().handler("PRIVATE_QUESTION", h.ctx);
 	await flush();
-	expect(statuses.some(row => row.status?.state === "working")).toBe(true);
-	childUI.setProgramStatus?.("goal", { state: "working", title: "Goal" });
-	expect(statuses.every(row => row.key.startsWith("btw/"))).toBe(true);
+	const key = statuses[0].key;
+	expect(key).toMatch(/^btw\/[a-f0-9]{24}$/);
+	childUI.setProgramStatus?.("permission", { state: "blocked", kind: "permission" });
 	h.component().handleInput("\x03"); await opened;
-	expect(statuses.at(-1)?.status.state).toBe("working");
-	childUI.setProgramStatus?.("goal", undefined);
+	expect(statuses.map(row => [row.key, row.status?.state, row.status?.aggregate])).toEqual([
+		[key, "working", false],
+		[`${key}/permission`, "blocked", false],
+	]);
+	h.start();
+	expect(statuses.slice(2)).toEqual(statuses.slice(0, 2));
+	childUI.setProgramStatus?.("permission", undefined);
 	h.requests[0].resolve({ stopReason: "stop", content: [{ type: "text", text: "PRIVATE_ANSWER" }] }); await flush();
-	expect(statuses.at(-1)?.status.state).toBe("done");
+	expect(statuses.at(-1)).toMatchObject({ key, status: { state: "done", aggregate: false } });
 	expect(JSON.stringify(statuses)).not.toContain("PRIVATE_");
+	const count = statuses.length;
+	h.start();
 	await h.shutdown();
+	childUI.setProgramStatus?.("permission", { state: "blocked", kind: "permission" });
+	expect(statuses).toHaveLength(count);
 });
 
 it("docks btw across the top half above a resizing main input dock", async () => {

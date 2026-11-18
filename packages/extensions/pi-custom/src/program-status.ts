@@ -7,6 +7,7 @@ export interface ActivityStatus {
 	title?: string;
 	message?: string;
 	progress?: number;
+	aggregate?: false;
 }
 
 /** Keep opaque/session ids within the protocol's 32-byte segment limit. */
@@ -19,5 +20,7 @@ export function reportActivity(ctx: Pick<ExtensionContext, "ui" | "hasUI"> | und
 	if (!ctx || ctx.hasUI === false) return;
 	try {
 		(ctx.ui as { setProgramStatus?(key: string, status: ActivityStatus | undefined): void }).setProgramStatus?.(key, status);
-	} catch {}
+	} catch {
+		// A broken status sink must not fail the action it describes.
+	}
 }
