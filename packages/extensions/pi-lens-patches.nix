@@ -23,8 +23,8 @@ in
   # The diagnostics widget draws its " pi-lens" header whenever it tracks a
   # file or an LSP server, even when there is nothing to put after it: no
   # languages, no findings, no files worth a row. That leaves a lone "pi-lens"
-  # line above the footer. Keep the compact control if an expanded view has
-  # no detail rows, so clicking it never removes the way to collapse it.
+  # line above the footer. Use the normal summary for a quiet, expanded
+  # view that has nothing else to show.
   quietEmptyWidget = ''
     substituteInPlace dist/index.js --replace-fail \
       ${lib.escapeShellArg "  lines.push(fitLine(header, w));\n  if (summaryFacts.totalSuppressed > 0) {"} \
@@ -32,38 +32,54 @@ in
   '';
 
   # The dashboard consumes the compact chip when available; the native widget
-  # then owns only expanded detail rows. Both surfaces share one click state.
+  # then owns only expanded rows. One expansion state keeps the two surfaces
+  # mutually exclusive, including when Pi changes global tool expansion.
   compactToggleWidget = ''
+    substituteInPlace dist/index.js --replace-fail \
+      ${lib.escapeShellArg "  let mountedLensWidgetUi;"} \
+      ${lib.escapeShellArg ''
+        let mountedLensWidgetUi;
+        let toggleLensWidgetDetails;
+        pi.registerShortcut?.("ctrl+shift+l", {
+          description: "Expand or collapse Lens diagnostics",
+          handler: async () => { toggleLensWidgetDetails?.(); },
+        });
+      ''}
     substituteInPlace dist/index.js --replace-fail \
       ${lib.escapeShellArg "      const compactWidget = getLensFlag(\"lens-compact-widget\") === true;"} \
       ${lib.escapeShellArg ''
-        let compactWidget = true;
+        let expanded = false;
+        let lastGlobalExpanded;
+        const isExpanded = () => {
+          const globalExpanded = ui.getToolsExpanded?.() === true;
+          if (lastGlobalExpanded !== globalExpanded) {
+            lastGlobalExpanded = globalExpanded;
+            expanded = globalExpanded;
+          }
+          return expanded;
+        };
         const inlineKey = Symbol.for("pi.inline-status-widgets.v1");
         const inline = globalThis[inlineKey] ??= { widgets: new Map(), consumers: new Set() };
-        const toggle = (event) => {
-          if (event.type !== "click" || event.button !== "left") return;
-          compactWidget = !compactWidget;
+        const toggle = () => {
+          expanded = !isExpanded();
           tui.requestRender();
-          return { handled: true, render: true };
         };
+        toggleLensWidgetDetails = toggle;
         const chip = {
-          render: (width, chipTheme) => renderWidget(width, chipTheme, { compact: true })[0] ?? "",
-          handleMouse: toggle,
+          render: (width, chipTheme) => isExpanded() ? "" : renderWidget(width, chipTheme, { compact: true })[0] ?? "",
         };
         inline.widgets.set("pi-lens", chip);
       ''}
     substituteInPlace dist/index.js --replace-fail \
       ${lib.escapeShellArg "          return renderWidget(width, theme, { compact: compactWidget });\n        },\n        invalidate:"} \
       ${lib.escapeShellArg ''
-          const embedded = inline.consumers.size > 0;
-          const compact = !ui.getToolsExpanded?.() && compactWidget;
-          if (embedded && compact) return [];
-          const rows = renderWidget(width, theme, { compact });
-          return embedded && rows.length === 1 && rows[0] === chip.render(width, theme) ? [] : rows;
+          const compact = !isExpanded();
+          if (inline.consumers.size > 0 && compact) return [];
+          return renderWidget(width, theme, { compact });
         },
-        handleMouse: toggle,
         dispose: () => {
           if (inline.widgets.get("pi-lens") === chip) inline.widgets.delete("pi-lens");
+          if (toggleLensWidgetDetails === toggle) toggleLensWidgetDetails = undefined;
         },
         invalidate:''}
     # Invalidation is a redraw/theme boundary, not widget disposal. Unmount
