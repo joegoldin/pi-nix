@@ -1,4 +1,5 @@
 import { expect, spyOn, test } from "bun:test";
+import { visibleWidth } from "@earendil-works/pi-tui";
 import { registerGoal } from "./goal.ts";
 import { registerSteeringGuard, STEERING } from "../extras/steer.ts";
 
@@ -116,7 +117,7 @@ test("background completion still receives the active goal contract", () => {
 	expect(result.message.content).toContain("Verify the fix");
 });
 
-function waitingGoal(status = "active", resumeAt?: number) {
+function waitingGoal(status = "active", resumeAt?: number, mode?: "tui") {
 	const handlers = new Map<string, Function>();
 	const tools = new Map<string, any>();
 	const commands = new Map<string, any>();
@@ -129,9 +130,18 @@ function waitingGoal(status = "active", resumeAt?: number) {
 	};
 	let saved: any = structuredClone(initial);
 	const sent: string[] = [];
+	const widgets = new Map<string, { factory: Function; placement: string }>();
+	let footer: string | undefined;
 	const ctx = {
-		isIdle: () => true, hasPendingMessages: () => false,
-		ui: { setStatus() {}, notify: (text: string) => notices.push(text) },
+		mode, isIdle: () => true, hasPendingMessages: () => false,
+		ui: {
+			setStatus(_key: string, text?: string) { footer = text; },
+			notify: (text: string) => notices.push(text),
+			setWidget(key: string, factory?: Function, options?: { placement: string }) {
+				if (factory && options) widgets.set(key, { factory, placement: options.placement });
+				else widgets.delete(key);
+			},
+		},
 		sessionManager: { getBranch: () => [{ type: "custom", customType: "goal-state", data: { goal: initial } }] },
 	};
 	registerGoal({
@@ -142,7 +152,7 @@ function waitingGoal(status = "active", resumeAt?: number) {
 	} as never, () => ({ goalTurnLimit: 100, goalNoProgressTurns: 10 }) as never);
 	const emit = (name: string, event = {}) => handlers.get(name)?.(event, ctx);
 	emit("session_start");
-	return { emit, ctx, sent, tools, commands, notices, saved: () => saved, wait: (reason = "Build B completion", waiting_for: string | undefined = "background", background_task?: string) => tools.get("goal_wait").execute("call", { goal_id: initial.id, reason, waiting_for, background_task }, undefined, undefined, ctx) };
+	return { emit, ctx, sent, tools, commands, notices, widgets, footer: () => footer, saved: () => saved, wait: (reason = "Build B completion", waiting_for: string | undefined = "background", background_task?: string) => tools.get("goal_wait").execute("call", { goal_id: initial.id, reason, waiting_for, background_task }, undefined, undefined, ctx) };
 }
 
 test("a background wake consumes the old wait so the new run can wait again", async () => {
@@ -247,6 +257,45 @@ test("wait recaps identify who must act, persist that distinction, and keep it i
 			expect(h.notices.at(-1)).toContain(reason);
 		} finally { h.emit("session_shutdown"); }
 	}
+});
+
+test("the current wait stays above the TUI editor rather than repeating in the transcript and footer", async () => {
+	const h = waitingGoal("active", undefined, "tui");
+	const reason = "Drag Move, then tell me when done.";
+	const background = "The build keeps running.";
+	const colors: [string, string][] = [];
+	const theme = { fg: (slot: string, text: string) => { colors.push([slot, text]); return text; }, bold: (text: string) => text };
+	try {
+		expect(h.widgets.size).toBe(1); // Restored from the branch on session start.
+		h.emit("before_agent_start", { messageType: "custom" });
+		expect(h.widgets.size).toBe(0);
+		const result = await h.wait(reason, "user", background);
+		const [widget] = [...h.widgets.values()];
+		expect(widget?.placement).toBe("aboveEditor");
+		const component = widget.factory({ terminal: { rows: 35 } }, theme);
+		const lines = component.render(50);
+		expect(lines[0]).toContain("Goal waiting for your action");
+		expect(lines.join("\n")).toContain(reason);
+		expect(lines.join("\n")).toContain(background);
+		expect(colors).toContainEqual(["warning", "╭─"]);
+		expect(colors).toContainEqual(["text", reason]);
+		const narrow = component.render(12);
+		expect(narrow.every((line: string) => visibleWidth(line) === 12)).toBe(true);
+		expect(narrow.length).toBeLessThanOrEqual(11);
+		expect(h.footer()).not.toContain(reason);
+		expect(h.notices).toEqual([]);
+		const tool = h.tools.get("goal_wait");
+		const call = tool.renderCall({ waiting_for: "user", reason, goal_id: "internal-id" }, theme);
+		expect(call.render(80).join("\n")).not.toMatch(/internal-id|Drag Move/);
+		expect(tool.renderResult(result, { expanded: false, isPartial: false }, theme).render(80).join("\n")).not.toContain(reason);
+		expect(tool.renderResult(result, { expanded: true, isPartial: false }, theme).render(80).join("\n")).toContain(reason);
+		h.emit("agent_settled");
+		expect(h.widgets.size).toBe(1);
+		h.emit("turn_start");
+		expect(h.widgets.size).toBe(0);
+		await h.wait("Check on the build", "background");
+	} finally { h.emit("session_shutdown"); }
+	expect(h.widgets.size).toBe(0);
 });
 
 test("new waits require an ownership category and user-facing tool field guidance", async () => {

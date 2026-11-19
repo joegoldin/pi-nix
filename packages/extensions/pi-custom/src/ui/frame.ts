@@ -23,13 +23,14 @@ export class Framed {
 		private inner: Inner,
 		private title: string,
 		private theme: UiTheme,
+		private border: "border" | "warning" = "border",
 	) {}
 
 	render(width: number): string[] {
 		const w = Math.max(6, width);
 		const innerW = w - 4;
-		const rule = (s: string) => this.theme.fg("border", s);
-		const label = ` ${this.title} `;
+		const rule = (s: string) => this.theme.fg(this.border, s);
+		const label = truncateToWidth(` ${this.title} `, w - 3, "…");
 		const top = `${rule("╭─")}${this.theme.bold(label)}${rule(`${"─".repeat(Math.max(0, w - 3 - visibleWidth(label)))}╮`)}`;
 		const rows = this.inner.render(innerW).map((line) => {
 			const fitted = visibleWidth(line) > innerW ? truncateToWidth(line, innerW, "…") : line;

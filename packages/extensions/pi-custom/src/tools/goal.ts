@@ -14,9 +14,10 @@
 
 import { randomUUID } from "node:crypto";
 import { type ExtensionAPI, type ExtensionContext, getMarkdownTheme } from "@earendil-works/pi-coding-agent";
-import { Markdown } from "@earendil-works/pi-tui";
+import { Markdown, Text, stripTerminalSequences, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import type { UiConfig } from "../ui/config.ts";
+import { Framed } from "../ui/frame.ts";
 import { reportActivity, type ActivityStatus } from "../program-status.ts";
 import {
 	activeContract,
@@ -37,6 +38,7 @@ import {
 	parseCommand,
 	resumePrompt,
 	statusText,
+	waitLabel,
 	waitMessage,
 	waitingResumePrompt,
 } from "./goal-text.ts";
@@ -45,6 +47,36 @@ const STATE_TYPE = "goal-state";
 const CONTRACT_TYPE = "goal-contract";
 const WRAP_UP_TYPE = "goal-budget-wrap-up";
 const STATUS_KEY = "goal";
+const WAIT_WIDGET = "goal-wait";
+
+function waitBody(text: string): string {
+	return stripTerminalSequences(text).replaceAll("\r\n", "\n").replaceAll("\t", "    ").replace(/\p{Cc}/gu, char => char === "\n" ? char : " ");
+}
+
+function updateWaitWidget(ctx: ExtensionContext, waiting: Goal["waiting"]): void {
+	if (!waiting) {
+		ctx.ui.setWidget(WAIT_WIDGET, undefined);
+		return;
+	}
+	ctx.ui.setWidget(WAIT_WIDGET, (tui, theme) => {
+		const reason = waitBody(waiting.reason);
+		const background = waiting.backgroundTask && waitBody(waiting.backgroundTask);
+		const frame = new Framed({
+			render(width) {
+				const rows = wrapTextWithAnsi(reason, width).map(line => theme.fg("text", line));
+				if (background) {
+					rows.push("", theme.bold("Background task"));
+					rows.push(...wrapTextWithAnsi(background, width).map(line => theme.fg("text", line)));
+				}
+				// Leave room for the transcript and input even for a long, narrow wait.
+				const limit = Math.max(2, Math.min(10, Math.floor(tui.terminal.rows / 3) - 2));
+				return rows.length > limit ? [...rows.slice(0, limit - 1), theme.fg("dim", "… /goal status for the full wait")] : rows;
+			},
+			invalidate() {},
+		}, `Goal ${waitLabel(waiting)}`, theme, "warning");
+		return { render: (width: number) => width < 6 ? [] : frame.render(width), invalidate: () => frame.invalidate() };
+	}, { placement: "aboveEditor" });
+}
 
 interface MessageLike {
 	role?: string;
@@ -104,6 +136,7 @@ export function registerGoal(pi: ExtensionAPI, config: () => UiConfig): { active
 	let wrapUpActive = false;
 	let waitTimer: ReturnType<typeof setTimeout> | undefined;
 	let completionTimer: ReturnType<typeof setTimeout> | undefined;
+	let shownWait: Goal["waiting"];
 
 	const turnLimit = () => (config().goalTurnLimit > 0 ? config().goalTurnLimit : null);
 	const noProgressLimit = () => (config().goalNoProgressTurns > 0 ? config().goalNoProgressTurns : null);
@@ -120,15 +153,28 @@ export function registerGoal(pi: ExtensionAPI, config: () => UiConfig): { active
 		else if (goal?.status === "paused" && !goal.safetyPauseCause) activity = { state: "idle", message: "Goal paused" };
 		else if (goal) activity = { state: "blocked", kind: "question", message: "Goal needs your review before resuming" };
 		reportActivity(ctxRef, "goal", activity && { ...activity, title: "Goal" });
+		if (!ctxRef) return;
+		const waiting = goal?.status === "active" ? goal.waiting : undefined;
 		try {
-			ctxRef?.ui.setStatus(STATUS_KEY, statusText(goal, turnLimit()));
-		} catch {}
+			ctxRef.ui.setStatus(STATUS_KEY, ctxRef.mode === "tui" && waiting ? waitLabel(waiting) : statusText(goal, turnLimit()));
+		} catch {
+			// A footer update is not part of the goal lifecycle.
+		}
+		showWait(ctxRef, waiting);
+	}
+
+	function showWait(ctx: ExtensionContext | undefined, waiting: Goal["waiting"]): void {
+		if (ctx?.mode !== "tui" || waiting === shownWait) return;
+		updateWaitWidget(ctx, waiting);
+		shownWait = waiting;
 	}
 
 	function notify(message: string, level: "info" | "warning" | "error" = "info"): void {
 		try {
 			ctxRef?.ui.notify(message, level);
-		} catch {}
+		} catch {
+			// Notifications are best-effort on noninteractive hosts.
+		}
 	}
 
 	/** Bank the running clock and the tokens spent since the goal started. */
@@ -345,12 +391,15 @@ export function registerGoal(pi: ExtensionAPI, config: () => UiConfig): { active
 			if (waitTimer) clearTimeout(waitTimer);
 			goal = undefined;
 			completed = true;
+			showWait(ctxRef, undefined);
 			reportActivity(ctxRef, "goal", { state: "done", title: "Goal", message: "Goal completed" });
 			pi.appendEntry(STATE_TYPE, { goal: null });
 			deactivateContract();
 			try {
 				ctxRef?.ui.setStatus(STATUS_KEY, "complete");
-			} catch {}
+			} catch {
+				// The goal is already complete even without a footer.
+			}
 			if (completionTimer) clearTimeout(completionTimer);
 			completionTimer = setTimeout(() => updateStatus(), 8000);
 			notify(`Goal complete: ${finished.text}`);
@@ -429,13 +478,22 @@ export function registerGoal(pi: ExtensionAPI, config: () => UiConfig): { active
 			persist();
 			scheduleWait();
 			const message = waitMessage(goal!.waiting);
-			notify(message);
+			if (ctx.mode !== "tui") notify(message);
 			const clamped = effective !== undefined && effective !== requested ? `\nThe next automatic check is in ${effective / 1000} seconds (the minimum wait).` : "";
 			return {
 				content: [{ type: "text" as const, text: `${message}${clamped}` }],
 				details: { goal, goal_id: params.goal_id, reason: params.reason, waiting_for: params.waiting_for, background_task: goal!.waiting.backgroundTask, resume_after_ms: effective, resume_at: goal!.waiting.resumeAt },
 				terminate: true,
 			};
+		},
+		renderCall(args, theme) {
+			return new Text(theme.bold(theme.fg("toolTitle", `Goal ${waitLabel({ waitingFor: args.waiting_for, reason: "" })}`)), 0, 0);
+		},
+		renderResult(result, options, theme) {
+			const rejected = (result.details as { rejected?: string } | undefined)?.rejected;
+			if (rejected) return new Text(theme.fg("error", `Rejected: ${rejected}`), 0, 0);
+			const text = result.content.filter(item => item.type === "text").map(item => waitBody(item.text)).join("\n");
+			return new Text(options.expanded ? text : "", 0, 0);
 		},
 	});
 
@@ -573,7 +631,9 @@ export function registerGoal(pi: ExtensionAPI, config: () => UiConfig): { active
 		stop(ctx, "paused");
 		try {
 			ctx.abort();
-		} catch {}
+		} catch {
+			// Pausing still takes effect if there is no live turn to abort.
+		}
 		notify(`Goal paused: ${goal?.text ?? ""}`);
 	}
 
@@ -787,6 +847,7 @@ export function registerGoal(pi: ExtensionAPI, config: () => UiConfig): { active
 		if (completionTimer) clearTimeout(completionTimer);
 		waitTimer = undefined;
 		if (goal?.status === "active") reportActivity(ctxRef, "goal", { state: "idle", title: "Goal", message: "Goal suspended with session" });
+		showWait(ctx, undefined);
 		ctxRef = undefined;
 	});
 	return { active: () => goal?.status === "active" || wrapUpActive };
