@@ -17,6 +17,20 @@ export interface DeliveryDetails {
 	code?: string;
 	retryable: boolean;
 	outcomeKnown: boolean;
+	demoted?: "late_reply";
+}
+
+export interface RexLocation {
+	sessionId: string;
+	blockId: string;
+	windowId?: string;
+	hostId?: string;
+}
+
+export function rexId(value: unknown, kind?: "session" | "block" | "window"): value is string {
+	if (typeof value !== "string" || (kind && !value.startsWith(`${kind}:`))) return false;
+	const id = kind ? value.slice(kind.length + 1) : value;
+	return id.length === 36 && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(id);
 }
 
 export interface SessionInfo {
@@ -40,6 +54,8 @@ export interface SessionInfo {
 	contextWindow?: number;
 	/** $TMUX_PANE at registration, when the session runs inside tmux. */
 	tmuxPane?: string;
+	/** Advertised at registration, not an Intercom address or proof of pane ownership. */
+	rex?: RexLocation;
 }
 
 export interface Attachment {
@@ -60,6 +76,8 @@ export interface Message {
 	supersedes?: string;
 	retryOf?: string;
 	replyTo?: string;
+	/** Set only by the broker when the original ask is no longer open. */
+	lateReplyTo?: string;
 	expectsReply?: boolean;
 	content: {
 		text: string;

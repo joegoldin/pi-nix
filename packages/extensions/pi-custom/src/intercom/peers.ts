@@ -9,6 +9,7 @@
 import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import type { Attachment, Message, SessionInfo } from "./broker/types.ts";
+import { formatRexLocation } from "./rex.ts";
 
 /** A Claude Code session as intercom lists it. */
 export interface ClaudeRow {
@@ -105,7 +106,7 @@ export function piRow(session: SessionInfo, currentCwd: string, isSelf: boolean,
 	const tags = [isSelf ? "self" : sameCwd(session.cwd, currentCwd) ? "same cwd" : undefined, session.status].filter(
 		(t): t is string => Boolean(t),
 	);
-	const pane = session.tmuxPane ? ` · tmux ${session.tmuxPane}` : "";
+	const pane = session.rex ? ` · ${formatRexLocation(session.rex)}` : session.tmuxPane ? ` · tmux ${session.tmuxPane}` : "";
 	return `• ${session.name || "Unnamed session"} (${idPrefix}) — ${session.cwd} (${session.model}${contextUsage(session)}${pane})${tags.length ? ` [${tags.join(", ")}]` : ""}`;
 }
 
@@ -220,6 +221,7 @@ export function deliveryMetadata(message: Message): string {
 	if (typeof message.senderSequence === "number") parts.push(`seq ${message.senderSequence}`);
 	if (message.supersedes) parts.push(`supersedes ${message.supersedes}`);
 	if (message.retryOf) parts.push(`retry of ${message.retryOf}`);
+	if (message.lateReplyTo) parts.push(`late reply to ${message.lateReplyTo}`);
 	const stamps: Array<[string, number | undefined]> = [
 		["sent", message.timestamp],
 		["broker delivered", message.brokerDeliveredAt],

@@ -107,6 +107,37 @@ describe("session identity", () => {
 	});
 });
 
+describe("Rex location", () => {
+	it("shows location on the correct roster row and in the owning session's status", async () => {
+		const previousSession = process.env.REX_SESSION;
+		const previousBlock = process.env.REX_BLOCK;
+		let a: Awaited<ReturnType<typeof session>> | undefined;
+		let b: Awaited<ReturnType<typeof session>> | undefined;
+		try {
+			delete process.env.REX_SESSION;
+			delete process.env.REX_BLOCK;
+			a = await session("rex-test-outside", "outside-rex");
+			process.env.REX_SESSION = "session:01234567-8901-2345-6789-012345678901";
+			process.env.REX_BLOCK = "block:01234567-8901-2345-6789-012345678901";
+			b = await session("rex-test-inside", "inside-rex");
+			const list = await a.runtime.list(".");
+			const rows = list.content[0]!.text.split("\n");
+			expect(rows.find(row => row.includes("• inside-rex"))).toContain(process.env.REX_BLOCK);
+			expect(rows.find(row => row.includes("• outside-rex"))).not.toContain("Rex:");
+			expect(list.details.roster).toMatchObject({ rexLocations: [{ id: "rex-test-inside", rex: { blockId: process.env.REX_BLOCK } }] });
+			expect((await b.runtime.status()).content[0]!.text).toContain(`Rex: ${process.env.REX_SESSION}`);
+			expect((await a.runtime.status()).content[0]!.text).not.toContain("Rex:");
+		} finally {
+			await b?.runtime.shutdown();
+			await a?.runtime.shutdown();
+			if (previousSession === undefined) delete process.env.REX_SESSION;
+			else process.env.REX_SESSION = previousSession;
+			if (previousBlock === undefined) delete process.env.REX_BLOCK;
+			else process.env.REX_BLOCK = previousBlock;
+		}
+	});
+});
+
 describe("between two sessions", () => {
 	it("lists, sends without triggering, asks and gets the reply", async () => {
 		const a = await session("aaaaaaaa-1111", "alpha");

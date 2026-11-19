@@ -13,7 +13,7 @@ import { resolve } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { IntercomClient, type SendResult } from "./broker/client.ts";
 import { spawnBrokerIfNeeded } from "./broker/spawn.ts";
-import type { Attachment, Message, MessageControl, MessageReceiptStatus, SessionInfo, SessionRegistration } from "./broker/types.ts";
+import type { Attachment, Message, MessageControl, MessageReceiptStatus, RexLocation, SessionInfo, SessionRegistration } from "./broker/types.ts";
 import { ClaudeTransport, type InboundMessage, type InboundReceipt } from "./claude/transport.ts";
 import { askTimeoutMs, type IntercomConfig } from "./config.ts";
 import { gitState, handoverBody, handoverMessage } from "./handover.ts";
@@ -32,6 +32,7 @@ import {
 	type Target,
 } from "./peers.ts";
 import { ReplyTracker } from "./reply-tracker.ts";
+import { formatRexLocation, readRexLocation } from "./rex.ts";
 
 const SESSION_ID_ENV = "PI_INTERCOM_SESSION_ID";
 const STABLE_ID_ENV = "PI_INTERCOM_STABLE_ID";
@@ -90,7 +91,18 @@ function deliveryDetails(result: SendResult): Record<string, unknown> {
 		outcomeKnown: result.outcomeKnown,
 		...(result.code ? { code: result.code } : {}),
 		...(result.reason ? { reason: result.reason } : {}),
+		...(result.demoted ? { demoted: result.demoted } : {}),
 	};
+}
+
+const LATE_REPLY_NOTE = "The ask was no longer open, so the reply was delivered as a regular message.";
+
+function isClosedAsk(result: SendResult): boolean {
+	return result.code === "E_REPLY_TARGET" && result.reason === "Reply target does not match a pending ask";
+}
+
+function closedAskText(label: string): string {
+	return `Reply to "${label}" was not delivered: the broker no longer has a matching ask. Use intercom with action "send" and no replyTo to send it as a new message.`;
 }
 
 function peerLabel(target: Target): string {
@@ -118,6 +130,7 @@ export class Intercom {
 	private piSessionId: string | null = null;
 	private intercomId: string | null = null;
 	private startedAt = 0;
+	private rexLocation: Promise<RexLocation | undefined> = Promise.resolve(undefined);
 	private model = "unknown";
 	private agentRunning = false;
 	private readonly activeTools = new Map<string, string>();
@@ -153,6 +166,7 @@ export class Intercom {
 		process.env[SESSION_ID_ENV] = this.intercomId;
 		this.model = ctx.model?.id ?? "unknown";
 		this.startedAt = Date.now();
+		this.rexLocation = readRexLocation();
 		this.agentRunning = false;
 		this.lastName = this.identity().name;
 		this.startNamePoll();
@@ -273,7 +287,7 @@ export class Intercom {
 		};
 	}
 
-	private registration(): SessionRegistration {
+	private registration(rex: RexLocation | undefined): SessionRegistration {
 		const ctx = this.ctx;
 		if (!ctx) throw new Error("Intercom runtime not initialized");
 		const pane = process.env.TMUX_PANE?.trim();
@@ -287,6 +301,7 @@ export class Intercom {
 			lastActivity: Date.now(),
 			status: this.statusLine(),
 			...(pane ? { tmuxPane: pane } : {}),
+			...(rex ? { rex } : {}),
 			...(typeof usage.contextPct === "number" ? { contextPct: usage.contextPct } : {}),
 			...(typeof usage.contextTokens === "number" ? { contextTokens: usage.contextTokens } : {}),
 			...(usage.contextWindow ? { contextWindow: usage.contextWindow } : {}),
@@ -319,11 +334,14 @@ export class Intercom {
 		if (this.connecting) return this.connecting;
 		if (!this.ctx) throw new Error("Intercom runtime not initialized");
 		const generation = this.generation;
+		const rexLocation = this.rexLocation;
 		const attempt: Promise<IntercomClient> = (async () => {
 			const client = new IntercomClient();
 			this.attach(client);
 			await spawnBrokerIfNeeded(this.config.brokerCommand, this.config.brokerArgs);
-			await client.connect(this.registration(), this.intercomId ?? undefined);
+			const rex = await rexLocation;
+			if (generation !== this.generation) throw new Error("Intercom runtime no longer active");
+			await client.connect(this.registration(rex), this.intercomId ?? undefined);
 			if (generation !== this.generation) {
 				await client.disconnect();
 				throw new Error("Intercom runtime no longer active");
@@ -623,8 +641,11 @@ export class Intercom {
 	async roster(): Promise<Roster> {
 		const client = await this.connect();
 		const sessions = await client.listSessions();
-		const self = sessions.find((s) => s.id === client.sessionId);
-		if (!self) throw new Error("Current session is missing from intercom session list.");
+		const registered = sessions.find((s) => s.id === client.sessionId);
+		if (!registered) throw new Error("Current session is missing from intercom session list.");
+		// A broker already running from an older package can omit the new field.
+		const rex = registered.rex ?? await this.rexLocation;
+		const self = rex ? { ...registered, rex } : registered;
 		let claude: ClaudeRow[] = [];
 		let claudeNote = this.claudeNote;
 		try {
@@ -640,7 +661,9 @@ export class Intercom {
 			const roster = await this.roster();
 			const filter = cwd === undefined ? undefined : cwd && cwd !== "." ? resolve(roster.self.cwd, cwd) : roster.self.cwd;
 			const { text: body, peers, total } = rosterText(roster, filter);
-			return text(body, { roster: { peers, total, ...(filter ? { cwd: filter } : {}) } });
+			const rexLocations = [roster.self, ...roster.pi.filter((s) => s.id !== roster.self.id && (!filter || sameCwd(s.cwd, filter)))]
+				.flatMap((s) => s.rex ? [{ id: s.id, rex: s.rex }] : []);
+			return text(body, { roster: { peers, total, ...(filter ? { cwd: filter } : {}), ...(rexLocations.length ? { rexLocations } : {}) } });
 		} catch (error) {
 			return fail(`Failed to list sessions: ${errorText(error)}`);
 		}
@@ -711,6 +734,10 @@ export class Intercom {
 				supersedes: request.supersedes,
 				retryOf: request.retryOf,
 			});
+			if (!result.delivered && replyTo && isClosedAsk(result)) {
+				this.tracker.dismiss(replyTo);
+				return fail(closedAskText(label), deliveryDetails(result));
+			}
 			if (!result.delivered) return text(`Message to "${label}" was not delivered: ${result.reason ?? "Session may not exist or has disconnected."}`, deliveryDetails(result));
 			this.pi.appendEntry("intercom_sent", {
 				to: label,
@@ -719,7 +746,7 @@ export class Intercom {
 				timestamp: Date.now(),
 			});
 			if (replyTo) this.tracker.dismiss(replyTo);
-			return text(inferred ? `Reply sent to ${label} (inferred from pending ask)` : `Message sent to ${label}`, {
+			return text(result.demoted ? `Message sent to ${label}. ${LATE_REPLY_NOTE}` : inferred ? `Reply sent to ${label} (inferred from pending ask)` : `Message sent to ${label}`, {
 				...deliveryDetails(result),
 				...(replyTo ? { replyTo } : {}),
 			});
@@ -866,7 +893,9 @@ export class Intercom {
 			if (context.from.id === client.sessionId) return fail("Cannot message the current session");
 			const result = await client.send(context.from.id, { text: request.message, attachments: request.attachments, replyTo: context.message.id });
 			if (!result.delivered) {
-				if (result.reason === "Session not found") this.tracker.dismiss(context.message.id);
+				const closedAsk = isClosedAsk(result);
+				if (closedAsk || result.code === "E_TARGET_NOT_FOUND") this.tracker.dismiss(context.message.id);
+				if (closedAsk) return fail(closedAskText(label), deliveryDetails(result));
 				return text(`Reply to "${label}" was not delivered: ${result.reason ?? "Session may not exist or has disconnected."}`, deliveryDetails(result));
 			}
 			this.tracker.dismiss(context.message.id);
@@ -876,7 +905,7 @@ export class Intercom {
 				messageId: result.id,
 				timestamp: Date.now(),
 			});
-			return text(`Reply sent to ${label}`, { ...deliveryDetails(result), replyTo: context.message.id });
+			return text(result.demoted ? `Message sent to ${label}. ${LATE_REPLY_NOTE}` : `Reply sent to ${label}`, { ...deliveryDetails(result), replyTo: context.message.id });
 		} catch (error) {
 			return fail(`Failed to reply: ${errorText(error)}`);
 		}
@@ -926,7 +955,8 @@ export class Intercom {
 			const client = await this.connect();
 			const sessions = await client.listSessions();
 			const claude = this.claude?.address ? `registered as "${this.claude.name}" at ${this.claude.address}` : (this.claudeNote ?? "not registered");
-			return text(`**Intercom Status:**\nConnected: Yes\nSession ID: ${client.sessionId}\nActive sessions: ${sessions.length}\nClaude Code: ${claude}`);
+			const rex = sessions.find((s) => s.id === client.sessionId)?.rex ?? await this.rexLocation;
+			return text(`**Intercom Status:**\nConnected: Yes\nSession ID: ${client.sessionId}\nActive sessions: ${sessions.length}\nClaude Code: ${claude}${rex ? `\n${formatRexLocation(rex)}` : ""}`, rex ? { rex } : {});
 		} catch (error) {
 			return fail(`Failed to get status: ${errorText(error)}`);
 		}

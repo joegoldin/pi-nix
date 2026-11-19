@@ -31,10 +31,12 @@ Usage:
   intercom({ action: "cancel", messageId: "..." })                 → Request cancellation of a sent message (pi sessions only)
   intercom({ action: "reply", message: "..." })                      → Reply to the active/single pending ask
   intercom({ action: "pending" })                                      → List unresolved inbound asks
-  intercom({ action: "status" })                  → Show connection status
+  intercom({ action: "status" })                  → Show connection status and current Rex location, if any
   intercom({ action: "complete", to: "requester-id", message: "Evidence and results", requestCleanup: true, quit: "ask" }) → Report completion, request pane cleanup, optionally ask the local user to exit
 
 Completion is self-reported, not proof of integration. Cleanup requests do not authorize pane closure.
+Rex IDs in the Pi roster describe terminal location, not Intercom addresses or pane-control authorization. Verify the current pane and occupant in Rex before any terminal action.
+
 quit defaults to "keep". "ask" requires local user confirmation; "auto" requires this Pi instance to have been launched with --peer-auto-exit after explicit user authorization. Exit waits for a clean final reply and refuses unfinished local work. It never closes panes or worktrees.`;
 
 /** `intercom()` is null between sessions, before the first session_start. */

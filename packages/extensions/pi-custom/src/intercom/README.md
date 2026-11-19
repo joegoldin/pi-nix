@@ -21,6 +21,16 @@ sections. A `to` is resolved by exact id, then by name across both lists, then
 by id prefix; `pi:<name>` or `claude:<name>` picks one when both lists hold the
 name, and a `uds:` address is always Claude's.
 
+Pi peers in Rex advertise their session and block (pane) IDs in `list` and
+`list-cwd`. `status` shows the current Pi session's location. A bounded,
+read-only `rex whoami` lookup adds window (tab) and host IDs if it confirms the
+inherited session and block. Without the CLI, only the inherited IDs are
+shown. These are hints, not message addresses or proof of pane ownership.
+Verify the location and occupant in Rex before any authorized terminal action.
+Claude Code's peer registry does not report Rex locations. An older broker
+still works but cannot relay other peers' Rex metadata; the new broker takes
+over once the older one exits normally.
+
 Claude Code peers take text only: attachments are inlined, and `cancel`,
 `supersedes` and `retryOf` are refused. An `ask` to Claude resolves on the next
 message from that session (Claude has no reply ids) and fails early if Claude
@@ -57,7 +67,9 @@ waiting `ask`, recorded as answerable, then held or shown:
   is busy, and under `busyDelivery: "human-first"`, messages wait and are
   delivered when it is safe.
 - **Replies are explicit.** Nothing is ever sent on the model's behalf; it
-  answers with `reply` or `send`.
+  answers with `reply` or `send`. If the original ask closed but the broker
+  still knows both sides of it, a late reply arrives as a regular message.
+  It does not satisfy another ask or wake a session set to `replies`.
 
 Messages render as a rounded box headed by the sender (ctrl+o expands).
 

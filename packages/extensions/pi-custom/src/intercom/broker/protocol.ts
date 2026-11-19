@@ -16,6 +16,8 @@ import type {
 	SessionRegistration,
 } from "./types.ts";
 
+import { rexId } from "./types.ts";
+
 const DEFAULT_ASK_TIMEOUT_MS = 10 * 60 * 1000;
 
 /**
@@ -97,7 +99,7 @@ export function isMessage(value: unknown): value is Message {
 	for (const key of ["senderSequence", "brokerReceivedAt", "brokerDeliveredAt", "receiverReceivedAt", "injectedAt"] as const) {
 		if (!optional(value[key], "number")) return false;
 	}
-	for (const key of ["supersedes", "retryOf", "replyTo"] as const) {
+	for (const key of ["supersedes", "retryOf", "replyTo", "lateReplyTo"] as const) {
 		if (!optional(value[key], "string")) return false;
 	}
 	if (!optional(value.expectsReply, "boolean")) return false;
@@ -121,6 +123,16 @@ export function messageDeliveryFingerprint(message: Message, targetId: string): 
 	});
 }
 
+function optionalRexLocation(value: unknown): boolean {
+	return value === undefined || (
+		isRecord(value) &&
+		rexId(value.sessionId, "session") &&
+		rexId(value.blockId, "block") &&
+		(value.windowId === undefined || rexId(value.windowId, "window")) &&
+		(value.hostId === undefined || rexId(value.hostId))
+	);
+}
+
 export function isSessionInfo(value: unknown): value is SessionInfo {
 	if (!isRecord(value)) return false;
 	if (
@@ -141,6 +153,7 @@ export function isSessionInfo(value: unknown): value is SessionInfo {
 		optional(value.contextPct, "number") &&
 		optional(value.contextTokens, "number") &&
 		optional(value.contextWindow, "number") &&
+		optionalRexLocation(value.rex) &&
 		optional(value.tmuxPane, "string") &&
 		optional(value.trustedLocal, "boolean")
 	);
@@ -165,6 +178,7 @@ export function isSessionRegistration(value: unknown): value is SessionRegistrat
 		optional(value.name, "string") &&
 		optional(value.runtimeFallbackAlias, "boolean") &&
 		optional(value.status, "string") &&
+		optionalRexLocation(value.rex) &&
 		optional(value.tmuxPane, "string")
 	);
 }

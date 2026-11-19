@@ -298,8 +298,18 @@ describe("asks", () => {
 		const reply = await target.client.send(asker.id, { text: "answer", replyTo: ask.id });
 		expect(reply.delivered).toBe(true);
 		await until(() => asker.messages.find((m) => m.message.replyTo === ask.id), "reply");
-		// The edge is spent once answered.
-		expect((await target.client.send(asker.id, { text: "again", replyTo: ask.id })).code).toBe("E_REPLY_TARGET");
+		// The edge is spent once answered, but a late answer still reaches the original asker.
+		const options = { messageId: unique("late"), text: "one more thing", replyTo: ask.id };
+		const late = await target.client.send(asker.id, options);
+		expect(late.demoted).toBe("late_reply");
+		const message = (await until(() => asker.messages.find((m) => m.message.id === late.id), "late reply")).message;
+		expect(message.replyTo).toBeUndefined();
+		expect(message.lateReplyTo).toBe(ask.id);
+		expect((await target.client.send(asker.id, options)).demoted).toBe("late_reply");
+		expect(asker.messages.filter((m) => m.message.id === late.id)).toHaveLength(1);
+		expect((await bystander.client.send(asker.id, { text: "not you", replyTo: ask.id })).code).toBe("E_REPLY_TARGET");
+		const plain = await asker.client.send(target.id, { text: "not an ask" });
+		expect((await target.client.send(asker.id, { text: "answer", replyTo: plain.id })).code).toBe("E_REPLY_TARGET");
 	});
 
 	it("refuses a mutual ask, and allows it again after cancel_ask", async () => {

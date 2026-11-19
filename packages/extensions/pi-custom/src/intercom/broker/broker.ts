@@ -77,6 +77,7 @@ interface ConnectedSession {
 }
 
 interface DeliveryRecord {
+	demoted?: "late_reply";
 	fingerprint: string;
 	state: DeliveryState;
 	reason?: string;
@@ -99,6 +100,7 @@ interface AskEdge {
 }
 
 interface MessageReceiptRoute {
+	expectsReply?: boolean;
 	from: string;
 	to: string;
 	createdAt: number;
@@ -406,6 +408,12 @@ class IntercomBroker {
 			startedAt: session.startedAt,
 			lastActivity: session.lastActivity,
 			...(session.status !== undefined ? { status: session.status } : {}),
+			...(session.rex ? { rex: {
+				sessionId: session.rex.sessionId,
+				blockId: session.rex.blockId,
+				...(session.rex.windowId ? { windowId: session.rex.windowId } : {}),
+				...(session.rex.hostId ? { hostId: session.rex.hostId } : {}),
+			} } : {}),
 			...(session.tmuxPane !== undefined ? { tmuxPane: session.tmuxPane } : {}),
 			trustedLocal: true,
 		};
@@ -448,6 +456,7 @@ class IntercomBroker {
 			return;
 		}
 
+		delete message.lateReplyTo; // Only the broker may mark a late reply.
 		const brokerReceivedAt = Date.now();
 		this.pruneAskEdges(brokerReceivedAt);
 		this.pruneMessageReceiptRoutes(brokerReceivedAt);
@@ -489,13 +498,19 @@ class IntercomBroker {
 
 		const targets = this.findSessions(to, fromSession.scopeId);
 		if (targets.length === 1) {
-			if (message.replyTo && !replyEdge) {
-				this.writeDeliveryFailure(socket, message.id, "Reply target does not match a pending ask", "E_REPLY_TARGET");
-				return;
-			}
 			const target = targets[0]!;
 			const fingerprint = messageDeliveryFingerprint(message, target.info.id);
 			if (this.replayOrReject(socket, currentKey, message.id, fingerprint)) return;
+			if (message.replyTo && !replyEdge) {
+				const route = this.messageReceiptRoutes.get(message.replyTo);
+				if (message.expectsReply || !route?.expectsReply || route.from !== target.key || route.to !== currentKey) {
+					this.writeDeliveryFailure(socket, message.id, "Reply target does not match a pending ask", "E_REPLY_TARGET");
+					return;
+				}
+				// Preserve the answer without resolving a waiter or waking a replies-only session.
+				message.lateReplyTo = message.replyTo;
+				delete message.replyTo;
+			}
 			if (message.supersedes) {
 				const supersededRoute = this.messageReceiptRoutes.get(message.supersedes);
 				if (!supersededRoute || supersededRoute.from !== currentKey || supersededRoute.to !== target.key) {
@@ -522,7 +537,7 @@ class IntercomBroker {
 					this.writeDeliveryFailure(
 						socket,
 						message.id,
-						"Mutual ask refused: target session is already waiting for a reply from this session.",
+						"Mutual ask refused: the target is already waiting for you. Use intercom with action \"reply\" to answer its ask first.",
 						"E_MUTUAL_ASK",
 					);
 					return;
@@ -545,9 +560,10 @@ class IntercomBroker {
 				message: { ...message, brokerReceivedAt, brokerDeliveredAt: Date.now() },
 			});
 			if (message.replyTo) this.askEdges.delete(message.replyTo);
-			this.messageReceiptRoutes.set(message.id, { from: currentKey, to: target.key, createdAt: brokerReceivedAt });
-			this.recordDelivery(currentKey, message.id, fingerprint, "socket_delivered");
-			this.writeDeliverySuccess(socket, message.id, "socket_delivered");
+			this.messageReceiptRoutes.set(message.id, { from: currentKey, to: target.key, expectsReply: message.expectsReply, createdAt: brokerReceivedAt });
+			const record = this.recordDelivery(currentKey, message.id, fingerprint, "socket_delivered");
+			if (message.lateReplyTo) record.demoted = "late_reply";
+			this.writeDeliverySuccess(socket, message.id, "socket_delivered", record.demoted);
 			return;
 		}
 
@@ -741,8 +757,8 @@ class IntercomBroker {
 		});
 	}
 
-	private writeDeliverySuccess(socket: net.Socket, messageId: string, delivery: "socket_delivered" | "queued"): void {
-		writeMessage(socket, { type: "delivered", messageId, delivery, retryable: false, outcomeKnown: true });
+	private writeDeliverySuccess(socket: net.Socket, messageId: string, delivery: "socket_delivered" | "queued", demoted?: "late_reply"): void {
+		writeMessage(socket, { type: "delivered", messageId, delivery, retryable: false, outcomeKnown: true, ...(demoted ? { demoted } : {}) });
 	}
 
 	private writeDeliveryFailure(socket: net.Socket, messageId: string, reason: string, code: string, retryable = false): void {
@@ -770,7 +786,7 @@ class IntercomBroker {
 		}
 		if (record.code === "E_TARGET_REBOUND" && record.retryable) return false;
 		if (record.state === "socket_delivered" || record.state === "queued") {
-			this.writeDeliverySuccess(socket, messageId, record.state);
+			this.writeDeliverySuccess(socket, messageId, record.state, record.demoted);
 		} else {
 			this.writeDeliveryFailure(socket, messageId, record.reason ?? "Previous delivery failed", record.code ?? "E_DELIVERY_FAILED", record.retryable);
 		}
@@ -785,14 +801,14 @@ class IntercomBroker {
 		reason?: string,
 		code?: string,
 		retryable = false,
-	): void {
+	): DeliveryRecord {
 		this.pruneDeliveryRecords();
 		while (this.deliveryRecords.size >= MAX_DELIVERY_RECORDS) {
 			const oldest = this.deliveryRecords.keys().next().value;
 			if (oldest === undefined) break;
 			this.deliveryRecords.delete(oldest);
 		}
-		this.deliveryRecords.set(this.deliveryRecordKey(fromKey, messageId), {
+		const record: DeliveryRecord = {
 			fingerprint,
 			state,
 			...(reason ? { reason } : {}),
@@ -800,7 +816,9 @@ class IntercomBroker {
 			retryable,
 			outcomeKnown: true,
 			createdAt: Date.now(),
-		});
+		};
+		this.deliveryRecords.set(this.deliveryRecordKey(fromKey, messageId), record);
+		return record;
 	}
 
 	private pruneDeliveryRecords(now = Date.now()): void {

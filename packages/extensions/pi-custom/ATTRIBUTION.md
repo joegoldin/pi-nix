@@ -133,3 +133,11 @@ module-global group-cache fixes do not map directly to this renderer: diffs are
 parsed from Pi's display rows, and card caches are instance-local, include width
 and group identity/revision, and are invalidated on streaming updates.
 pi-claude-link remains at the already reviewed `7fdccbd`; no new port is needed.
+
+## Intercom upstream review (4b387e800116)
+
+Adapted late-reply delivery (`529d407051ea`) and actionable reply errors for the
+local broker and its existing delivery replay guard. Kept the local broker PID
+ownership checks: upstream's endpoint probe can treat a closed or malformed
+connection as proof that a live PID is stale. The SSH relay, Herdr, extension
+bus and sender-controlled wake policy are not part of this integration.

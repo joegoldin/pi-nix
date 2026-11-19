@@ -354,6 +354,7 @@ export class IntercomClient extends EventEmitter {
 					retryable: (retryable as boolean | undefined) ?? false,
 					outcomeKnown: (outcomeKnown as boolean | undefined) ?? true,
 					...(typeof brokerMessage.code === "string" ? { code: brokerMessage.code } : {}),
+					...(brokerMessage.demoted === "late_reply" ? { demoted: brokerMessage.demoted } : {}),
 				});
 				break;
 			}
