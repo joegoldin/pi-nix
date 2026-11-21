@@ -35,7 +35,7 @@ let
   #
   #   options.nix -- jail.privateAgentSubdirs has to append its tmpfs after the
   #   agent-directory bind, and that bind is emitted here.
-  #   VERSION.json, bun.nix -- the Pi 1.5.2 source and generated dependencies;
+  #   VERSION.json, bun.nix -- the Pi 1.6.0 source and generated dependencies;
   #   bun.nix also maps apps/* workspace members through workspaceSubdir.
   #   package.nix, package-bun.nix -- upstream's pi-patch hook, as upstream.
   #   regenerate-models.nix -- upstream's version, applying pi-patch before npm ci.
@@ -44,8 +44,8 @@ let
   #   compatibility against the minimatch that Pi ships.
   #   scan.nix -- supply zizmor's missing system AWS-LC build dependency.
   expected = {
-    "VERSION.json" = "94cb5a64fd81d70defada1659f8b5fa1ce356ec15a2c277c88ecee793de3b06d";
-    "coding-agent/bun.nix" = "cf20cb1e8ff0a4e454fd82664819a4fe5484c1635f5aad5f4cbd35fa96a03d30";
+    "VERSION.json" = "4d73be5a3be78b1ade44fe181e7cb01c7970026fbf87608d2324b3bde0bbbfed";
+    "coding-agent/bun.nix" = "4e39d9ea5f0245612fd94e0de1c3b3692622eb8774ac22f13cbeb4e60e9f5205";
     "coding-agent/options.nix" = "8e4d15055baf64dd62f7e5d724d1fd958eee1cbec2299f5a414a8d8fb001747a";
     "coding-agent/package-bun.nix" = "658c5e5448f36273ac49e4eba53b6269c59f4b972a24075a01e3fafc4f13c571";
     "coding-agent/package.nix" = "87e9dd8852a559c1030cf4fb749e88369741b4461ec93a84aadc650a1bff4fac";

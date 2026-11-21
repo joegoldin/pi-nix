@@ -9,12 +9,13 @@ function prompt(text: string, columns = 24, rows = 80) {
 	const copied: string[] = [];
 	const terminal = { columns, rows, write() {}, hideCursor() {}, showCursor() {}, moveBy() {}, setCursorPosition() {}, clearLine() {}, clearFromCursor() {} };
 	const tui = new TuiAltScreen(terminal as never, false, undefined, { copySelection: async text => { copied.push(text); return true; } });
-	tui.requestRender = () => {};
+	const native = tui as any;
+	// The fixture renders frames by hand but still needs to mark content dirty.
+	native.requestViewRender = () => {};
 	const Prompt = createPromptEditor(CustomEditor as never, () => identity);
 	const target = new Prompt(tui, { borderColor: identity, selectList: {} }, { matches: () => false }) as unknown as CustomEditor;
 	target.setText(text);
 	tui.setLayoutRoot(target);
-	const native = tui as any;
 	native.stopped = false; native.altScreenActive = true; native.doRender();
 	return {
 		target, tui, native, copied,
@@ -89,6 +90,13 @@ test("partial conversation selections join only selected fragments, including wi
 	// The native wrapper puts 界 on its own row; begin inside the emoji's second cell.
 	const selection = { start: { row: 1, col: 2 }, end: { row: 2, col: 4 } };
 	expect((await copyConversation(text, 14, 6, selection)).text).toBe("🙂abcdefghijklm");
+});
+
+test("whole table cells take precedence over pi-custom's conversation copy adapter", async () => {
+	const table = new Markdown("| First | Next |\n|---|---|\n| a | b |", 0, 0, markdownTheme as never);
+	const copied = await copyConversation(table, 42, 8, { start: { row: 1, col: 2 }, end: { row: 3, col: 2 } });
+	expect(copied.displayed).toBe("First\na");
+	expect(copied.text).toBe(copied.displayed);
 });
 
 test("custom tool payload borders and deliberate newlines are not guessed to be UI chrome", async () => {

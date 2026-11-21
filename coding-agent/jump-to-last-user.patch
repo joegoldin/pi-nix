@@ -1,8 +1,7 @@
 diff --git a/packages/coding-agent/src/modes/interactive/components/user-message.ts b/packages/coding-agent/src/modes/interactive/components/user-message.ts
-index e313e02..2cda775 100644
 --- a/packages/coding-agent/src/modes/interactive/components/user-message.ts
 +++ b/packages/coding-agent/src/modes/interactive/components/user-message.ts
-@@ -3,7 +3,7 @@ import type { MarkdownTransformer } from "../../../core/extensions/types.ts";
+@@ -3,7 +3,7 @@
  import { getMarkdownTheme, theme } from "../theme/theme.ts";
  import { createMarkdownTransform } from "./markdown-transform.ts";
  
@@ -12,25 +11,29 @@ index e313e02..2cda775 100644
  const OSC133_ZONE_FINAL = "\x1b]133;C\x07";
  
 diff --git a/packages/coding-agent/src/modes/interactive/tui-renderer.ts b/packages/coding-agent/src/modes/interactive/tui-renderer.ts
-index 6487c1c..56918b2 100644
 --- a/packages/coding-agent/src/modes/interactive/tui-renderer.ts
 +++ b/packages/coding-agent/src/modes/interactive/tui-renderer.ts
-@@ -32,6 +32,10 @@ export function createInteractiveTui(options: InteractiveTuiOptions): TuiMainScr
- 				const label = ` ↓ Jump to latest message${shortcut ? ` · ${shortcut}` : ""} `;
- 				return theme.bg("selectedBg", theme.fg("text", label));
- 			},
-+			scrollToLastPromptIndicator: () => {
-+				const label = " ↑ Jump to previous user message ";
+@@ -27,9 +27,14 @@
+ 			searchMatchStyle: (text) => theme.underline(styleSearchMatch(text)),
+ 			searchCurrentMatchStyle: (text) => theme.bold(theme.inverse(styleSearchMatch(text))),
+ 			searchNavigationButtonStyle: (text, hovered) => (hovered ? theme.underline(text) : text),
+-			scrollToEndIndicator: () => {
++			scrollToEndIndicator: (unseenTurns) => {
+ 				const shortcut = keyDisplayText("tui.altScreen.bottom");
+-				const label = ` ↓ Jump to latest message${shortcut ? ` · ${shortcut}` : ""} `;
++				const count = unseenTurns > 0 ? ` ${unseenTurns} new ${unseenTurns === 1 ? "turn" : "turns"} ·` : "";
++				const label = ` ↓${count} Jump to latest message${shortcut ? ` · ${shortcut}` : ""} `;
 +				return theme.bg("selectedBg", theme.fg("text", label));
 +			},
++			scrollToLastPromptIndicator: () => {
++				const label = " ↑ Jump to previous user message ";
+ 				return theme.bg("selectedBg", theme.fg("text", label));
+ 			},
  			openUrl: openBrowser,
- 			onRightClickPaste: options.onRightClickPaste,
- 			copyOnSelect: options.fullscreenCopyOnSelect,
 diff --git a/packages/tui/src/layout.ts b/packages/tui/src/layout.ts
-index a64c262..ba14441 100644
 --- a/packages/tui/src/layout.ts
 +++ b/packages/tui/src/layout.ts
-@@ -11,7 +11,7 @@ import {
+@@ -11,7 +11,7 @@
  	visibleWidth,
  } from "./utils.ts";
  
@@ -40,10 +43,9 @@ index a64c262..ba14441 100644
  export interface LayoutRect {
  	x: number;
 diff --git a/packages/tui/src/tui-alt-screen.ts b/packages/tui/src/tui-alt-screen.ts
-index 85f69ac..d4c12a4 100644
 --- a/packages/tui/src/tui-alt-screen.ts
 +++ b/packages/tui/src/tui-alt-screen.ts
-@@ -71,8 +71,9 @@ const FOCUS_IN = "\x1b[I";
+@@ -71,8 +71,9 @@
  const FOCUS_OUT = "\x1b[O";
  const BEGIN_SYNCHRONIZED_OUTPUT = "\x1b[?2026h";
  const END_SYNCHRONIZED_OUTPUT = "\x1b[?2026l";
@@ -55,15 +57,20 @@ index 85f69ac..d4c12a4 100644
  const PAGE_SCROLL_OVERLAP = 4;
  const ALT_WHEEL_SCROLL_MULTIPLIER = 5;
  const MAX_CACHED_OFFSCREEN_KITTY_IMAGES = 16;
-@@ -185,6 +186,7 @@ export interface TuiAltScreenOptions {
- 	 * primary scroll view while that view is scrolled away from its end.
+@@ -182,9 +183,10 @@
+ 	searchNavigationButtonStyle?: (text: string, hovered: boolean) => string;
+ 	/**
+ 	 * Render a clickable jump-to-end label. It is centered on the last row of a follow-end
+-	 * primary scroll view while that view is scrolled away from its end.
++	 * primary scroll view while that view is scrolled away from its end. Receives the number of user turns below the viewport.
  	 */
- 	scrollToEndIndicator?: () => string;
+-	scrollToEndIndicator?: () => string;
++	scrollToEndIndicator?: (unseenTurns: number) => string;
 +	scrollToLastPromptIndicator?: (direction: -1 | 1) => string;
  	/** Open an OSC 8 hyperlink activated with a primary-button click. */
  	openUrl?: (url: string) => void;
  	/** Handle an unmodified secondary-button press for clipboard paste. Currently enabled on Windows only. */
-@@ -228,6 +230,7 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
+@@ -228,6 +230,7 @@
  	private scrollbarDrag?: ScrollbarDrag;
  	private scrollbarHover?: ScrollView;
  	private scrollToEndIndicatorRect?: ScrollToEndIndicatorRect;
@@ -71,15 +78,17 @@ index 85f69ac..d4c12a4 100644
  	private activeSearch?: ActiveSearch;
  	private pressedUrl?: string;
  	private selectionDragged = false;
-@@ -248,6 +251,7 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
+@@ -247,7 +250,8 @@
+ 	private readonly searchMatchStyle: (text: string) => string;
  	private readonly searchCurrentMatchStyle: (text: string) => string;
  	private readonly searchNavigationButtonStyle: (text: string, hovered: boolean) => string;
- 	private readonly scrollToEndIndicator?: () => string;
+-	private readonly scrollToEndIndicator?: () => string;
++	private readonly scrollToEndIndicator?: (unseenTurns: number) => string;
 +	private readonly scrollToLastPromptIndicator?: (direction: -1 | 1) => string;
  	private readonly openUrl?: (url: string) => void;
  	private readonly onRightClickPaste?: () => void;
  	private copyOnSelect: boolean;
-@@ -275,6 +279,7 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
+@@ -275,6 +279,7 @@
  		this.searchCurrentMatchStyle = options.searchCurrentMatchStyle ?? ((text) => `\x1b[1;7m${text}\x1b[22;27m`);
  		this.searchNavigationButtonStyle = options.searchNavigationButtonStyle ?? ((text) => text);
  		this.scrollToEndIndicator = options.scrollToEndIndicator;
@@ -87,7 +96,7 @@ index 85f69ac..d4c12a4 100644
  		this.openUrl = options.openUrl;
  		this.onRightClickPaste = options.onRightClickPaste;
  		this.copyOnSelect = options.copyOnSelect ?? true;
-@@ -1048,6 +1053,20 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
+@@ -1050,6 +1055,20 @@
  	}
  
  	private handleScrollToEndIndicatorMouseEvent(event: SgrMouseEvent): boolean {
@@ -108,7 +117,27 @@ index 85f69ac..d4c12a4 100644
  		const rect = this.scrollToEndIndicatorRect;
  		if (!rect || event.release || (event.button & 32) !== 0 || (event.button & 3) !== 0) return false;
  		if (event.y !== rect.row || event.x < rect.column || event.x >= rect.column + rect.width) return false;
-@@ -1676,6 +1695,42 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
+@@ -1661,11 +1680,17 @@
+ 		if (!this.scrollToEndIndicator || !scrollView.followEnd || scrollView.isFollowingEnd) return screen;
+ 		const box = getScrollViewBox(layout, scrollView);
+ 		const clip = box?.clip;
+-		if (!clip || clip.width <= 0 || clip.height <= 0) return screen;
++		if (!box || !clip || clip.width <= 0 || clip.height <= 0) return screen;
+ 		const row = clip.y + clip.height - 1;
+ 		if (row >= screen.length || isImageLine(screen[row] ?? "")) return screen;
+ 		const scrollbarColumn = box ? getScrollbarGeometry(box)?.column : undefined;
+-		const label = truncateToWidth(this.scrollToEndIndicator(), clip.width, "");
++		const firstUnseenRow = scrollView.scrollTop + row - box.rect.y + 1;
++		const lines = box.scrollContentLines ?? [];
++		let unseenTurns = 0;
++		for (let i = firstUnseenRow; i < lines.length; i++) {
++			if (OSC133_USER_START.test(lines[i]!)) unseenTurns++;
++		}
++		const label = truncateToWidth(this.scrollToEndIndicator(unseenTurns), clip.width, "");
+ 		const labelWidth = visibleWidth(label);
+ 		const column = clip.x + Math.floor((clip.width - labelWidth) / 2);
+ 		const rightEdge = scrollbarColumn ?? clip.x + clip.width;
+@@ -1679,6 +1704,42 @@
  		return result;
  	}
  
@@ -151,7 +180,7 @@ index 85f69ac..d4c12a4 100644
  	private compositeFlashes(screen: string[], width: number, height: number): string[] {
  		const flashLines = this.flashes.render(width).slice(-height);
  		if (flashLines.length === 0) return screen;
-@@ -1703,6 +1758,7 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
+@@ -1709,6 +1770,7 @@
  		let screen = this.resolveFakeCursors(nextLayout.lines.map((line) => line.replace(OSC133_ZONE_PREFIX, "")));
  		screen = this.applySearchHighlights(screen, nextLayout);
  		screen = this.compositeScrollToEndIndicator(screen, nextLayout, width);
@@ -161,10 +190,9 @@ index 85f69ac..d4c12a4 100644
  		screen = this.applySelection(screen, nextLayout);
 diff --git a/packages/tui/test/jump-to-last-user.test.ts b/packages/tui/test/jump-to-last-user.test.ts
 new file mode 100644
-index 0000000..3966272
 --- /dev/null
 +++ b/packages/tui/test/jump-to-last-user.test.ts
-@@ -0,0 +1,201 @@
+@@ -0,0 +1,237 @@
 +import assert from "node:assert/strict";
 +import { it } from "node:test";
 +import { ScrollView } from "../src/components/scroll-view.ts";
@@ -362,6 +390,42 @@ index 0000000..3966272
 +		tui.requestRender();
 +		await terminal.waitForRender();
 +		assert.ok(!terminal.getViewport()[0].includes(label));
++	} finally {
++		tui.stop();
++	}
++});
++
++it("counts only user turns below the visible rows, including after resize and new output", async () => {
++	const terminal = new VirtualTerminal(60, 4);
++	const tui = new TuiAltScreen(terminal, undefined, undefined, {
++		scrollToEndIndicator: (count) => ` Jump to latest (${count}) `,
++	});
++	const lines = [
++		`${prompt}first`, "first answer", `${prompt}visible`, "visible answer",
++		`${prompt}below`, "\x1b]133;A\x07assistant", ...Array(10).fill("streaming output"),
++	];
++	const text = new Text(lines.join("\n"), 0, 0);
++	const transcript = new ScrollView(text, { follow: "end", primary: true });
++	tui.setLayoutRoot(transcript);
++	tui.start();
++	try {
++		await terminal.waitForRender();
++		transcript.scrollTo(0, { disableFollow: true });
++		tui.requestRender();
++		await terminal.waitForRender();
++		assert.match(terminal.getViewport()[3]!, /Jump to latest \(1\)/);
++		terminal.resize(40, 5);
++		await terminal.waitForRender();
++		assert.match(terminal.getViewport()[4]!, /Jump to latest \(0\)/);
++		text.setText([...lines, `${prompt}new turn`, "answer"].join("\n"));
++		tui.requestRender();
++		await terminal.waitForRender();
++		assert.match(terminal.getViewport()[4]!, /Jump to latest \(1\)/);
++		terminal.sendInput("\x1b[<0;20;5M");
++		terminal.sendInput("\x1b[<0;20;5m");
++		await terminal.waitForRender();
++		assert.ok(transcript.isFollowingEnd);
++		assert.ok(!terminal.getViewport().some((line) => line.includes("Jump to latest")));
 +	} finally {
 +		tui.stop();
 +	}

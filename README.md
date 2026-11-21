@@ -201,6 +201,55 @@ key. The legacy `openai-codex` provider and its model catalog are not bundled.
 Existing saved credentials are not changed. The old `/usage` command depended
 on that legacy login, so Pi no longer displays those subscription quota numbers.
 
+### Fullscreen selection
+
+Drag in the prompt to copy the draft text. Pi skips the frame, prompt glyph,
+and visual padding, rejoins soft wraps, and keeps real line breaks, spaces,
+and typed `|` or `│` characters. In regular mode, selection belongs to your
+terminal; Pi cannot remove decorations from that clipboard text.
+
+Drag between two cells in the same rendered Markdown table to select a
+rectangle of whole cells. One column copies as plain text, one value per row;
+multiple columns copy as tab-separated text. A wrapped cell still copies as
+one value. A drag that starts or ends outside the table uses normal text
+selection. The jump-to-latest button counts user turns that start below the
+viewport, not the assistant output still streaming from a visible turn.
+
+### Working-copy review
+
+With `pi-custom` enabled, `/changes` lists local additions, modifications and
+removals, including edits from shell commands. The baseline is `HEAD` for Git
+and the working-copy commit’s parent for Git-backed Jujutsu. It reads the files
+on disk without staging, committing or snapshotting. Jujutsu merge working
+copies are not supported.
+
+Press **Enter** for the patch, **n/p** to jump between hunks, and **o** to open
+an in-Pi source preview at the selected line. **Space** toggles a review mark
+for that version of the file. **r** refreshes the list; changed files lose their
+marks. Marks are kept only while the panel is open.
+
+### Prompt caching
+
+The modules enable Pi’s native cache-miss notices and set `cacheWarming` to
+`"idle"`. `/session` shows the warmer’s status. Pi only sends a refresh for
+supported models when its estimated savings justify one. Set
+`settings.cacheWarming = "off"` to forbid refreshes or
+`settings.showCacheMissNotices = false` to hide the notices.
+
+For **GPT‑6.2 Sol and Astra on the OpenAI Responses API**, leave
+`PI_CACHE_RETENTION` unset: OpenAI’s default is a
+[30-minute minimum for eligible prefixes](https://developers.openai.com/api/docs/guides/prompt-caching#cache-lifetime),
+not a deadline or a guarantee of a cache hit. The optional 12-hour minimum
+costs twice as much to write and mainly suits stable prefixes reused hours
+apart. Pi 1.6.0’s `PI_CACHE_RETENTION=long` does **not** request 12 hours on
+these models. Pi deliberately leaves warming inactive for both models even
+on API keys; the upstream catalog does not declare a replay-safe lifetime.
+The API’s retention and pricing should not be assumed for ChatGPT sign-in.
+Use [Sol](https://developers.openai.com/api/docs/models/gpt-6.2-sol) as the
+cost-conscious default and switch to
+[Astra](https://developers.openai.com/api/docs/models/gpt-6.2-astra) for harder
+work; keep the same retention setting for both.
+
 ### Fast mode
 
 The first-party `pi-fast` plugin provides `/fast`, `/fast on`, `/fast off`,

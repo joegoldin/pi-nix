@@ -13,6 +13,7 @@ const OWNER = Symbol.for("pi-custom.prompt-selection");
 type SelectionTui = {
 	[OWNER]?: Owner;
 	getActiveSelectionText(): string | undefined;
+	isActiveTableSelection?(): boolean;
 	getSelectionBounds(): Bounds | undefined;
 	getSelectionColumns(line: string, row: number, bounds: Bounds): { start: number; end: number };
 	currentLayout?: { root: Box };
@@ -45,7 +46,7 @@ export function installPromptSelection(value: unknown, owner: Owner): boolean {
 	tui.getActiveSelectionText = function () {
 		const current = this[OWNER]!;
 		const bounds = this.getSelectionBounds();
-		if (!bounds) return original.call(this);
+		if (!bounds || this.isActiveTableSelection?.()) return original.call(this);
 		if (bounds.start.scrollView && this.currentLayout) {
 			const scroll = findBox(this.currentLayout.root, bounds.start.scrollView);
 			const child = scroll?.children[0];

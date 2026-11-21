@@ -496,6 +496,7 @@ let
           pkgs.which
           pkgs.tree
         ]
+        ++ lib.optional custom.enable pkgs.jujutsu
         ++ nixRuntimeInputs
         ++ messagingRuntimeInputs
       ))
@@ -1979,6 +1980,13 @@ in
       ++ minimapEntrypoints;
     skills = extSkills;
     promptTemplates = extPrompts;
-    settings = extSettings;
+    # Settings are merged shallowly, so put defaults before extensions and user settings.
+    settings = lib.mkMerge [
+      (lib.mkBefore {
+        showCacheMissNotices = true;
+        cacheWarming = "idle";
+      })
+      extSettings
+    ];
   };
 }

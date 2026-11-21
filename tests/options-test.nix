@@ -76,6 +76,13 @@ let
   # ── unset ────────────────────────────────────────────────────────────────
   bare = evalPi { };
 
+  cacheOverrides = evalPi {
+    pi.coding-agent.settings = {
+      showCacheMissNotices = false;
+      cacheWarming = "off";
+    };
+  };
+
   # ── inline text ──────────────────────────────────────────────────────────
   inline = evalPi { pi.coding-agent.systemPrompt = "You are terse.\n"; };
 
@@ -399,6 +406,10 @@ assert
 assert flagValues withExts.finalArgs "--skill" == [ "/nix/store/fake-a/skills" ];
 assert flagValues withExts.finalArgs "--prompt-template" == [ "/nix/store/fake-b/prompts" ];
 # settings are deep-merged, so two extensions can contribute to one subtree.
+assert bare.settings.showCacheMissNotices;
+assert bare.settings.cacheWarming == "idle";
+assert !cacheOverrides.settings.showCacheMissNotices;
+assert cacheOverrides.settings.cacheWarming == "off";
 assert withExts.settings.alpha == true;
 assert withExts.settings.beta == 2;
 assert

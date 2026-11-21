@@ -119,6 +119,8 @@ let
         nativeBuildInputs = [
           pkgs.bun
           pkgs.typescript
+          pkgs.gitMinimal
+          pkgs.jujutsu
           # intercom's Claude registry entry carries `ps -o lstart=` for its
           # pid, which its tests compare against the real thing.
           pkgs.ps

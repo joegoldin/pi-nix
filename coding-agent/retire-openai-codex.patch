@@ -140,9 +140,9 @@
 +++ b/packages/coding-agent/src/core/model-resolver.ts
 @@ -23,7 +23,6 @@
  	anthropic: "claude-opus-5-5",
- 	openai: "gpt-6.1-sol",
- 	azure: "gpt-6.1-sol",
--	"openai-codex": "gpt-6.1-sol",
+ 	openai: "gpt-6.2-sol",
+ 	azure: "gpt-6.2-sol",
+-	"openai-codex": "gpt-6.2-sol",
  	radius: "balanced",
  	nvidia: "nvidia/nemotron-3.5-super-vl-120b-a12b",
  	deepseek: "deepseek-v4-pro",

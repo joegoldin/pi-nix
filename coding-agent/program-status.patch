@@ -70,7 +70,7 @@ diff --git a/packages/coding-agent/src/modes/interactive/program-status-reporter
 index 4dac611..125e404 100644
 --- a/packages/coding-agent/src/modes/interactive/program-status-reporter.ts
 +++ b/packages/coding-agent/src/modes/interactive/program-status-reporter.ts
-@@ -1,4 +1,6 @@
+@@ -1,7 +1,9 @@
 -import type { ProgramStatus, Terminal } from "@earendil-works/pi-tui";
 +import { findProgramStatusEviction, type ProgramStatus, type Terminal } from "@earendil-works/pi-tui";
  import { APP_NAME } from "../../config.ts";
@@ -78,6 +78,9 @@ index 4dac611..125e404 100644
  
 +type ActivityStatus = Omit<ProgramStatus, "id" | "app"> & { aggregate?: false };
 +
+ export type BlockedStatus = { kind: NonNullable<ProgramStatus["kind"]>; message: string };
+ 
+ function firstLine(text: string | undefined): string {
 @@ -19,6 +21,8 @@ export class ProgramStatusReporter {
  	private readonly getSessionName: () => string | undefined;
  	private runActive = false;

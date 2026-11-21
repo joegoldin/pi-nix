@@ -7,6 +7,7 @@ const load = (path) => import(pathToFileURL(`${root}/${path}.${extension}`).href
 const { TuiAltScreen } = await load("tui-alt-screen");
 const { Text } = await load("components/text");
 const { Markdown } = await load("components/markdown");
+const { Editor } = await load("components/editor");
 const { stripTerminalSequences, visibleWidth, withCopyTracking, isCopyTrackingEnabled } = await load("utils");
 
 const render = (text, width = 24) => withCopyTracking(() => text.render(width));
@@ -89,4 +90,37 @@ assert.equal(select([wrappedUrl[0], render(new Text(other, 2, 0))[1]]), `${url.s
   "unrelated wrapped regions must not be silently joined");
 assert.throws(() => withCopyTracking(() => { throw new Error("render failure"); }), /render failure/);
 assert.equal(isCopyTrackingEnabled(), false, "render failures must restore ordinary rendering mode");
+
+const editor = new Editor(tui, { borderColor: (line) => line, selectList: {} }, { paddingX: 2 });
+const draft = "  a | literal │ very long editor line wraps here  \n\n  界🙂 é\n";
+editor.setText(draft);
+const draftRows = render(editor);
+assert.match(stripTerminalSequences(draftRows[0]), /^─+$/);
+assert.equal(select(draftRows, { row: 0, col: 0 }, { row: draftRows.length - 1, col: 23 }), draft,
+  "the native editor copies draft characters and hard newlines, not its frame, cursor or padding");
+assert.equal(select(draftRows, { row: 1, col: 4 }, { row: 1, col: 6 }), "a |", "literal pipes survive a partial selection");
+assert.equal(editor.render(24).some((line) => line.includes("pi:copy")), false, "regular editors do not emit fullscreen copy metadata");
+
+const table = new Markdown(
+  "| Name | Long | Num |\n|:-----|------|----:|\n| 漢字 | wraps around at some arbitrary spaces │ and \\| | 12 |\n| next | | 4 |\n\nprose",
+  2, 0, theme,
+);
+for (const width of [28, 52, 120, 28]) {
+  const rows = render(table, width);
+  const plain = rows.map(stripTerminalSequences);
+  const grid = [...plain[0].matchAll(/[┌┬┐]/g)].map((match) => match.index);
+  const bottom = plain.findIndex((line) => /^\s*└/.test(line));
+  const header = 1;
+  const body = plain.findIndex((line) => line.includes("漢字"));
+  const point = (row, column) => ({ row, col: grid[column] + 2 });
+  assert.equal(select(rows, point(header, 0), point(body, 0)), "Name\n漢字");
+  assert.equal(select(rows, point(header, 1), point(body, 1)), "Long\nwraps around at some arbitrary spaces │ and |");
+  assert.equal(select(rows, point(body, 2), point(header, 0)), "Name\tLong\tNum\n漢字\twraps around at some arbitrary spaces │ and |\t12");
+  assert.equal(select(rows, { row: 0, col: grid[0] }, { row: bottom, col: grid.at(-1) }),
+    "Name\tLong\tNum\n漢字\twraps around at some arbitrary spaces │ and |\t12\nnext\t\t4");
+  assert.match(select(rows, point(header, 0), { row: rows.length - 1, col: width - 1 }), /prose$/,
+    "selecting across a table and prose still uses the ordinary linear selection");
+}
+assert(!table.render(28).some((line) => line.includes("pi:table")), "table metadata is fullscreen only");
+assert(!render(table, 9).some((line) => line.includes("pi:table")), "narrow raw-Markdown fallback is not a visual grid");
 console.log("selection copy regressions passed");

@@ -114,7 +114,7 @@ let
     }
     {
       name = "the config lands at intercom/config.json, not settings.json";
-      ok = lib.attrNames on.finalConfigFiles == [ "intercom/config.json" ] && on.settings == { };
+      ok = lib.attrNames on.finalConfigFiles == [ "intercom/config.json" ] && on.settings == off.settings;
     }
     {
       name = "the config switches intercom on";

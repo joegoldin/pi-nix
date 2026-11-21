@@ -88,6 +88,7 @@ export function createPromptEditor(Base: EditorBase, promptColour: () => Colour,
 		override layoutText(width: number) {
 			// Capture while dictation's temporary meter cell is present, so source
 			// columns match the actual native layout rather than the restored draft.
+			// SAFETY: the pinned native CustomEditor inherits this visual-line map from Editor.
 			const native = this as unknown as { buildVisualLineMap(width: number): { logicalLine: number; startCol: number; length: number }[] };
 			this.selectionSource = native.buildVisualLineMap(width).map(chunk => ({ id: chunk.logicalLine,
 				text: this.state.lines[chunk.logicalLine]!.slice(chunk.startCol, chunk.startCol + chunk.length),
@@ -101,8 +102,9 @@ export function createPromptEditor(Base: EditorBase, promptColour: () => Colour,
 			const lines = super.render(width);
 			this.selectionRows.clear();
 			if (!this.boxed) return lines;
-			const top = this.topBorder ? lines.indexOf(this.topBorder) : -1;
-			const bottom = this.bottomBorder ? lines.lastIndexOf(this.bottomBorder) : -1;
+			// Native fullscreen copy metadata wraps the border without changing its drawing.
+			const top = this.topBorder ? lines.findIndex(line => line.includes(this.topBorder)) : -1;
+			const bottom = this.bottomBorder ? lines.findLastIndex(line => line.includes(this.bottomBorder)) : -1;
 			if (top < 0 || bottom <= top) return lines;
 
 			// The icon goes in the padding of the first text row, and only when the
@@ -126,6 +128,7 @@ export function createPromptEditor(Base: EditorBase, promptColour: () => Colour,
 			const inset = Math.min(pad, Math.max(0, Math.floor((width - 1) / 2)));
 			// Use the native editor's wrap map, including paste-marker segmentation
 			// and scroll offset, rather than guessing line breaks from screen width.
+			// SAFETY: the native render above sets Editor's scroll offset for these rows.
 			const native = this as unknown as { scrollOffset: number };
 			const visual = this.selectionSource.slice(native.scrollOffset);
 			for (let i = first; i < bottom; i++) {

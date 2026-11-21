@@ -83,20 +83,28 @@ export function contentRows(component: object, width: number): Rows | undefined 
 				: { line, start: 2, text: displayed, owner: component, id: row, before: "" };
 		});
 	}
-	const native = component as { mouseLayout?: { width: number; children: { component: object; height: number }[] }; paddingX?: number; paddingY?: number; cache?: { lines: string[] }; selfRenderContainer?: object; selfRenderHeight?: number; getRenderShell?(): string };
+	const native = component as {
+		childLines?: { width: number; children: readonly object[]; parts: readonly (readonly string[])[] };
+		paddingX?: number;
+		paddingY?: number;
+		cache?: { lines: readonly string[] };
+		selfRenderContainer?: object;
+		selfRenderHeight?: number;
+		getRenderShell?(): string;
+	};
 	if (native.getRenderShell?.() === "self" && native.selfRenderContainer && native.selfRenderHeight) {
 		return [undefined, ...(contentRows(native.selfRenderContainer, width) ?? Array(native.selfRenderHeight).fill(undefined))];
 	}
 	if (!(component instanceof Container) && !(component instanceof Box)) return;
-	const layout = native.mouseLayout;
+	const layout = native.childLines;
 	if (!layout || layout.width !== (component instanceof Box ? Math.max(1, width - native.paddingX! * 2) : width)) return;
 	const rows: Rows = [];
 	const paddingX = component instanceof Box ? native.paddingX! : 0;
 	const paddingY = component instanceof Box ? native.paddingY! : 0;
 	for (let i = 0; i < paddingY; i++) rows.push(undefined);
-	for (const child of layout.children) {
-		const childRows = contentRows(child.component, layout.width);
-		for (let row = 0; row < child.height; row++) {
+	for (const [i, child] of layout.children.entries()) {
+		const childRows = contentRows(child, layout.width);
+		for (let row = 0; row < layout.parts[i]!.length; row++) {
 			const source = childRows?.[row];
 			rows.push(source ? { ...source, start: source.start + paddingX, line: native.cache?.lines[rows.length] ?? source.line } : undefined);
 		}

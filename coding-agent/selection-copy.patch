@@ -20,7 +20,7 @@
  			result.push(wrappedLine);
  		}
  		// Update tracker with codes from this line for next iteration
-@@ -973,6 +975,92 @@
+@@ -973,6 +975,108 @@
  	}
  
  	return result.length > 0 ? result : [""];
@@ -47,6 +47,19 @@
 +const COPY_START = "\x1b_pi:copy-start\x1b\\";
 +let nextCopySource = 0;
 +const COPY_END = /\x1b_pi:copy-end;([^\x1b]*)\x1b\\/g;
++
++/** A source ID ties adjacent display rows together; regular rendering emits no metadata. */
++export function createCopySource(): number | undefined {
++	return isCopyTrackingEnabled() ? ++nextCopySource : undefined;
++}
++
++/** Mark exact editor content or a decorative row without altering its visual output. */
++export function markCopyText(
++	text: string, source: number | undefined, row: number, separator: string, kind: "exact" | "skip" = "exact",
++): string {
++	if (source === undefined) return text;
++	return `${COPY_START}${text}\x1b_pi:copy-end;${JSON.stringify([source, row, separator, kind])}\x1b\\`;
++}
 +
 +function annotateCopyWraps(lines: string[], source: string): string[] {
 +	if (source.includes(COPY_START)) return lines;
@@ -79,6 +92,7 @@
 +			source: number;
 +			row: number;
 +			separator: string;
++			skip?: boolean;
 +	  }
 +	| undefined {
 +	const start = line.indexOf(COPY_START);
@@ -88,8 +102,9 @@
 +	const match = matches[0]!;
 +	try {
 +		const data: unknown = JSON.parse(match[1]!);
-+		if (!Array.isArray(data) || data.length !== 3) return undefined;
-+		const [source, row, separator] = data;
++		if (!Array.isArray(data) || (data.length !== 3 && data.length !== 4)) return undefined;
++		const [source, row, separator, kind] = data;
++		if (data.length === 4 && kind !== "exact" && kind !== "skip") return undefined;
 +		if (
 +			!Number.isSafeInteger(source) ||
 +			!Number.isSafeInteger(row) ||
@@ -99,13 +114,14 @@
 +			return undefined;
 +		const prefix = stripTerminalSequences(line.slice(0, start));
 +		// A first-line bullet or quote prefix is content; repeated continuation gutters are not.
-+		const contentStart = row === 0 && /\S/.test(prefix) ? (prefix.match(/^\s*/)?.[0] ?? "") : prefix;
++		const contentStart = kind === undefined && row === 0 && /\S/.test(prefix) ? (prefix.match(/^\s*/)?.[0] ?? "") : prefix;
 +		return {
 +			start: visibleWidth(contentStart),
 +			end: visibleWidth(line.slice(0, match.index)),
 +			source,
 +			row,
 +			separator,
++			skip: kind === "skip",
 +		};
 +	} catch {
 +		return undefined;
@@ -113,6 +129,88 @@
  }
  
  function wrapSingleLine(line: string, width: number): string[] {
+--- a/packages/tui/src/components/editor.ts
++++ b/packages/tui/src/components/editor.ts
+@@ -16,6 +16,8 @@
+ 	autocompleteBoundaryRegex,
+ 	autocompleteSeparatorRegex,
+ 	cjkBreakRegex,
++	createCopySource,
++	markCopyText,
+ 	getGraphemeSegmenter,
+ 	getWordSegmenter,
+ 	isWhitespaceChar,
+@@ -231,6 +233,7 @@
+ 
+ interface LayoutLine {
+ 	text: string;
++	continues?: boolean;
+ 	hasCursor: boolean;
+ 	cursorPos?: number;
+ }
+@@ -566,7 +569,9 @@
+ 		const rightPadding = leftPadding;
+ 
+ 		// Render top border (with scroll indicator if scrolled down)
+-		result.push(this.renderTopBorder(width, this.scrollOffset));
++		const copySource = createCopySource();
++		const topBorder = this.renderTopBorder(width, this.scrollOffset);
++		result.push(markCopyText(topBorder, copySource, 0, "", "skip"));
+ 
+ 		// Render each visible layout line
+ 		// Emit hardware cursor marker when focused so TUI can position the
+@@ -574,8 +579,9 @@
+ 		// autocomplete (e.g. slash-command menu) is visible.
+ 		const emitCursorMarker = this.focused;
+ 
+-		for (const layoutLine of visibleLines) {
++		for (const [i, layoutLine] of visibleLines.entries()) {
+ 			let displayText = layoutLine.text;
++			let trailingCursor = "";
+ 			let lineVisibleWidth = visibleWidth(layoutLine.text);
+ 			let cursorInPadding = false;
+ 
+@@ -599,7 +605,7 @@
+ 				} else {
+ 					// Cursor is at the end - add highlighted space
+ 					const cursor = renderFakeCursor(" ");
+-					displayText = before + marker + cursor;
++					trailingCursor = marker + cursor;
+ 					lineVisibleWidth = lineVisibleWidth + 1;
+ 					// If cursor overflows content width into the padding, flag it
+ 					if (lineVisibleWidth > contentWidth && paddingX > 0) {
+@@ -613,12 +619,14 @@
+ 			const lineRightPadding = cursorInPadding ? rightPadding.slice(1) : rightPadding;
+ 
+ 			// Render the line (no side borders, just horizontal lines above and below)
+-			result.push(`${leftPadding}${displayText}${padding}${lineRightPadding}`);
++			const text = markCopyText(displayText, copySource, this.scrollOffset + i, layoutLine.continues ? "" : "\n");
++			result.push(`${leftPadding}${text}${trailingCursor}${padding}${lineRightPadding}`);
+ 		}
+ 
+ 		// Render bottom border (with scroll indicator if more content below)
+ 		const linesBelow = layoutLines.length - (this.scrollOffset + visibleLines.length);
+-		result.push(this.renderBottomBorder(width, linesBelow));
++		const bottomBorder = this.renderBottomBorder(width, linesBelow);
++		result.push(markCopyText(bottomBorder, copySource, 0, "", "skip"));
+ 
+ 		// Add autocomplete list if active
+ 		this.renderedAutocompleteHeight = 0;
+@@ -1083,12 +1091,14 @@
+ 					if (hasCursorInChunk) {
+ 						layoutLines.push({
+ 							text: chunk.text,
++							continues: !isLastChunk,
+ 							hasCursor: true,
+ 							cursorPos: adjustedCursorPos,
+ 						});
+ 					} else {
+ 						layoutLines.push({
+ 							text: chunk.text,
++							continues: !isLastChunk,
+ 							hasCursor: false,
+ 						});
+ 					}
 --- a/packages/tui/src/components/text.ts
 +++ b/packages/tui/src/components/text.ts
 @@ -1,5 +1,11 @@
@@ -177,8 +275,9 @@
  		return result.length > 0 ? result : [""];
 --- a/packages/tui/src/components/markdown.ts
 +++ b/packages/tui/src/components/markdown.ts
-@@ -3,7 +3,14 @@
+@@ -3,7 +3,15 @@
  import { renderLatex } from "../latex.ts";
++import { tableCopyMarker } from "../table-copy.ts";
  import { getCapabilities, hyperlink, isImageLine } from "../terminal-image.ts";
  import type { Component } from "../tui.ts";
 -import { applyBackgroundToLine, cjkPunctuationRegex, flattenLines, visibleWidth, wrapTextWithAnsi } from "../utils.ts";
@@ -289,23 +388,171 @@
  			if (nextTokenType && nextTokenType !== "space") {
  				fallbackLines.push("");
  			}
+--- a/packages/tui/src/components/markdown.ts
++++ b/packages/tui/src/components/markdown.ts
+@@ -1125,9 +1125,11 @@
+ 			}
+ 		}
+ 
++		const mark = tableCopyMarker(columnWidths);
++
+ 		// Render top border
+ 		const topBorderCells = columnWidths.map((w) => "─".repeat(w));
+-		lines.push(`┌─${topBorderCells.join("─┬─")}─┐`);
++		lines.push(mark(`┌─${topBorderCells.join("─┬─")}─┐`));
+ 
+ 		// Render header with wrapping
+ 		const headerCellLines: string[][] = token.header.map((cell, i) => {
+@@ -1142,13 +1144,13 @@
+ 				const padded = text + " ".repeat(Math.max(0, columnWidths[colIdx] - visibleWidth(text)));
+ 				return this.theme.bold(padded);
+ 			});
+-			lines.push(`│ ${rowParts.join(" │ ")} │`);
++			lines.push(mark(`│ ${rowParts.join(" │ ")} │`, 0));
+ 		}
+ 
+ 		// Render separator
+ 		const separatorCells = columnWidths.map((w) => "─".repeat(w));
+ 		const separatorLine = `├─${separatorCells.join("─┼─")}─┤`;
+-		lines.push(separatorLine);
++		lines.push(mark(separatorLine));
+ 
+ 		// Render rows with wrapping
+ 		for (let rowIndex = 0; rowIndex < token.rows.length; rowIndex++) {
+@@ -1164,17 +1166,17 @@
+ 					const text = cellLines[lineIdx] || "";
+ 					return text + " ".repeat(Math.max(0, columnWidths[colIdx] - visibleWidth(text)));
+ 				});
+-				lines.push(`│ ${rowParts.join(" │ ")} │`);
++				lines.push(mark(`│ ${rowParts.join(" │ ")} │`, rowIndex + 1));
+ 			}
+ 
+ 			if (rowIndex < token.rows.length - 1) {
+-				lines.push(separatorLine);
++				lines.push(mark(separatorLine));
+ 			}
+ 		}
+ 
+ 		// Render bottom border
+ 		const bottomBorderCells = columnWidths.map((w) => "─".repeat(w));
+-		lines.push(`└─${bottomBorderCells.join("─┴─")}─┘`);
++		lines.push(mark(`└─${bottomBorderCells.join("─┴─")}─┘`));
+ 
+ 		if (nextTokenType && nextTokenType !== "space") {
+ 			lines.push(""); // Add spacing after table
+--- /dev/null
++++ b/packages/tui/src/table-copy.ts
+@@ -0,0 +1,87 @@
++import { createCopySource, getCopySpan, sliceByColumn, stripTerminalSequences, visibleWidth } from "./utils.ts";
++
++const TABLE_MARKER = /\x1b_pi:table;([\d,;-]+)\x1b\\/;
++type TablePoint = { row: number; col: number };
++type Cell = { start: number; end: number };
++type TableSelection = { rows: { index: number; logical: number }[]; cells: Cell[] };
++
++/** Carry table geometry, not cell text, from the renderer to fullscreen selection. */
++export function tableCopyMarker(widths: readonly number[]): (line: string, logical?: number) => string {
++	const source = createCopySource();
++	if (source === undefined) return (line) => line;
++	let edge = 0;
++	const borders = [edge, ...widths.map((width) => edge += width + 3)].join(",");
++	let index = 0;
++	return (line, logical = -1) => `\x1b_pi:table;${source};${index++};${logical};${borders}\x1b\\${line}`;
++}
++
++function getTableRow(line: string) {
++	const match = TABLE_MARKER.exec(line);
++	if (!match) return undefined;
++	const [source, index, logical, columns] = match[1]!.split(";");
++	if (!columns || !source) return undefined;
++	const offset = visibleWidth(line.slice(0, match.index));
++	const borders = columns.split(",").map((col) => Number(col) + offset);
++	if (borders.length < 2 || borders.some((col, i) => !Number.isSafeInteger(col) || (i > 0 && col <= borders[i - 1]!))) return undefined;
++	return { source, index: Number(index), logical: Number(logical), borders };
++}
++
++export function getTableSelection(lines: readonly string[], start: TablePoint, end: TablePoint): TableSelection | undefined {
++	const first = getTableRow(lines[start.row] ?? "");
++	const last = getTableRow(lines[end.row] ?? "");
++	if (!first || !last || first.source !== last.source || start.row - first.index !== end.row - last.index) return undefined;
++	const borders = first.borders;
++	const left = Math.min(start.col, end.col);
++	const right = Math.max(start.col, end.col);
++	if (left < borders[0]! || right > borders.at(-1)!) return undefined;
++	const cells = borders.slice(1).flatMap((edge, col) => {
++		const start = borders[col]! + 1;
++		return left <= edge && right >= start - (col === 0 ? 1 : 0) ? [{ start, end: edge }] : [];
++	});
++	let from = start.row;
++	let to = end.row;
++	const sameLogical = (index: number, logical: number) => {
++		const row = getTableRow(lines[index] ?? "");
++		return row?.source === first.source && row.index === first.index + index - start.row && row.logical === logical;
++	};
++	while (first.logical >= 0 && from > 0 && sameLogical(from - 1, first.logical)) from--;
++	while (last.logical >= 0 && to + 1 < lines.length && sameLogical(to + 1, last.logical)) to++;
++	const rows: TableSelection["rows"] = [];
++	for (let index = from; index <= to; index++) {
++		const row = getTableRow(lines[index] ?? "");
++		if (row?.source !== first.source || row.index !== first.index + index - start.row) return undefined;
++		if (row.logical >= 0) rows.push({ index, logical: row.logical });
++	}
++	return { rows, cells };
++}
++
++export function copyTableSelection(lines: readonly string[], selection: TableSelection): string {
++	const output: string[] = [];
++	let index = 0;
++	while (index < selection.rows.length) {
++		const first = index;
++		const logical = selection.rows[first]!.logical;
++		while (index < selection.rows.length && selection.rows[index]!.logical === logical) index++;
++		const fragments = selection.rows.slice(first, index);
++		const values = selection.cells.map(({ start, end }) => {
++			let text = "";
++			let previous: ReturnType<typeof getCopySpan>;
++			for (const { index } of fragments) {
++				const cell = sliceByColumn(lines[index]!, start, end - start, true);
++				const span = getCopySpan(cell);
++				if (span) {
++					if (previous && previous.source === span.source && previous.row + 1 === span.row) text += previous.separator;
++					else if (text) text += " ";
++					text += stripTerminalSequences(sliceByColumn(cell, span.start, span.end - span.start, true));
++				} else {
++					const literal = stripTerminalSequences(cell).trim();
++					if (literal) text += text ? ` ${literal}` : literal;
++				}
++				previous = span;
++			}
++			return text.replace(/[\t\r\n]/g, " ");
++		});
++		output.push(values.join("\t"));
++	}
++	return output.join("\n");
++}
 --- a/packages/tui/src/tui-alt-screen.ts
 +++ b/packages/tui/src/tui-alt-screen.ts
-@@ -49,6 +49,8 @@
+@@ -49,6 +49,9 @@
  	type ViewportTUI,
  } from "./tui.ts";
++import { copyTableSelection, getTableSelection } from "./table-copy.ts";
  import {
 +	getCopySpan,
 +	withCopyTracking,
  	extractAnsiCode,
  	getGraphemeCellRange,
  	getOsc8LinkAtColumn,
-@@ -1534,17 +1536,22 @@
+@@ -1534,17 +1536,29 @@
  			if (!box?.scrollContentLines) return undefined;
  			sourceLines = box.scrollContentLines;
  		}
++		if (this.selectionGranularity === "character") {
++			const table = getTableSelection(sourceLines, selection.start, selection.end);
++			if (table) return copyTableSelection(sourceLines, table) || undefined;
++		}
 -		const lines: string[] = [];
 +		let text = "";
++		let copiedRow = false;
 +		let previous: ReturnType<typeof getCopySpan>;
  		for (let row = selection.start.row; row <= selection.end.row; row++) {
  			const line = sourceLines[row] ?? "";
@@ -315,34 +562,175 @@
 -					sliceByColumn(line, columns.start, Math.max(0, columns.end - columns.start), true),
 -				).trimEnd(),
 +			const span = getCopySpan(line);
++			if (span?.skip) continue;
 +			const columns = this.getSelectionColumns(line, row, selection, span?.start, span?.end);
 +			const fragment = stripTerminalSequences(
 +				sliceByColumn(line, columns.start, Math.max(0, columns.end - columns.start), true),
  			);
 -		}
 -		const text = lines.join("\n");
-+			if (row > selection.start.row) {
++			if (copiedRow) {
 +				const consecutive = span && previous && span.source === previous.source && span.row === previous.row + 1;
 +				text += previous && span && (consecutive || previous.separator.includes("\n")) ? previous.separator : "\n";
 +			}
 +			text += span ? fragment : fragment.trimEnd();
 +			previous = span;
++			copiedRow = true;
 +		}
  		return text.length === 0 ? undefined : text;
  	}
  
-@@ -1804,9 +1811,9 @@
- 		const width = Math.max(1, this.terminal.columns);
- 		const height = Math.max(1, this.terminal.rows);
- 		const root = this.layoutRoot ?? this.implicitScrollView;
--		let nextLayout = renderLayoutFrame(root, width, height, () => this.requestRender());
-+		let nextLayout = withCopyTracking(() => renderLayoutFrame(root, width, height, () => this.requestRender()));
+@@ -1635,6 +1635,9 @@
+ 		const selection = this.getSelectionBounds();
+ 		if (!selection) return screen;
+ 		let screenSelection = selection;
++		let tableLines: readonly string[] = screen;
++		let rowOffset = 0;
++		let colOffset = 0;
+ 		let minRow = 0;
+ 		let maxRow = screen.length - 1;
+ 		let minColumn = 0;
+@@ -1643,6 +1646,9 @@
+ 			if (!layout) return screen;
+ 			const box = getScrollViewBox(layout, selection.start.scrollView);
+ 			if (!box) return screen;
++			tableLines = box.scrollContentLines ?? [];
++			rowOffset = box.rect.y - selection.start.scrollView.scrollTop;
++			colOffset = box.rect.x;
+ 			minRow = Math.max(0, box.rect.y, box.clip.y);
+ 			maxRow = Math.min(screen.length - 1, box.rect.y + box.rect.height - 1, box.clip.y + box.clip.height - 1);
+ 			minColumn = Math.max(0, box.rect.x, box.clip.x);
+@@ -1660,23 +1666,30 @@
+ 				},
+ 			};
+ 		}
++		const table = this.selectionGranularity === "character" && getTableSelection(tableLines, selection.start, selection.end);
++		const tableRows = table ? new Set(table.rows.map(({ index }) => index + rowOffset)) : undefined;
+ 		return screen.map((line, row) => {
+ 			if (
+ 				row < minRow ||
+ 				row > maxRow ||
+-				row < screenSelection.start.row ||
+-				row > screenSelection.end.row ||
++				(tableRows ? !tableRows.has(row) : row < screenSelection.start.row || row > screenSelection.end.row) ||
+ 				isImageLine(line)
+ 			) {
+ 				return line;
+ 			}
+ 			const lineWidth = visibleWidth(line);
+-			const columns = this.getSelectionColumns(line, row, screenSelection, minColumn, maxColumn);
+-			if (columns.end <= columns.start) return line;
+-			const before = sliceByColumn(line, 0, columns.start, true);
+-			const selected = sliceByColumn(line, columns.start, columns.end - columns.start, true);
+-			const after = sliceByColumn(line, columns.end, Math.max(0, lineWidth - columns.end), true);
+-			return `${before}${this.applySelectionHighlight(selected)}${after}`;
++			const ranges = table
++				? table.cells.map(({ start, end }) => ({ start: Math.max(minColumn, start + colOffset), end: Math.min(maxColumn, end + colOffset) }))
++				: [this.getSelectionColumns(line, row, screenSelection, minColumn, maxColumn)];
++			let result = line;
++			for (const { start, end } of ranges.reverse()) {
++				if (end <= start) continue;
++				const before = sliceByColumn(result, 0, start, true);
++				const selected = sliceByColumn(result, start, end - start, true);
++				const after = sliceByColumn(result, end, Math.max(0, lineWidth - end), true);
++				result = `${before}${this.applySelectionHighlight(selected)}${after}`;
++			}
++			return result;
+ 		});
+ 	}
+ 
+@@ -1817,9 +1824,9 @@
+ 		const requestViewRender = () => this.requestViewRender();
+ 		const reusableOutput = this.contentChanged ? undefined : this.currentLayout?.renderCache;
+ 		this.contentChanged = false;
+-		let nextLayout = renderLayoutFrame(root, width, height, requestViewRender, reusableOutput);
++		let nextLayout = withCopyTracking(() => renderLayoutFrame(root, width, height, requestViewRender, reusableOutput));
  		if (this.refreshSearch(nextLayout)) {
--			nextLayout = renderLayoutFrame(root, width, height, () => this.requestRender());
-+			nextLayout = withCopyTracking(() => renderLayoutFrame(root, width, height, () => this.requestRender()));
+-			nextLayout = renderLayoutFrame(root, width, height, requestViewRender, nextLayout.renderCache);
++			nextLayout = withCopyTracking(() => renderLayoutFrame(root, width, height, requestViewRender, nextLayout.renderCache));
  		}
  		// Resolve fake cursors before highlighting and compositing, which only track SGR codes
  		let screen = this.resolveFakeCursors(nextLayout.lines.map((line) => line.replace(OSC133_ZONE_PREFIX, "")));
+--- a/packages/tui/src/tui-alt-screen.ts
++++ b/packages/tui/src/tui-alt-screen.ts
+@@ -209,6 +209,7 @@
+ 	readonly mode = "fullscreen" as const;
+ 	readonly [VIEWPORT_TUI] = true as const;
+ 	private previousScreen: string[] = [];
++	private selectionScreen?: readonly string[];
+ 	private lastDocument: string[] = [];
+ 	private previousScreenWidth = 0;
+ 	private previousScreenHeight = 0;
+@@ -315,6 +316,14 @@
+ 		return this.getActiveSelectionText() !== undefined;
+ 	}
+ 
++	/** Whether clipboard handling must use the native whole-cell selection instead of a custom text provider. */
++	isActiveTableSelection(): boolean {
++		const selection = this.getSelectionBounds();
++		if (!selection || this.selectionGranularity !== "character") return false;
++		const lines = this.getSelectionSourceLines(selection.start);
++		return !!lines && getTableSelection(lines, selection.start, selection.end) !== undefined;
++	}
++
+ 	/** Copy the active fullscreen text selection, if any, using the configured selection clipboard path. */
+ 	async copyActiveSelectionToClipboard(): Promise<boolean> {
+ 		const text = this.getActiveSelectionText();
+@@ -503,6 +512,7 @@
+ 
+ 	protected override resetRenderState(): void {
+ 		this.previousScreen = [];
++		this.selectionScreen = undefined;
+ 		this.previousScreenWidth = 0;
+ 		this.previousScreenHeight = 0;
+ 		this.currentLayout = undefined;
+@@ -1203,12 +1213,15 @@
+ 		};
+ 	}
+ 
++	private getSelectionSourceLines(point: SelectionPoint): readonly string[] | undefined {
++		if (point.scrollView) {
++			return this.currentLayout && getScrollViewBox(this.currentLayout, point.scrollView)?.scrollContentLines;
++		}
++		return this.selectionScreen ?? this.previousScreen;
++	}
++
+ 	private getSelectionSourceLine(point: SelectionPoint): string {
+-		if (point.scrollView && this.currentLayout) {
+-			const lines = getScrollViewBox(this.currentLayout, point.scrollView)?.scrollContentLines;
+-			if (lines) return lines[point.row] ?? "";
+-		}
+-		return this.previousScreen[point.row] ?? "";
++		return this.getSelectionSourceLines(point)?.[point.row] ?? "";
+ 	}
+ 
+ 	private getWordSelection(point: SelectionPoint): SelectionRange | undefined {
+@@ -1478,13 +1491,8 @@
+ 	private getActiveSelectionText(): string | undefined {
+ 		const selection = this.getSelectionBounds();
+ 		if (!selection) return undefined;
+-		let sourceLines: readonly string[] = this.previousScreen;
+-		if (selection.start.scrollView) {
+-			if (!this.currentLayout) return undefined;
+-			const box = getScrollViewBox(this.currentLayout, selection.start.scrollView);
+-			if (!box?.scrollContentLines) return undefined;
+-			sourceLines = box.scrollContentLines;
+-		}
++		const sourceLines = this.getSelectionSourceLines(selection.start);
++		if (!sourceLines) return undefined;
+ 		if (this.selectionGranularity === "character") {
+ 			const table = getTableSelection(sourceLines, selection.start, selection.end);
+ 			if (table) return copyTableSelection(sourceLines, table) || undefined;
+@@ -1801,6 +1809,9 @@
+ 		screen = this.compositeScrollToLastPromptIndicator(screen, nextLayout, width);
+ 		screen = this.compositeOverlays(screen, width, height);
+ 		if (screen.length > height) screen = screen.slice(screen.length - height);
++		// Highlighting slices display lines and can split copy metadata across ANSI runs.
++		// Hit testing and clipboard reads use the same frame before that decoration.
++		this.selectionScreen = screen;
+ 		screen = this.applySelection(screen, nextLayout);
+ 		screen = this.compositeFlashes(screen, width, height);
+ 
 --- a/packages/tui/test/tui-alt-screen.test.ts
 +++ b/packages/tui/test/tui-alt-screen.test.ts
 @@ -9,6 +9,7 @@
@@ -362,10 +750,40 @@
  import { VirtualTerminal } from "./virtual-terminal.ts";
  
  const OSC133_ZONE_START = "\x1b]133;A\x07";
-@@ -65,6 +66,35 @@
+@@ -65,6 +66,65 @@
  }
  
  describe("TuiAltScreen", () => {
++	it("highlights whole Markdown cells and copies the selected columns on mouse release", async () => {
++		const terminal = new VirtualTerminal(36, 14);
++		const copied: string[] = [];
++		const tui = new TuiAltScreen(terminal, undefined, undefined, {
++			copySelection: async (text) => { copied.push(text); return true; },
++		});
++		const document = new Markdown(
++			"| First | Second | Third |\n|---|---|---|\n| 漢字 | wrapped text becomes one cell again | data |",
++			2, 0, defaultMarkdownTheme,
++		);
++		tui.setLayoutRoot(new ScrollView(document, { primary: true }));
++		tui.start();
++		try {
++			await terminal.waitForRender();
++			const grid = [...terminal.getViewport()[0]!.matchAll(/[┌┬┐]/g)].map((edge) => edge.index);
++			const start = grid[1]! + 3;
++			terminal.sendInput(`\x1b[<0;${start};2M`);
++			terminal.sendInput(`\x1b[<32;${start};4M`);
++			await terminal.waitForRender();
++			const selected = tui.getScreenLines()[3]!;
++			assert.ok(selected.includes("\x1b[7m"));
++			assert.equal(visibleWidth(selected), 36);
++			terminal.sendInput(`\x1b[<0;${start};4m`);
++			await terminal.waitForRender();
++			assert.deepEqual(copied, ["Second\nwrapped text becomes one cell again"]);
++		} finally {
++			tui.stop();
++		}
++	});
++
 +	for (const kind of ["text", "markdown"] as const) {
 +		it(`copies soft-wrapped ${kind} URLs through mouse selection without adding whitespace`, async () => {
 +			const url =

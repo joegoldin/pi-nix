@@ -78,8 +78,9 @@ test("fullscreen copying omits the prompt frame and gutter, not typed decoration
 	internals.selectionAnchor = { row: 0, col: 0 };
 	internals.selectionFocus = { row: 3, col: 79 };
 	const native = (TuiAltScreen.prototype as any).getActiveSelectionText.call(tui);
-	expect(native).toContain("╭");
-	expect(native).toContain("╰");
+	expect(tui.getScreenLines()[0]).toContain("╭");
+	expect(tui.getScreenLines()[3]).toContain("╰");
+	expect(native).toBe("hello │ world\n  indented ❯ text");
 	await tui.copyActiveSelectionToClipboard();
 	expect(copied).toEqual(["hello │ world\n  indented ❯ text"]);
 	internals.selectionAnchor = { row: 1, col: 5 };

@@ -24,6 +24,7 @@ import {
 	SessionManager,
 } from "@earendil-works/pi-coding-agent";
 import { type Component, SettingsList } from "@earendil-works/pi-tui";
+import { registerChanges } from "./changes.ts";
 import { createCompleter } from "./complete.ts";
 import { loadConfig, saveConfig, type UiConfig } from "./config.ts";
 import { computeBreakdown, ContextView } from "./context.ts";
@@ -83,6 +84,7 @@ function repainting(component: Component & { handleInput?(data: string): void },
 }
 
 export default function piUi(pi: ExtensionAPI): void {
+	registerChanges(pi);
 	let config: UiConfig = loadConfig();
 	const index = new SearchIndex();
 	let ctxRef: ExtensionContext | undefined;

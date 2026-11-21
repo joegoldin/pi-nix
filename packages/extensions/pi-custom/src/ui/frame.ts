@@ -9,7 +9,7 @@ import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { UiTheme } from "./card.ts";
 
 interface Inner {
-	render(width: number): string[];
+	render(width: number): readonly string[];
 	handleInput?(data: string): void;
 	invalidate(): void;
 }

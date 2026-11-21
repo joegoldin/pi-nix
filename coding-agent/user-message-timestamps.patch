@@ -1,5 +1,4 @@
 diff --git a/packages/coding-agent/src/modes/interactive/components/user-message.ts b/packages/coding-agent/src/modes/interactive/components/user-message.ts
-index 2cda775..83164ef 100644
 --- a/packages/coding-agent/src/modes/interactive/components/user-message.ts
 +++ b/packages/coding-agent/src/modes/interactive/components/user-message.ts
 @@ -1,4 +1,4 @@
@@ -8,16 +7,17 @@ index 2cda775..83164ef 100644
  import type { MarkdownTransformer } from "../../../core/extensions/types.ts";
  import { getMarkdownTheme, theme } from "../theme/theme.ts";
  import { createMarkdownTransform } from "./markdown-transform.ts";
-@@ -17,6 +17,8 @@ export class UserMessageComponent extends Container {
+@@ -17,6 +17,8 @@
  	private markdownTransformers: readonly MarkdownTransformer[];
  	private messageId?: string;
  	private timestamp?: string;
 +	/** The saved message time shown in the corner, including when replaying history. */
 +	private displayTime?: number;
+-	private zoneLines?: { source: readonly string[]; lines: string[] };
++	private zoneLines?: { source: readonly string[]; lines: string[]; timeZoneOffset?: number };
  
  	constructor(
- 		text: string,
-@@ -25,6 +27,7 @@ export class UserMessageComponent extends Container {
+@@ -26,6 +28,7 @@
  		markdownTransformers: readonly MarkdownTransformer[] = [],
  		messageId?: string,
  		timestamp?: string,
@@ -25,7 +25,7 @@ index 2cda775..83164ef 100644
  	) {
  		super();
  		this.text = text;
-@@ -33,6 +36,7 @@ export class UserMessageComponent extends Container {
+@@ -34,6 +37,7 @@
  		this.markdownTransformers = markdownTransformers;
  		this.messageId = messageId;
  		this.timestamp = timestamp;
@@ -33,24 +33,26 @@ index 2cda775..83164ef 100644
  		this.rebuild();
  	}
  
-@@ -76,6 +80,17 @@ export class UserMessageComponent extends Container {
- 			return lines;
- 		}
- 
-+		// Use the saved message time, including when replaying history. The top
-+		// padding already belongs to this message, so no transcript row is added.
+@@ -80,6 +84,17 @@
 +		const date = this.displayTime === undefined ? undefined : new Date(this.displayTime);
-+		if (date && Number.isFinite(date.getTime())) {
-+			const time = date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
-+			const left = width - visibleWidth(time) - this.outputPad;
-+			if (left >= this.outputPad) {
-+				lines[0] = theme.bg("userMessageBg", " ".repeat(left) + theme.fg("dim", time) + " ".repeat(this.outputPad));
++		const offset = date?.getTimezoneOffset();
++		const timeZoneOffset = Number.isFinite(offset) ? offset : undefined;
+ 		// Container output is shared across frames; copy it once per change instead of mutating it.
+-		if (this.zoneLines?.source !== lines) {
++		if (this.zoneLines?.source !== lines || this.zoneLines.timeZoneOffset !== timeZoneOffset) {
+ 			const zoned = [...lines];
++			// The top padding already belongs to this message, so no transcript row is added.
++			if (date && timeZoneOffset !== undefined) {
++				const time = date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
++				const left = width - visibleWidth(time) - this.outputPad;
++				if (left >= this.outputPad) {
++					zoned[0] = theme.bg("userMessageBg", " ".repeat(left) + theme.fg("dim", time) + " ".repeat(this.outputPad));
++				}
 +			}
-+		}
-+
- 		lines[0] = OSC133_ZONE_START + lines[0];
- 		lines[lines.length - 1] = OSC133_ZONE_END + OSC133_ZONE_FINAL + lines[lines.length - 1];
- 		return lines;
+ 			zoned[0] = OSC133_ZONE_START + zoned[0];
+ 			zoned[zoned.length - 1] = OSC133_ZONE_END + OSC133_ZONE_FINAL + zoned[zoned.length - 1];
+-			this.zoneLines = { source: lines, lines: zoned };
++			this.zoneLines = { source: lines, lines: zoned, timeZoneOffset };
 diff --git a/packages/coding-agent/src/modes/interactive/interactive-mode.ts b/packages/coding-agent/src/modes/interactive/interactive-mode.ts
 index d8e2390..11b787b 100644
 --- a/packages/coding-agent/src/modes/interactive/interactive-mode.ts
