@@ -13,7 +13,7 @@ import { resolve } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { IntercomClient, type SendResult } from "./broker/client.ts";
 import { spawnBrokerIfNeeded } from "./broker/spawn.ts";
-import type { Attachment, Message, MessageControl, MessageReceiptStatus, RexLocation, SessionInfo, SessionRegistration } from "./broker/types.ts";
+import type { Attachment, Message, MessageControl, MessageReceiptStatus, SessionInfo, SessionRegistration } from "./broker/types.ts";
 import { ClaudeTransport, type InboundMessage, type InboundReceipt } from "./claude/transport.ts";
 import { askTimeoutMs, type IntercomConfig } from "./config.ts";
 import { gitState, handoverBody, handoverMessage } from "./handover.ts";
@@ -32,7 +32,7 @@ import {
 	type Target,
 } from "./peers.ts";
 import { ReplyTracker } from "./reply-tracker.ts";
-import { formatRexLocation, readRexLocation } from "./rex.ts";
+import { formatRexLocation, readRexLocation, type RexCaller } from "./rex.ts";
 
 const SESSION_ID_ENV = "PI_INTERCOM_SESSION_ID";
 const STABLE_ID_ENV = "PI_INTERCOM_STABLE_ID";
@@ -130,7 +130,7 @@ export class Intercom {
 	private piSessionId: string | null = null;
 	private intercomId: string | null = null;
 	private startedAt = 0;
-	private rexLocation: Promise<RexLocation | undefined> = Promise.resolve(undefined);
+	private rexLocation: Promise<RexCaller | undefined> = Promise.resolve(undefined);
 	private model = "unknown";
 	private agentRunning = false;
 	private readonly activeTools = new Map<string, string>();
@@ -287,7 +287,7 @@ export class Intercom {
 		};
 	}
 
-	private registration(rex: RexLocation | undefined): SessionRegistration {
+	private registration(rex: RexCaller | undefined): SessionRegistration {
 		const ctx = this.ctx;
 		if (!ctx) throw new Error("Intercom runtime not initialized");
 		const pane = process.env.TMUX_PANE?.trim();
@@ -301,7 +301,8 @@ export class Intercom {
 			lastActivity: Date.now(),
 			status: this.statusLine(),
 			...(pane ? { tmuxPane: pane } : {}),
-			...(rex ? { rex } : {}),
+			// Older brokers require a session ID when Rex metadata is present.
+			...(rex?.sessionId ? { rex: { ...rex, sessionId: rex.sessionId } } : {}),
 			...(typeof usage.contextPct === "number" ? { contextPct: usage.contextPct } : {}),
 			...(typeof usage.contextTokens === "number" ? { contextTokens: usage.contextTokens } : {}),
 			...(usage.contextWindow ? { contextWindow: usage.contextWindow } : {}),
@@ -645,7 +646,7 @@ export class Intercom {
 		if (!registered) throw new Error("Current session is missing from intercom session list.");
 		// A broker already running from an older package can omit the new field.
 		const rex = registered.rex ?? await this.rexLocation;
-		const self = rex ? { ...registered, rex } : registered;
+		const self = rex?.sessionId ? { ...registered, rex: { ...rex, sessionId: rex.sessionId } } : registered;
 		let claude: ClaudeRow[] = [];
 		let claudeNote = this.claudeNote;
 		try {

@@ -25,6 +25,25 @@ describe("Rex location discovery", () => {
 		});
 	});
 
+	it("resolves the current session from a block-only environment", async () => {
+		await withRex({ session_id: sessionId, block_id: blockId, window_id: windowId, host_id: id }, async (env) => {
+			delete env.REX_SESSION;
+			expect(await readRexLocation(env)).toEqual({ sessionId, blockId, windowId, hostId: id });
+		});
+	});
+
+	it("does not attach an unconfirmed session or host to an inherited block", async () => {
+		for (const result of [
+			{ session_id: sessionId, block_id: "block:other" },
+			{ session_id: "session:bad", block_id: blockId },
+		]) {
+			await withRex({ ...result, window_id: windowId, host_id: id }, async (env) => {
+				delete env.REX_SESSION;
+				expect(await readRexLocation(env)).toEqual({ blockId });
+			});
+		}
+	});
+
 	it("does not associate a different pane or host with inherited IDs", async () => {
 		await withRex({ session_id: sessionId, block_id: "block:other", window_id: windowId, host_id: id }, async (env) => {
 			expect(await readRexLocation(env)).toEqual({ sessionId, blockId });
@@ -33,6 +52,8 @@ describe("Rex location discovery", () => {
 
 	it("works without the CLI and omits missing or malformed locations", async () => {
 		expect(await readRexLocation({ PATH: "/nonexistent", REX_SESSION: sessionId, REX_BLOCK: blockId })).toEqual({ sessionId, blockId });
+		expect(await readRexLocation({ PATH: "/nonexistent", REX_BLOCK: blockId })).toEqual({ blockId });
+		expect(await readRexLocation({ PATH: "/nonexistent", REX_BLOCK: `${blockId}\n` })).toBeUndefined();
 		expect(await readRexLocation({ PATH: "/nonexistent", REX_SESSION: sessionId })).toBeUndefined();
 		expect(await readRexLocation({ PATH: "/nonexistent", REX_SESSION: sessionId, REX_BLOCK: "block:bogus" })).toBeUndefined();
 	});

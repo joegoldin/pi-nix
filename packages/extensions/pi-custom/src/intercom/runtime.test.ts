@@ -2,7 +2,7 @@
 // reply, and ordinary session identity.
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { parseConfig } from "./config.ts";
 import { Intercom } from "./runtime.ts";
 
@@ -108,24 +108,29 @@ describe("session identity", () => {
 });
 
 describe("Rex location", () => {
-	it("shows location on the correct roster row and in the owning session's status", async () => {
+	it("shows a block-only caller on the correct roster row and in its status", async () => {
 		const previousSession = process.env.REX_SESSION;
 		const previousBlock = process.env.REX_BLOCK;
+		const previousPath = process.env.PATH;
+		const cli = mkdtempSync("/tmp/pir-rex-");
+		const sessionId = "session:01234567-8901-2345-6789-012345678901";
+		const blockId = "block:01234567-8901-2345-6789-012345678901";
 		let a: Awaited<ReturnType<typeof session>> | undefined;
 		let b: Awaited<ReturnType<typeof session>> | undefined;
 		try {
 			delete process.env.REX_SESSION;
 			delete process.env.REX_BLOCK;
 			a = await session("rex-test-outside", "outside-rex");
-			process.env.REX_SESSION = "session:01234567-8901-2345-6789-012345678901";
-			process.env.REX_BLOCK = "block:01234567-8901-2345-6789-012345678901";
+			writeFileSync(`${cli}/rex`, `#!/bin/sh\nprintf '%s\\n' '${JSON.stringify({ session_id: sessionId, block_id: blockId })}'\n`, { mode: 0o700 });
+			process.env.PATH = `${cli}:${previousPath ?? ""}`;
+			process.env.REX_BLOCK = blockId;
 			b = await session("rex-test-inside", "inside-rex");
 			const list = await a.runtime.list(".");
 			const rows = list.content[0]!.text.split("\n");
 			expect(rows.find(row => row.includes("• inside-rex"))).toContain(process.env.REX_BLOCK);
 			expect(rows.find(row => row.includes("• outside-rex"))).not.toContain("Rex:");
 			expect(list.details.roster).toMatchObject({ rexLocations: [{ id: "rex-test-inside", rex: { blockId: process.env.REX_BLOCK } }] });
-			expect((await b.runtime.status()).content[0]!.text).toContain(`Rex: ${process.env.REX_SESSION}`);
+			expect((await b.runtime.status()).content[0]!.text).toContain(`Rex: ${sessionId}`);
 			expect((await a.runtime.status()).content[0]!.text).not.toContain("Rex:");
 		} finally {
 			await b?.runtime.shutdown();
@@ -134,6 +139,9 @@ describe("Rex location", () => {
 			else process.env.REX_SESSION = previousSession;
 			if (previousBlock === undefined) delete process.env.REX_BLOCK;
 			else process.env.REX_BLOCK = previousBlock;
+			if (previousPath === undefined) delete process.env.PATH;
+			else process.env.PATH = previousPath;
+			rmSync(cli, { recursive: true, force: true });
 		}
 	});
 });

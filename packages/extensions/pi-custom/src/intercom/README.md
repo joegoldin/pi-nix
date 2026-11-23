@@ -23,9 +23,11 @@ name, and a `uds:` address is always Claude's.
 
 Pi peers in Rex advertise their session and block (pane) IDs in `list` and
 `list-cwd`. `status` shows the current Pi session's location. A bounded,
-read-only `rex whoami` lookup adds window (tab) and host IDs if it confirms the
-inherited session and block. Without the CLI, only the inherited IDs are
-shown. These are hints, not message addresses or proof of pane ownership.
+read-only `rex whoami` lookup confirms the inherited block and any legacy
+session ID, and adds the live session, window (tab) and host IDs. On current
+Rex, which only sets `REX_BLOCK`, a failed lookup leaves the block visible in
+local `status` but not the roster: the broker requires a session ID. These are
+hints, not message addresses or proof of pane ownership.
 Verify the location and occupant in Rex before any authorized terminal action.
 Claude Code's peer registry does not report Rex locations. An older broker
 still works but cannot relay other peers' Rex metadata; the new broker takes
