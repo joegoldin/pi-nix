@@ -14,8 +14,8 @@ export function readRexContext(): Promise<string> {
 export function inRex(env: NodeJS.ProcessEnv): boolean {
 	// Inherited environment is data. Reject control characters before asking the
 	// upstream hook to interpolate it into model context.
-	return /^session:[a-f0-9-]{36}$/i.test(env.REX_SESSION ?? "")
-		&& /^block:[a-f0-9-]{36}$/i.test(env.REX_BLOCK ?? "");
+	return /^block:[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(env.REX_BLOCK ?? "")
+		&& (!env.REX_SESSION || /^session:[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(env.REX_SESSION));
 }
 
 export function registerRexContext(pi: ExtensionAPI, env = process.env, read: RexHook = readRexContext): void {
