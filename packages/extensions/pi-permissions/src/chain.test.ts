@@ -929,13 +929,13 @@ test("directory facts survive follow-ups and restoration but never skip risk rev
   expect(h.classifierCalls()).toBe(6);
 });
 
-test("literal bookkeeping skips classification but mixed wrappers cannot hide a remote side effect", async () => {
+test("retired todo calls no longer exempt codemode from classification", async () => {
   const seen = [];
   const h = await realHost(() => ({}), async (_ctx, _cfg, action) => {
     seen.push(action);
     return action.includes("git push")
       ? { decision: "block", tier: "soft_deny", reason: "Publishing was not authorized" }
-      : { decision: "allow", tier: "allow", reason: "Completed-task bookkeeping only" };
+      : { decision: "allow", tier: "allow", reason: "No external side effects" };
   });
   const codes = [
     'for (const id of [40,41]) text(await tools.todo({action:"delete",id}));',
@@ -947,8 +947,9 @@ test("literal bookkeeping skips classification but mixed wrappers cannot hide a 
     const result = await h.service.links.get("pi-automode")({ ...call, toolCall: call }, {}, log);
     expect(result.kind).toBe(index === 0 ? "allow" : "deny");
   }
-  expect(h.classifierCalls()).toBe(1);
-  expect(seen[0]).toContain("git push origin main");
+  expect(h.classifierCalls()).toBe(2);
+  expect(seen[0]).toContain("tools.todo");
+  expect(seen[1]).toContain("git push origin main");
 });
 
 test("linked approval questions do not classify the requested action but retain explicit tool denials", async () => {
@@ -962,7 +963,7 @@ test("linked approval questions do not classify the requested action but retain 
   expect(denied.classifierCalls()).toBe(0);
 });
 
-test("bookkeeping shortcuts retain explicit wrapper and nested-tool denials", async () => {
+test("retired todo calls retain explicit wrapper and nested-tool denials", async () => {
   for (const toolName of ["codemode", "todo"]) {
     const h = await realHost(() => ({ permissionDeny: [parseToolPattern(`${toolName}(*)`)] }));
     const input = toolName === "todo" ? { action: "delete", id: 37 } : { code: 'await tools.todo({action:"delete",id:37});' };

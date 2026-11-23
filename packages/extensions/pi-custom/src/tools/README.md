@@ -14,8 +14,7 @@ model and starts a follow-up turn, so it never polls. `bg_status`, `bg_logs`
 `/kill <id>` do the same at the keyboard. Tasks live for the session.
 
 Tool results and completion notices use the shared custom cards and theme.
-The dock uses the todo list’s tree conventions: one compact Jobs summary,
-clickable to reveal up to five task names and their outcomes. Ctrl+O shows all
+The dock shows one compact Jobs summary, clickable to reveal up to five task names and their outcomes. Ctrl+O shows all
 jobs, including acknowledged history, and restores the local view when folded.
 Acknowledged results disappear from the dock and Rex metadata, not history.
 Automatic follow-up results remain working until consumed by the next turn. `/jobs` and `/logs <id>` open bordered views;
@@ -24,108 +23,6 @@ Log views are bounded snapshots, not a live tail. Model-facing output and
 completion delivery are unchanged.
 
 Replaces pi-background-tasks.
-
-## Todo list (`todo.ts`, `todo-state.ts`)
-
-`/todo <task>` sends the agent a steering message to add that task to the current
-batch without replacing the existing work. It does not interrupt a running tool
-or edit the list behind the agent's back. When idle, it starts a new turn. Bare
-`/todo` shows the list, like `/todos`; `/todos <group-id>` keeps its group controls.
-
-The `todo` tool tracks tasks and optional top-level groups. Groups contain
-one level of tasks, never other groups or grandchildren. `kind: "group"`
-creates a group or converts an existing umbrella task; `parentId` attaches a
-task, and `parentId: null` detaches it. Group progress is derived from live
-children, with empty groups still pending. Counts include only tasks, not
-groups. Dependencies (`blockedBy`) connect tasks independently of grouping.
-Move or delete all live children before deleting a group; deletion never
-silently cascades.
-
-The list above the editor starts with a five-task preview. Ctrl+Alt+T cycles
-through the full wrapped list with history, focus mode (up to two active tasks,
-or one next task when nothing is active), and preview. Clicking the todo widget
-does not change its view or group scoping. The full view shows group counts
-and indented tasks; use `/todos <group-id>` to collapse/expand a group.
-`/todos` displays the full list without changing the current view.
-Preview and focus rows include each child’s parent and overall group progress
-on the same line. Both subjects shorten independently to leave room for IDs,
-group progress and unresolved dependencies. Ungrouped tasks also truncate to
-one line; the expanded view keeps full, wrapped text.
-Active work sorts first, then ready pending work, blocked work and completions. Groups follow their highest-priority
-child. Satisfied dependency edges disappear from the widget, not the records.
-The heading labels overall counts; overflow labels only the tasks outside the
-current view. A compact list that
-needs truncation omits completed rows before budgeting unfinished work; small
-lists can show both. Group counts always include completed children.
-
-Completed rows fade at the next agent run or after 60 seconds, whichever comes
-first. A single deadline timer handles long-running and idle sessions without
-model calls. Reading the list or compacting the session does not renew the
-countdown; clearing, changing branches and shutdown cancel stale deadlines.
-This only archives rows: completed records, dependencies and evidence remain intact.
-The default `todo list` returns unfinished work; `list status=completed` and `get`
-provide completed history. All todo headings retain the same overall
-completed/total count when rows fade, excluding deleted tasks and group headings.
-Focus and preview labels describe the visible subset without changing that count.
-Expanded views and `/todos` still expose completed history.
-
-Each new task requires `acceptanceCriteria`: a bounded, observable completion
-check. Once set, it cannot be rewritten. Newly discovered scope needs another
-task; progress, blockers and next actions belong in `description`. A transition
-to completed requires `evidence` naming the check and observed result. These
-fields are preserved in snapshots and shown by `get`. Legacy tasks remain
-readable and can acquire criteria on update. Validation requires recorded
-criteria and evidence, not proof that their claims are true.
-
-Every model request receives a request-local checkpoint from current unfinished
-tasks, active first (up to 20 tasks, with bounded text and a total count). It
-asks the agent to resume the actual task when none is active, reconcile verified
-milestones before switching work, and record blockers before yielding. It does
-not queue messages, start turns, or infer completion. Completed history stays
-available without pruning; legacy pruning notices are excluded from model
-context while remaining in recorded history.
-
-A stronger **Todo review due** checkpoint appears after 6 model turns or
-120 seconds without an unfiltered `todo list` read, whichever comes first.
-Session start, branch restoration and compaction also require a fresh review
-when unfinished tasks exist. The checkpoint asks for the full list before
-further substantive work, then reconciliation against observed results:
-verified completions with evidence, stale activity, blockers and next actions.
-Reading one task, listing a status subset, or updating one row does not dismiss
-a backlog review. An unfiltered list read acknowledges the checkpoint; it is
-not proof that reconciliation or verification happened. Clearing a batch also
-resets the cadence. The reminder remains due until acknowledged. Elapsed time
-is checked at the next model request, not by a timer: idle sessions and long
-running tools are never interrupted or woken for bookkeeping. Empty and
-completed-only lists produce no checkpoint. Older tasks are not deleted or
-resumed merely because a review is due.
-
-Starting a task returns conflicting active tasks to pending. Simultaneous
-work requires distinct explicit owners, not several unowned in-progress
-rows. On settlement, including interruption, or session/branch restoration,
-unfinished tasks return to pending; completion is never inferred. Descriptions
-retain blockers and next actions; criteria and evidence have separate fields. Running
-background jobs retain their own lifecycle; record their IDs in the task
-rather than using an idle agent's status as proof that work is running.
-
-State travels in tool-result details; automatic idle resets append a
-`pi-custom:todo-state` session entry. The latest branch-local snapshot wins
-on replay and compaction. Older flat todo sessions remain readable.
-
-Substantial multi-step work gets one independently verifiable outcome per
-task without waiting to be asked. Useful umbrella goals become groups, not
-extra active tasks. Small requests stay flat or need no list; explicit
-opt-outs still apply. Tracking does not authorize extra scope, delegation,
-publication, or an unsolicited design plan. Group completion alone is not
-proof that a `/goal` is satisfied; final audits belong in explicit tasks.
-
-Pi's custom system prompt omits tool `promptGuidelines`. Before each run,
-the extension supplies only missing guidelines when the tool is active.
-Goal kickoff, continuation and resume reinforce the same task/group semantics
-and reconciliation of the existing list. Nesting and activity cleanup are
-enforced by code; useful task decomposition remains model guidance.
-
-Replaces rpiv-todo.
 
 ## Questions (`ask.ts`, `ask-state.ts`)
 

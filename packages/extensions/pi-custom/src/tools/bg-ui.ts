@@ -31,7 +31,7 @@ export function taskNotification(task: TaskSnapshot, theme: UiTheme, expanded: b
 	return { render: (width: number) => layoutCard(model, { mode: "on", expanded, collapsedLines: 3, expandedLines: 100, expandHint: "(ctrl+o)" }, theme, width), invalidate() {} };
 }
 
-/** Match the todo dock: one summary, with job names and outcomes on demand. */
+/** Show one summary, with job names and outcomes on demand. */
 export function taskWidget(tasks: () => TaskSnapshot[], seen: ReadonlySet<string>, theme: UiTheme, expanded: () => boolean, repaint: () => void) {
 	let open = false;
 	return {

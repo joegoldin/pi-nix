@@ -89,7 +89,7 @@ Cancelled or invalid replies still count when usage is reported. A call whose us
 was not returned remains explicitly unreported, including an interrupted call
 restored after restart.
 
-The sidebar extends alongside todos and other above-editor widgets, ending just
+The sidebar extends alongside above-editor widgets, ending just
 above the full-width editor. Event ages use source timestamps when known (for
 example, “8m ago”); legacy unknown times stay blank. A local minute tick refreshes
 ages without inference. The compact key distinguishes asks, decisions, changes,

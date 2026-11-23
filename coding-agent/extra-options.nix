@@ -1561,8 +1561,7 @@ in
         /exit, /clear, /clone-session and a /stash overlay, a persistent prompt
         stash, clipboard copy and cut, a thinking-level cycle, and a terminal
         tab title that shows when the agent is working. Its tools part adds
-        background shell tasks, a todo list, structured questions, /goal and
-        /btw.
+        background shell tasks, structured questions, /goal and /btw.
 
         It deliberately draws no status line of its own. Both upstreams render
         a footer, and this stack already has one

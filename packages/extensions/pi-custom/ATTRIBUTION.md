@@ -58,7 +58,7 @@ Its `find` and `grep` output reproduces pi's formats and notices exactly.
 
 ## Agent tools
 
-`src/tools/` reimplements five extensions so their tools keep the names,
+`src/tools/` reimplements four extensions so their tools keep the names,
 parameters, descriptions and result text the model and recorded sessions
 know. The wording of those model-facing strings is theirs.
 
@@ -66,9 +66,6 @@ know. The wording of those model-facing strings is theirs.
   (read at **v2.6.9**), licensed under the ISC License: `bg_run`,
   `bg_status`, `bg_logs`, `bg_kill`, and the completion notification, as it
   behaved with `PI_BG_FEATURES=process`.
-- [rpiv-todo](https://github.com/juicesharp/rpiv-mono) (read at **v2.12.0**),
-  licensed under the MIT License: the `todo` tool, its status machine and
-  replay from tool results, the list above the editor, and `/todos`.
 - [rpiv-ask-user-question](https://github.com/juicesharp/rpiv-mono) (read at
   **v2.12.0**), licensed under the MIT License: `ask_user_question`, its
   validation, questionnaire and answer text.

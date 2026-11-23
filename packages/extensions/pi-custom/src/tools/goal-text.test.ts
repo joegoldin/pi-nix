@@ -74,13 +74,11 @@ describe("prompts", () => {
 			expect(prompt).toContain('set waiting_for to "user" even if a background task is running');
 		}
 	});
-	it("keeps multi-step goals in concrete todos across kickoff, continuation and resume", () => {
+	it("keeps the same Markdown checklist across kickoff, continuation and resume", () => {
 		for (const prompt of [kickoffPrompt(goal()), activeContract(goal()), continuationPrompt(goal(), "nonce"), resumePrompt(goal(), "paused")]) {
-			expect(prompt).toContain("When the todo tool is available");
-			expect(prompt).toContain("separately verifiable milestones");
-			expect(prompt).toContain("existing list");
-			expect(prompt).toContain("one level of children");
-			expect(prompt).toContain("pending");
+			expect(prompt).toContain("`markdown-checklists` skill when available unless the user opts out");
+			expect(prompt).toContain("separately verifiable milestones and outstanding checks");
+			expect(prompt).toContain("reconcile the same file with current evidence");
 		}
 	});
 	it("carries the objective as data and the id as a guard", () => {

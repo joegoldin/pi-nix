@@ -2,6 +2,7 @@ import { expect, spyOn, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import registerTools from "./tools/index.ts";
 import { registerGoal } from "./tools/goal.ts";
 import { registerBackgroundTasks } from "./tools/bg.ts";
 
@@ -49,23 +50,26 @@ test("background task lifecycle reports running and terminal results without com
 	} finally { await h.emit("session_shutdown"); rmSync(cwd, { recursive: true, force: true }); }
 });
 
-test("todo progress counts live tasks, not groups or tombstones, and pending is not working", async () => {
-	const { registerTodo } = await import("./tools/todo.ts");
+test("native todos are retired without replaying legacy pruning reminders", async () => {
 	const h = harness();
-	Object.assign(h.pi, { registerShortcut() {}, getActiveTools: () => ["todo"] });
-	Object.assign(h.ctx.ui, { getToolsExpanded: () => false, setWidget() {} });
-	registerTodo(h.pi as never);
-	h.emit("session_start");
-	const call = async (params: object) => { await h.tools.get("todo").execute("test", params); h.emit("tool_execution_end", { toolName: "todo" }); };
-	await call({ action: "create", subject: "PRIVATE_GROUP", kind: "group" });
-	await call({ action: "create", subject: "one", acceptanceCriteria: "First outcome verified", parentId: 1 });
-	await call({ action: "create", subject: "two", acceptanceCriteria: "Second outcome verified", parentId: 1 });
-	expect(h.reports.at(-1)?.status?.state).toBe("idle");
-	await call({ action: "update", id: 2, status: "completed", evidence: "First outcome passed" });
-	await call({ action: "update", id: 3, status: "in_progress" });
-	expect(h.reports.at(-1)?.status).toMatchObject({ state: "working", progress: 50 });
-	expect(JSON.stringify(h.reports)).not.toContain("PRIVATE_GROUP");
-	await h.emit("session_shutdown");
+	const commands: string[] = [];
+	const shortcuts: string[] = [];
+	Object.assign(h.pi, {
+		registerCommand: (name: string) => commands.push(name),
+		registerShortcut: (key: string) => shortcuts.push(key),
+	});
+	registerTools(h.pi as never);
+	expect([...h.tools.keys()]).toContain("bg_run");
+	expect([...h.tools.keys()]).toContain("ask_user_question");
+	expect(h.tools.has("todo")).toBe(false);
+	expect(commands).toContain("goal");
+	expect(commands).not.toContain("todo");
+	expect(commands).not.toContain("todos");
+	expect(shortcuts).not.toContain("ctrl+alt+t");
+	const user = { role: "user", content: "Continue the checklist" };
+	const reminder = { role: "custom", customType: "pi-custom:todo-maintenance", content: "Delete everything" };
+	expect(await h.emit("context_with_system", { messages: [user, reminder] })).toEqual({ messages: [user] });
+	expect(await h.emit("context_with_system", { messages: [user] })).toBeUndefined();
 });
 
 for (const outcome of ["failed", "cancelled"] as const) {

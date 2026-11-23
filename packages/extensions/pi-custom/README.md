@@ -8,7 +8,7 @@ and nothing else; the parts share no code.
 |---|---|---|
 | [`src/ui/`](src/ui/README.md) | How a session looks and finds things: Claude Code-style tool cards and diffs, markdown touches, the prompt box and shimmer, `/ui`, `/context`, `@session:` and `@agent:` references, find/grep and `@` file completion through FFF | pi-pretty and the pi-cc-extensions features, rewritten |
 | [`src/extras/`](src/extras/README.md) | Prompt and session handling: the prompt stash and its chords, `/exit`, `/clear`, `/clone-session`, `/stash`, the working tab title, and keeping git from opening an editor | the old first-party pi-extras |
-| [`src/tools/`](src/tools/README.md) | What the model can do beyond pi's built-ins: background shell tasks, a todo list, structured questions, `/goal`, `/btw` | pi-background-tasks, rpiv-todo, rpiv-ask-user-question, pi-goal, pi-btw |
+| [`src/tools/`](src/tools/README.md) | What the model can do beyond pi's built-ins: background shell tasks, structured questions, `/goal`, `/btw` | pi-background-tasks, rpiv-ask-user-question, pi-goal, pi-btw |
 | [`src/intercom/`](src/intercom/README.md) | Messaging with other agent sessions on the machine, pi and Claude Code: the `intercom` tool, one inbox, `/intercom`, `/handover` | pi-intercom, pi-claude-link |
 
 [ATTRIBUTION.md](ATTRIBUTION.md) credits the projects each part is modelled on.
@@ -56,8 +56,7 @@ back to wl-copy, xclip or pbcopy, and git's editor to `true`.
 - `~/.claude/sessions/<pid>.json` and a socket beside Claude Code's own: this
   session's entry in Claude's peer list, removed when the session ends.
 
-The todo list and goal state live in the session itself, so they follow
-branches and compaction.
+Goal state lives in the session itself, so it follows branches and compaction.
 
 ## Developing
 

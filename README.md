@@ -171,28 +171,14 @@ alongside program status: that would risk duplicate alerts in terminals such as 
 When updating older configurations, remove `notifications.*` settings and any
 explicit `ext-pi-notify` entries from extension lists.
 
-### Todo working list and history
+### Work checklists
 
-Unfinished tasks take priority in every working view. A separate **Recently
-completed** section shows up to three tasks, newest first, completed within the
-last five minutes. Compact views use only spare task slots for this section;
-Ctrl+O expansion and the full Ctrl+Alt+T view keep the same three-task cap rather
-than revealing the full backlog. Completion times are saved with the tasks, so
-reloads, compaction and branch navigation do not restart the five-minute window.
-Older saved completions without timestamps stay in history. Archived tasks go
-straight to history, never into the recent section.
-
-`/todos` shows unfinished work and recent completions; `/todos history` shows all
-completed and archived tasks. The `todo` tool keeps `list` unfinished-only and
-exposes full `history`; `get` retains criteria, evidence and dependency links.
-Expiry only redraws the widget: it neither deletes history nor starts a model
-turn. `clear` explicitly resets everything, including history.
-
-Task and group references use `a` through `z`, then `aa`, `ab`, and so on.
-For example, update task `ab` with `addBlockedBy: ["z", "aa"]`, or toggle group
-`a` with `/todos a`. Saved numeric keys remain stable internally, and legacy
-numeric calls still resolve to the same tasks. Progress counts include completed
-tasks even though they no longer occupy working-list rows.
+Use the `markdown-checklists` skill from `agent-skills` to track substantial
+work in local Markdown outside the checkout and optionally show a live Glow
+preview beside Pi in Rex. Share the file path with other agents on the same
+machine. The old `todo` tool, `/todo`, `/todos`, and their widget and progress
+report are no longer registered. Existing Pi session files are unchanged;
+copy any work you still need from old sessions into a checklist.
 
 ### OpenAI sign-in
 
@@ -520,7 +506,7 @@ rather than from a pin:
 
 | Attribute | Source | What it adds |
 | --- | --- | --- |
-| `ext-pi-custom` | `packages/extensions/pi-custom` | Claude Code-style tool cards, /ui, /context, @ references and FFF search; the prompt stash and chords; background tasks, todos, structured questions, /goal and /btw; intercom messaging with pi and Claude Code sessions |
+| `ext-pi-custom` | `packages/extensions/pi-custom` | Claude Code-style tool cards, /ui, /context, @ references and FFF search; the prompt stash and chords; background tasks, structured questions, /goal and /btw; intercom messaging with pi and Claude Code sessions |
 | `ext-pi-voice` | `packages/extensions/pi-voice` | Push-to-talk dictation into the editor |
 | `ext-pi-foreign-skills` | `packages/extensions/pi-foreign-skills` | Skills from other agents' directories |
 | `ext-pi-permissions` | `packages/extensions/pi-permissions` | Permissions and auto mode in one extension: policy rules, the classifier as a chain link that asks before it blocks, permission gates for /btw editing |
@@ -580,8 +566,8 @@ are removed with it; `@session:` references and file completion are unchanged.
 
 For occasional parallel work, launch ordinary Pi sessions in visible terminal
 panes and communicate through Intercom. Each session uses its normal profile and
-owns its own permissions; messaging does not transfer approval authority or copy
-a requester's todo tree. The companion
+owns its own permissions; messaging does not transfer approval authority.
+Share a checklist by file path rather than mirroring it between sessions. The companion
 [peer-session skill changes](https://github.com/joegoldin/agent-skills/pull/9)
 cover bounded assignments, terminal identity, recovery and integration.
 

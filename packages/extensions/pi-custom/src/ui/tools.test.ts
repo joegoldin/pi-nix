@@ -195,7 +195,7 @@ describe("ls, find and grep", () => {
 describe("other tools", () => {
 	it("names MCP tools by server and tool", () => {
 		expect(toolTitle("mcp__github__search_issues")).toBe("github · search_issues");
-		expect(toolTitle("todo")).toBe("todo");
+		expect(toolTitle("custom_tool")).toBe("custom_tool");
 	});
 
 	it("lists arguments as key: value", () => {

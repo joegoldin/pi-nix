@@ -172,16 +172,6 @@ chronological order, including across compaction. Older answers are recovered
 only from matched questionnaire calls and validated results; arbitrary tool output
 cannot supply approval. Later instructions can narrow or revoke earlier answers.
 
-Native todo-maintenance reminders also reach the classifier, but only as bounded
-bookkeeping context reconstructed from validated candidate IDs—not their raw text
-and not operator authorization. Candidates still require a current status and
-dependency check. Deleting a native todo tombstones it; it does not erase a session
-transcript or audit log. Simple awaited `todo` list/get/delete calls and literal
-`for (const id of [1,2])` batches have a bounded bookkeeping shortcut, with optional
-`text(...)` output. Native codemode still routes every nested call through tool
-validation and permission hooks. Dynamic code, `clear`, and wrappers mixing other
-actions remain classified; explicit deny and ask rules still apply.
-
 Requested inspection includes the bounded discovery needed to locate the named
 records; an outside-cwd path or a Python wrapper does not turn a read into a write.
 Secret, disclosure and explicit path restrictions still apply. Historical blocked

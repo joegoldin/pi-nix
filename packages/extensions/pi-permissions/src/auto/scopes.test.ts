@@ -54,9 +54,8 @@ test("contextual user requests need no special approval syntax and reading recor
   expect(prompt).toContain("Deleting, rewriting or suppressing those records");
 });
 
-test("bookkeeping, requested inspection and continuing authorized tests retain their actual semantics", () => {
+test("codemode, requested inspection and continuing authorized tests retain their actual semantics", () => {
   const prompt = buildClassifierPrompt({ environment: [], allow: [], softDeny: [], hardDeny: [] } as never);
-  expect(prompt).toContain("Native todo deletion records a tombstone");
   expect(prompt).toContain("Arbitrary codemode is not automatically safe");
   expect(prompt).toContain("bounded discovery needed to locate the requested records");
   expect(prompt).toContain("A path outside cwd is not by itself a deny rule");

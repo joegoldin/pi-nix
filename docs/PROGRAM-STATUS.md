@@ -33,7 +33,6 @@ The native `ProgramStatusReporter` owns the root record (`app=pi`). Extensions p
 | Structured question | `blocked`, `kind=question`, cleared on answer, abort, or UI failure |
 | Auto-mode or engine permission prompt | `blocked`, `kind=permission`, cleared on every exit path |
 | Authentication | `blocked`, `kind=auth` → `done`, `error`, or `idle` |
-| Todo tasks | `working` only with an active task; measured completed/live-task percentage; groups and tombstones excluded |
 | Side conversation | Independent working/result record, even with its panel closed; child statuses are namespaced beneath it. Neither is mirrored at the root. |
 | Subagents/workflows/worker monitors | Bounded, hierarchical records from the provider's public status snapshot |
 
@@ -57,6 +56,6 @@ Subagent snapshots are requested only at startup and on lifecycle events, coales
 
 ## Verification
 
-`checks.<system>.program-status` exercises the shipped formatter, transport, reporter, authentication, and dialog integration. It includes negotiated capabilities, limits, subtree clearing, reset/restart behavior, cancellation, background goal waits, and prompt-marker replay. The first-party extension checks cover real background processes, goal wait/wake/completion, question/permission cleanup, todo progress, side-session isolation, and subagent snapshot ownership. Existing native terminal tests cover the keyboard/DA negotiation boundary.
+`checks.<system>.program-status` exercises the shipped formatter, transport, reporter, authentication, and dialog integration. It includes negotiated capabilities, limits, subtree clearing, reset/restart behavior, cancellation, background goal waits, and prompt-marker replay. The first-party extension checks cover real background processes, goal wait/wake/completion, question/permission cleanup, side-session isolation, and subagent snapshot ownership. Existing native terminal tests cover the keyboard/DA negotiation boundary.
 
 These checks capture emitted protocol bytes and native callbacks. They do not claim that a running Rex GUI has displayed the new states before the updated Pi package is activated. Rex owns presentation and notification policy.

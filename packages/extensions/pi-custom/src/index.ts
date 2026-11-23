@@ -8,7 +8,7 @@
 //   extras/  prompt and session handling: the prompt stash, ctrl+s chords,
 //            and the session commands.
 //   tools/   what the model can do beyond pi's built-ins: background shell
-//            tasks, a todo list, structured questions, /goal and /btw.
+//            tasks, structured questions, /goal and /btw.
 //   intercom/ messaging with other pi and Claude Code sessions on the machine.
 //
 // They were separate extensions once. Kept as directories rather than merged
