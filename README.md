@@ -174,11 +174,12 @@ explicit `ext-pi-notify` entries from extension lists.
 ### Work checklists
 
 Use the `markdown-checklists` skill from `agent-skills` to track substantial
-work in local Markdown outside the checkout and optionally show a live Glow
-preview beside Pi in Rex. Share the file path with other agents on the same
-machine. The old `todo` tool, `/todo`, `/todos`, and their widget and progress
-report are no longer registered. Existing Pi session files are unchanged;
-copy any work you still need from old sessions into a checklist.
+work in `.pi/todo/` inside the active checkout or working directory. For
+read-only work, keep progress in the conversation unless a file is requested.
+You can show a live Glow preview beside Pi in Rex and share the file path with
+other agents on the same machine. The old `todo` tool, `/todo`, `/todos`, and
+their widget and progress report are no longer registered. Existing Pi session
+files are unchanged; copy any work you still need into a checklist.
 
 ### OpenAI sign-in
 
