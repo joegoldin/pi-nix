@@ -1109,7 +1109,7 @@ export function createPiAutomode(options: PiAutomodeOptions = {}) {
         reason: answer === "deny"
           ? `${decision.reason} The user was asked and denied it.`
           : answer === "timeout"
-            ? `${decision.reason} The user was asked and did not answer within ${cfg.askOnBlock.timeoutSeconds}s; if they later tell you to go ahead, retry it.`
+            ? `${decision.reason} The approval prompt timed out after ${cfg.askOnBlock.timeoutSeconds}s. No approval was granted. If the user later authorizes this action in chat, retry it if still needed; permission checks still apply.${ctx.mode === "tui" ? " The user can also review the recorded action in /permissions → Denied." : ""}`
             : decision.reason,
         action: summary,
         kind: "classifier",

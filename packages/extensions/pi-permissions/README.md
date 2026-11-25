@@ -92,6 +92,17 @@ Python heredoc. The displayed approval now includes both the command scope and
 the directory scope, and stores both. A read-directory grant is never silently
 promoted to write access.
 
+A linked worktree is a separate directory scope, even if it shares Git history
+with an approved checkout. Creating it does not grant ongoing write or execute
+access there. Name the destination when requesting the worktree. Keep creation,
+inspection, file edits and test runs in separate calls: a direct file edit can
+show a writable worktree scope, while a shell call that mixes several effects
+may only show a bounded command scope. If the automatic prompt times out,
+nothing ran and no approval was granted. You can authorize the specific action
+in chat (a reply like “go ahead” can be enough when the action is clear), or
+review it in `/permissions` → **Denied**. A retry after chat authorization still
+goes through permission checks.
+
 Reusable approvals live in that same ledger and Allowed tab. For shell calls,
 `y` approves similar `bash` or `bg_run` actions for the same task and targets:
 its hosts, repositories, directories, services, recipients and side-effect types.

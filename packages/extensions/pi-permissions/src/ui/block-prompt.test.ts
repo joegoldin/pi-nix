@@ -172,9 +172,9 @@ describe("short reasons", () => {
 	it("keep what decided and drop the wrapping meant for the model", () => {
 		expect(
 			shortReason(
-				"[pi-permission-system] The 'pi-automode' authorizer denied this 'bash' call. Reason: [pi-automode] Action blocked; the tool did not run. Contains zebra. The user was asked and did not answer within 8s; if they later tell you to go ahead, retry it. Do not claim success, rely on effects.",
+				"[pi-permission-system] The 'pi-automode' authorizer denied this 'bash' call. Reason: [pi-automode] Action blocked; the tool did not run. Contains zebra. The approval prompt timed out after 8s. No approval was granted. If the user later authorizes this action in chat, retry it if still needed; permission checks still apply. The user can also review the recorded action in /permissions → Denied. Do not claim success, rely on effects.",
 			),
-		).toBe("Contains zebra. The user was asked and did not answer within 8s; if they later tell you to go ahead, retry it.");
+		).toBe("Contains zebra. The approval prompt timed out after 8s. No approval was granted. If the user later authorizes this action in chat, retry it if still needed; permission checks still apply. The user can also review the recorded action in /permissions → Denied.");
 		expect(shortReason("[pi-automode] Action blocked; the tool did not run. Path denied by policy: /x Do not claim success.")).toBe(
 			"Path denied by policy: /x",
 		);

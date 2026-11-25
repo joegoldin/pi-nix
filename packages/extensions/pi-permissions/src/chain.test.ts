@@ -715,7 +715,9 @@ test("a classifier block asks first, and the answer decides", async () => {
 
   const unanswered = await run(undefined, "ask-timeout");
   expect(unanswered.verdict.kind).toBe("deny");
-  expect(unanswered.verdict.reason).toContain("did not answer within 1s");
+  expect(unanswered.verdict.reason).toContain("The approval prompt timed out after 1s. No approval was granted.");
+  expect(unanswered.verdict.reason).toContain("If the user later authorizes this action in chat, retry it if still needed; permission checks still apply.");
+  expect(unanswered.verdict.reason).toContain("The user can also review the recorded action in /permissions → Denied.");
   expect(unanswered.h.state().blockedActions).toBe(1);
 });
 
