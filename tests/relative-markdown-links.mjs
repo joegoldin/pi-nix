@@ -23,7 +23,15 @@ const targets = (markdown, theme = getTheme()) => Array.from(
 
 const relative = "[Preview](.pi/todo/desktop-ui.ifYDZM4o/caption-dual.png)";
 assert.deepEqual(targets(relative), ["file:///work/A%20%231/.pi/todo/desktop-ui.ifYDZM4o/caption-dual.png"]);
-assert.deepEqual(targets("[Docs](../docs/with%20space%23.md#L5)"), ["file:///work/docs/with%20space%23.md#L5"]);
+assert.deepEqual(targets("[Source](modules/home/rex-listed.nix#L3)"), ["file:///work/A%20%231/modules/home/rex-listed.nix:3:1"]);
+assert.deepEqual(targets("[Docs](../docs/with%20space%23.md#L5)"), ["file:///work/docs/with%20space%23.md:5:1"]);
+assert.deepEqual(targets("[Range](/tmp/log.txt#L12C4-L16C9) [Absolute](file:///tmp/log.txt#L24)"),
+  ["file:///tmp/log.txt:12:4", "file:///tmp/log.txt:24:1"]);
+assert.deepEqual(targets("[Home source](~/source.ts#L5-L8)"), [pathToFileURL(`${homedir()}/source.ts:5:1`).href]);
+assert.deepEqual(targets("[Web lines](https://example.com/src.ts#L3) [Remote file](file://other-host/tmp/src.ts#L3)"),
+  ["https://example.com/src.ts#L3", "file://other-host/tmp/src.ts#L3"]);
+assert.deepEqual(targets("[Section](README.md#usage) [Encoded hash](src%23L3.ts) [Anchor only](#L3) [Invalid](/tmp/log.txt#L0)"),
+  ["file:///work/A%20%231/README.md#usage", "file:///work/A%20%231/src%23L3.ts", "#L3", "file:///tmp/log.txt#L0"]);
 assert.deepEqual(targets("[Log](/tmp/log.txt)"), ["file:///tmp/log.txt"]);
 assert.deepEqual(targets("[Home](~/Downloads)"), [pathToFileURL(`${homedir()}/Downloads`).href]);
 assert.deepEqual(targets("[Authorize](https://auth.example/authorize?client_id=test)"), ["https://auth.example/authorize?client_id=test"]);
@@ -40,4 +48,4 @@ assert.deepEqual(targets("[Old](README.md)", previous), ["file:///work/A%20%231/
 
 setCapabilityOverrides({ hyperlinks: false });
 assert.match(new Markdown("[Docs](./README.md)", 0, 0, getTheme()).render(100).join("\n"), /\(\.\/README\.md\)/);
-console.log("PASS: Pi emits session-relative Markdown destinations as absolute file URLs");
+console.log("PASS: Pi emits absolute Markdown file links and preserves local line positions in editor syntax");
