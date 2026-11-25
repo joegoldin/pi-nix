@@ -30,7 +30,7 @@ diff --git a/packages/coding-agent/src/modes/interactive/interactive-mode.ts b/p
  import type { AgentMessage, ThinkingLevel } from "@earendil-works/pi-agent-core";
  import type { AuthEvent, AuthPrompt } from "@earendil-works/pi-ai";
  import {
-@@ -1548,8 +1549,19 @@
+@@ -1548,8 +1549,27 @@
  	}
  
  	private getMarkdownThemeWithSettings(): MarkdownTheme {
@@ -39,13 +39,21 @@ diff --git a/packages/coding-agent/src/modes/interactive/interactive-mode.ts b/p
  		return {
  			...getMarkdownTheme(),
 +			resolveLink: (href) => {
-+				// Preserve explicit URIs and document-only references.
-+				if (!href || /^(?:[a-z][a-z\d+.-]*:|[?#]|\/\/|\\)/i.test(href)) return href;
++				// Leave document anchors and non-local URIs to their own handlers.
++				if (!href || /^(?:[?#]|\/\/|\\)/.test(href)) return href;
++				const explicitFile = /^file:\/\/(?:localhost)?\//i.test(href);
++				if (!explicitFile && /^[a-z][a-z\d+.-]*:/i.test(href)) return href;
 +				const homeRelative = href.startsWith("~/");
 +				const base = homeRelative ? pathToFileURL(`${os.homedir()}${path.sep}`) : cwd;
 +				// Backslashes in POSIX filenames are not URL path separators.
 +				const unresolved = homeRelative ? href.slice(2) : href;
-+				return new URL(path.sep === "/" ? unresolved.replaceAll("\\", "%5C") : unresolved, base).href;
++				const url = new URL(path.sep === "/" ? unresolved.replaceAll("\\", "%5C") : unresolved, base);
++				const position = /^#L([1-9]\d*)(?:C([1-9]\d*))?(?:-L[1-9]\d*(?:C[1-9]\d*)?)?$/.exec(url.hash);
++				if (!position || url.search || url.pathname.endsWith("/")) return explicitFile ? href : url.href;
++				// Zed reads the position from the path; a fragment becomes part of the filename.
++				url.hash = "";
++				url.pathname += `:${position[1]}:${position[2] ?? "1"}`;
++				return url.href;
 +			},
  			codeBlockIndent: this.settingsManager.getCodeBlockIndent(),
  		};
